@@ -42,7 +42,7 @@ is saved to a file as its own type.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -3235,7 +3235,9 @@ class Frf(DataArray):
         return plot_cmif(self, shapes, **kwargs)
 
     def conditioning(self, records: Sequence[int] | None = None, *,
-                     limit: float | None = None) -> Conditioning:
+                     limit: float | None = None,
+                     progress: Callable[[int, int], None] | None = None
+                     ) -> Conditioning:
         """The singular values and condition number of this FRF matrix at
         every line, and the lines where it is ill-conditioned
         (`core.matrix_checks.read_conditioning`).
@@ -3254,6 +3256,9 @@ class Frf(DataArray):
         limit : float, optional
             The condition number lines are flagged over;
             `core.matrix_checks.CONDITION_LIMIT` when omitted.
+        progress : callable, optional
+            Told ``(0, core.progress.BUSY)`` before the decomposition;
+            the app's progress bar uses it.
 
         Returns
         -------
@@ -3270,7 +3275,8 @@ class Frf(DataArray):
         from .matrix_checks import CONDITION_LIMIT, read_conditioning
 
         return read_conditioning(
-            self, records, limit=CONDITION_LIMIT if limit is None else limit)
+            self, records, limit=CONDITION_LIMIT if limit is None else limit,
+            progress=progress)
 
     def half_power(self, near: float, record: int = 0, *,
                    within: tuple[float, float] | None = None,
@@ -4391,7 +4397,9 @@ class Psd(_Bands, DataArray):
                                   if self.comment else 'coherence'))
 
     def conditioning(self, records: Sequence[int] | None = None, *,
-                     limit: float | None = None) -> Conditioning:
+                     limit: float | None = None,
+                     progress: Callable[[int, int], None] | None = None
+                     ) -> Conditioning:
         """The singular values and condition number of this cross-spectral
         matrix at every line (`core.matrix_checks.read_conditioning`).
 
@@ -4407,6 +4415,9 @@ class Psd(_Bands, DataArray):
         limit : float, optional
             The condition number lines are flagged over;
             `core.matrix_checks.CONDITION_LIMIT` when omitted.
+        progress : callable, optional
+            Told ``(0, core.progress.BUSY)`` before the decomposition;
+            the app's progress bar uses it.
 
         Returns
         -------
@@ -4423,11 +4434,14 @@ class Psd(_Bands, DataArray):
         from .matrix_checks import CONDITION_LIMIT, read_conditioning
 
         return read_conditioning(
-            self, records, limit=CONDITION_LIMIT if limit is None else limit)
+            self, records, limit=CONDITION_LIMIT if limit is None else limit,
+            progress=progress)
 
     def realizability(self, records: Sequence[int] | None = None, *,
                       tolerance: float | None = None,
-                      keep_diagonal: bool = True) -> Realizability:
+                      keep_diagonal: bool = True,
+                      progress: Callable[[int, int], None] | None = None
+                      ) -> Realizability:
         """Whether this cross-spectral matrix is Hermitian and positive
         semi-definite at every line, so that some set of signals has it,
         and the nearest matrix that is
@@ -4446,6 +4460,9 @@ class Psd(_Bands, DataArray):
             `core.matrix_checks.REALIZABLE_TOLERANCE` when omitted.
         keep_diagonal : bool, default True
             Whether the repair holds the autospectra where they are.
+        progress : callable, optional
+            Told ``(done, total)`` as the repair goes on; what it raises
+            stops it. The app's progress bar uses it.
 
         Returns
         -------
@@ -4456,19 +4473,21 @@ class Psd(_Bands, DataArray):
         Raises
         ------
         ValueError
-            For an empty selection, no cross terms, one channel, or an
-            incomplete matrix.
+            For an empty selection, no cross terms, records some declared
+            in units and some not, one channel, or an incomplete matrix.
         """
         from .matrix_checks import REALIZABLE_TOLERANCE, read_realizability
 
         return read_realizability(
             self, records, keep_diagonal=keep_diagonal,
             tolerance=REALIZABLE_TOLERANCE if tolerance is None
-            else tolerance)
+            else tolerance, progress=progress)
 
     def made_realizable(self, records: Sequence[int] | None = None, *,
                         tolerance: float | None = None,
-                        keep_diagonal: bool = True) -> Psd:
+                        keep_diagonal: bool = True,
+                        progress: Callable[[int, int], None] | None = None
+                        ) -> Psd:
         """A copy with the cross-spectral matrix repaired to the nearest
         realizable one at every line that is not
         (`core.matrix_checks.made_realizable`); the lines that are, and
@@ -4484,6 +4503,8 @@ class Psd(_Bands, DataArray):
             Hold the autospectra where they are and move only the cross
             terms. Without it a specification's limits follow each
             autospectrum that moved.
+        progress : callable, optional
+            As for `realizability`.
 
         Returns
         -------
@@ -4496,7 +4517,7 @@ class Psd(_Bands, DataArray):
         repaired, _reading = made_realizable(
             self, records, keep_diagonal=keep_diagonal,
             tolerance=REALIZABLE_TOLERANCE if tolerance is None
-            else tolerance)
+            else tolerance, progress=progress)
         return repaired
 
     @classmethod

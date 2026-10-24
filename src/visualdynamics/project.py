@@ -1880,7 +1880,8 @@ class Project(dict):
 
     def make_realizable(self, source: Any, *, name: str | None = None,
                         tolerance: float | None = None,
-                        keep_diagonal: bool = True) -> str:
+                        keep_diagonal: bool = True,
+                        progress: Any = None) -> str:
         """Repair a cross-spectral matrix to the nearest realizable one
         (Make Realizable in the Realizability reading), and add the
         result beside it.
@@ -1906,6 +1907,9 @@ class Project(dict):
             `core.matrix_checks.REALIZABLE_TOLERANCE` when omitted.
         keep_diagonal : bool, default True
             Hold the autospectra where they are.
+        progress : callable, optional
+            Called with ``(done, total)`` as the repair goes on. The
+            app's progress bar uses it; a script can print it.
 
         Returns
         -------
@@ -1917,8 +1921,9 @@ class Project(dict):
         ------
         ValueError
             If the object has no cross terms or its matrix is
-            incomplete, or it is realizable already, in which case there
-            is nothing to repair.
+            incomplete, if no line could be judged, or if it is
+            realizable already, in which case there is nothing to
+            repair.
         """
         from .core.matrix_checks import REALIZABLE_TOLERANCE, made_realizable
 
@@ -1926,7 +1931,12 @@ class Project(dict):
                      else float(tolerance))
         source = self.name_of(source)
         repaired, reading = made_realizable(
-            self[source], tolerance=tolerance, keep_diagonal=keep_diagonal)
+            self[source], tolerance=tolerance, keep_diagonal=keep_diagonal,
+            progress=progress)
+        if not reading.judged.any():
+            raise ValueError(f'{source!r}: no line could be judged, so there '
+                             'is nothing to repair; '
+                             + '; '.join(reading.notes))
         if reading.realizable:
             raise ValueError(f'{source!r} is realizable at every line; '
                              'there is nothing to repair')

@@ -133,7 +133,10 @@ def test_a_tall_plant_and_a_wide_one():
                             ['a', 'b', 'c'], ['d', 'e'])
     np.testing.assert_allclose(tall.singular[:, 0], [4.0, 3.0])
     np.testing.assert_allclose(tall.condition, 4.0 / 3.0)
-    assert tall.notes == ()
+    # a response nothing reaches is named, though a tall matrix keeps
+    # its full rank without it
+    assert tall.notes == (('c is reached by no reference at any line: a '
+                           'dead channel gives the matrix a zero row'),)
     wide = condition_matrix(F[:1], np.array([[[3, 0, 0], [0, 4, 0]]]),
                             ['a', 'b'], ['c', 'd', 'e'])
     assert wide.size == 2
@@ -193,8 +196,8 @@ def test_a_nan_line_a_zero_line_and_a_dead_drive():
     assert list(reading.judged) == [True, False, False, True]
     assert np.isnan(reading.condition[1]) and np.isnan(reading.condition[2])
     assert list(reading.rank) == [2, 0, 0, 2]
-    assert any('1 lines hold a value that is not a finite number' in n
-               for n in reading.notes)
+    assert ('1 line holds a value that is not a finite number, in a '
+            'against c, and is not judged') in reading.notes
     assert any('1 lines are zero throughout' in n for n in reading.notes)
     assert 'not judged' in reading.at(20.0).describe()
     assert not reading.at(20.0).ill, 'a line not judged is not flagged'
@@ -650,3 +653,176 @@ def test_the_quantity_picks_its_block():
                                                 quantity='acceleration')
     assert channels == [('1Z+', 'acceleration'), ('2Z+', 'acceleration')]
     assert filled.all()
+
+
+# ---- dead, not-a-number and empty inputs ------------------------------------
+
+def _history(signals, fs=1024.0, start=0.0, dofs=None, dims=None):
+    """A time history of `signals` (channels x samples) at `fs`, starting
+    at `start` seconds, with Hann frames of 256 samples overlapped by half
+    filled in: the averaging an analyst gets by default."""
+    from visualdynamics.core.averaging import Averaging
+
+    signals = np.atleast_2d(np.asarray(signals, dtype=float))
+    n = signals.shape[1]
+    dofs = dofs or [f'{k + 1}Z+' for k in range(len(signals))]
+    history = visualdynamics.TimeHistory(
+        start + np.arange(n) / fs, signals, response_dof=dofs,
+        ordinate_dim=dims or ['acceleration'] * len(signals))
+    history.averaging = Averaging(frame_length=256, overlap=0.5).filled(n, fs)
+    assert history.averaging.window == 'hann'
+    return history
+
+
+def test_a_dead_channel_is_named_by_both_checks():
+    rng = np.random.default_rng(11)
+    signals = rng.standard_normal((3, 8192))
+    signals[1] = 0.0
+    csd = _history(signals).compute_cpsds()
+    realizability = csd.realizability()
+    assert realizability.realizable
+    assert ('2Z+ has no power and no cross term at any line judged: a dead '
+            'channel is realizable, and says nothing about how the others '
+            'move with it') in realizability.notes
+    conditioning = csd.conditioning()
+    assert conditioning.ill[conditioning.judged].all()
+    assert any(n.startswith('2Z+ reaches no row') for n in conditioning.notes)
+    plant = np.repeat(np.diag([3.0, 1.0]).astype(complex)[None], 4, axis=0)
+    plant[:, 1, :] = 0.0
+    reading = condition_matrix(F, plant, ['a', 'b'], ['c', 'd'])
+    assert any(n.startswith('b is reached by no reference') for n in
+               reading.notes)
+
+
+def test_a_record_with_one_nan_sample_is_named_and_judges_nothing():
+    rng = np.random.default_rng(12)
+    signals = rng.standard_normal((2, 4096))
+    signals[1, 100] = np.nan
+    csd = _history(signals).compute_cpsds()
+    realizability = csd.realizability()
+    assert not realizability.realizable, 'nothing judged is no pass'
+    assert realizability.describe() == '2 channels: no line could be judged'
+    assert any(n.endswith('a value that is not a finite number, in 1Z+ '
+                          'against 2Z+ and 2 more terms, and are not judged')
+               for n in realizability.notes)
+    conditioning = csd.conditioning()
+    assert 'no line could be judged' in conditioning.describe()
+    with pytest.raises(ValueError, match='no line could be judged.*1Z\\+ '
+                                         'against 2Z\\+'):
+        project = visualdynamics.Project()
+        project.add('Measured', csd)
+        project.make_realizable('Measured')
+
+
+def test_a_matrix_of_zeros_is_judged_by_nothing():
+    zero = check_spectral_matrix(F, np.zeros((4, 2, 2)), ['a', 'b'])
+    assert not zero.realizable and not zero.judged.any()
+    assert zero.describe() == '2 channels: no line could be judged'
+    assert zero.notes == ('4 lines are zero throughout and are not judged',)
+    one = np.repeat(np.eye(2, dtype=complex)[None], 4, axis=0)
+    one[2] = 0.0
+    reading = check_spectral_matrix(F, one, ['a', 'b'])
+    assert list(reading.judged) == [True, True, False, True]
+    assert reading.realizable
+    assert reading.notes == ('1 line is zero throughout and is not judged',)
+
+
+def test_an_empty_selection_is_refused_by_both_checks():
+    csd = _csd(np.eye(3))
+    with pytest.raises(ValueError, match='no records are selected'):
+        csd.realizability(records=[])
+    with pytest.raises(ValueError, match='no records are selected'):
+        csd.conditioning(records=[])
+    with pytest.raises(ValueError, match='no records are selected'):
+        csd.made_realizable(records=[])
+
+
+def test_terms_declared_and_undeclared_are_not_one_matrix():
+    dims = (['acceleration**2/frequency'] * 3 + ['unknown']
+            + ['acceleration**2/frequency'] * 5)
+    csd = _csd(np.eye(3))
+    mixed = Psd(csd.abscissa, csd.ordinate, response_dof=csd.response_dof,
+                reference_dof=csd.reference_dof, ordinate_dim=dims)
+    with pytest.raises(ValueError, match=r'2Z\+ against 1Z\+ has no declared '
+                                         'units and other records do'):
+        mixed.realizability()
+    with pytest.raises(ValueError, match='different units'):
+        mixed.conditioning()
+    none = Psd(csd.abscissa, csd.ordinate, response_dof=csd.response_dof,
+               reference_dof=csd.reference_dof, ordinate_dim=['unknown'] * 9)
+    assert none.realizability().realizable
+
+
+# ---- measured matrices: the edges, the default window, white noise ----------
+
+def test_a_measured_csd_is_realizable_at_every_line_and_at_the_edges():
+    """A cross-spectral matrix computed from records under the default
+    Hann window is realizable at every line, whatever the records hold:
+    a tone on the first line and one at the edge of the span, a nonzero
+    start time, noise on every channel, two tones that cross, and fewer
+    frames than channels (a matrix of lower rank, still realizable)."""
+    fs, n = 1024.0, 16384
+    t = np.arange(n) / fs
+    rng = np.random.default_rng(13)
+    df = fs / 256
+    chirp_up = np.sin(2 * np.pi * (50.0 * t + 10.0 * t ** 2))
+    chirp_down = np.sin(2 * np.pi * (300.0 * t - 10.0 * t ** 2))
+    signals = np.vstack([
+        np.sin(2 * np.pi * df * t) + 0.1 * rng.standard_normal(n),
+        np.sin(2 * np.pi * (fs / 2 - df) * t) + 0.1 * rng.standard_normal(n),
+        chirp_up + chirp_down + 0.1 * rng.standard_normal(n),
+        0.5 * chirp_up + rng.standard_normal(n)])
+    for start in (0.0, 12.5):
+        reading = _history(signals, fs, start).compute_cpsds().realizability()
+        assert reading.judged.all() and reading.realizable, reading.describe()
+    short = _history(signals[:, :384], fs)
+    assert short.averaging.frames == 2
+    reading = short.compute_cpsds().realizability()
+    assert reading.realizable and (reading.rank[1:] <= 2).all()
+
+
+def test_white_noise_trips_neither_check_by_chance():
+    """The realizability tolerance and the condition-number limit,
+    checked against what chance gives: independent white-noise drives
+    averaged under the default Hann window, twenty records of 64 frames.
+    A measured matrix fails realizability only by arithmetic, and a pair
+    of independent drives reaches a condition number of 100 only with a
+    coherence estimate near 0.96, which 64 frames make vanishingly
+    rare."""
+    fs = 1024.0
+    realizable_trips = condition_trips = lines = 0
+    for seed in range(20):
+        rng = np.random.default_rng(seed)
+        csd = _history(rng.standard_normal((2, 256 * 33)), fs,
+                       dims=['force', 'force']).compute_cpsds()
+        realizable_trips += int(csd.realizability().failing.sum())
+        conditioning = csd.conditioning()
+        judged = conditioning.judged
+        condition_trips += int(conditioning.ill[judged].sum())
+        lines += int(judged.sum())
+    assert lines == 20 * 129
+    assert realizable_trips == 0
+    assert condition_trips == 0
+
+
+def test_progress_is_told_and_a_raise_in_it_stops_the_repair():
+    told = []
+    s = np.repeat(OPPOSED[None], 4, axis=0)
+    reading = _csd(s).realizability(progress=lambda d, t: told.append((d, t)))
+    assert not reading.realizable
+    assert told[-1][0] == told[-1][1] > 0, 'the bar ends full'
+
+    class Stop(Exception):
+        pass
+
+    def stop(_done, _total):
+        raise Stop
+
+    with pytest.raises(Stop):
+        _csd(s).made_realizable(progress=stop)
+    from visualdynamics.core.progress import BUSY
+
+    told.clear()
+    _frf(np.diag([3.0, 1.0])).conditioning(
+        progress=lambda d, t: told.append((d, t)))
+    assert told == [(0, BUSY)]

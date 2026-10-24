@@ -112,12 +112,14 @@ Bendat and Piersol's.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 from ..units import UNKNOWN
+from .progress import Ticker
 
 #: the condition number a line is flagged over. An FRF estimate good to
 #: one percent, inverted at a condition number of 100, can give a drive
@@ -272,8 +274,25 @@ def _completed(matrix: np.ndarray, filled: np.ndarray, labels: list[str]
     return matrix, notes
 
 
+def _not_finite_note(matrix: np.ndarray, finite: np.ndarray, rows: Any,
+                     columns: Any) -> str:
+    """The note for lines holding a value that is not a finite number,
+    naming the first entry that holds one, so the reader knows which
+    record to look at rather than only that some line was passed over."""
+    bad = ~np.isfinite(matrix[~finite]).all(axis=0)
+    r, c = (int(k) for k in np.argwhere(bad)[0])
+    where = (str(rows[r]) if r == c and list(rows) == list(columns)
+             else f'{rows[r]} against {columns[c]}')
+    others = int(bad.sum()) - 1
+    more = f' and {others} more term{"s" * (others != 1)}' if others else ''
+    count = int((~finite).sum())
+    return (f'{count} line{"s" * (count != 1)} hold{"s" * (count == 1)} a '
+            f'value that is not a finite number, in {where}{more}, and '
+            f'{"are" if count != 1 else "is"} not judged')
+
+
 def flagged_runs(frequency: np.ndarray, flags: np.ndarray
-          ) -> list[tuple[float, float]]:
+                 ) -> list[tuple[float, float]]:
     """(first, last) frequency of each run of consecutive flagged
     lines."""
     out = []
@@ -449,15 +468,20 @@ class Conditioning:
 def condition_matrix(frequency: Any, matrix: Any, rows: Any, columns: Any,
                      *, limit: float = CONDITION_LIMIT,
                      dimension: str = UNKNOWN, kind: str = 'FRF',
-                     notes: Any = ()) -> Conditioning:
+                     notes: Any = (),
+                     progress: Callable[[int, int], None] | None = None
+                     ) -> Conditioning:
     """The singular values of a matrix at every line, as a
     `Conditioning`.
 
     `matrix` is lines x rows x columns, complex, one unit throughout.
     A line holding any value that is not a finite number is not judged
-    (its singular values are not a number) and is noted; so is a line
-    where the matrix is all zero. `limit` is the condition number lines
-    are flagged over, more than one.
+    (its singular values are not a number) and is noted with the first
+    entry that holds one; so is a line where the matrix is all zero, and
+    a column (or, for an FRF, a row) that is zero at every line is named.
+    `limit` is the condition number lines are flagged over, more than
+    one. `progress`, when given, is told ``(0, core.progress.BUSY)``
+    before the decomposition, which cannot count itself.
     """
     limit = float(limit)
     if not limit > 1.0:
@@ -474,12 +498,12 @@ def condition_matrix(frequency: Any, matrix: Any, rows: Any, columns: Any,
     finite = np.isfinite(matrix).all(axis=(1, 2))
     singular = np.full((size, len(f)), np.nan)
     if finite.any():
+        Ticker(progress).busy()
         singular[:, finite] = np.linalg.svd(matrix[finite],
                                             compute_uv=False).T
     notes = list(notes)
     if not finite.all():
-        notes.append(f'{int((~finite).sum())} lines hold a value that is '
-                     'not a finite number and are not judged')
+        notes.append(_not_finite_note(matrix, finite, rows, columns))
     zero = finite & ~(singular[0] > 0.0)
     if zero.any():
         notes.append(f'{int(zero.sum())} lines are zero throughout and '
@@ -490,6 +514,16 @@ def condition_matrix(frequency: Any, matrix: Any, rows: Any, columns: Any,
         notes.append(f'{", ".join(dead)} reach{"es" * (len(dead) == 1)} '
                      'no row at any line: the matrix is singular wherever '
                      'it is judged')
+    # a response that nothing reaches is a dead channel too; in a CSD it
+    # is its own column, named above
+    silent = [str(rows[r]) for r in range(matrix.shape[1])
+              if kind == 'FRF' and finite.any()
+              and not np.any(matrix[finite][:, r, :])]
+    if silent:
+        notes.append(f'{", ".join(silent)} '
+                     f'{"is" if len(silent) == 1 else "are"} reached by no '
+                     'reference at any line: a dead channel gives the '
+                     'matrix a zero row')
     if kind == 'FRF' and matrix.shape[2] > matrix.shape[1]:
         notes.append(f'{matrix.shape[2]} references drive '
                      f'{matrix.shape[1]} responses: the references can '
@@ -522,7 +556,9 @@ def _one_unit(data: Any, wanted: list[int]) -> tuple[str, list[str]]:
 
 
 def read_conditioning(data: Any, records: Any = None, *,
-                      limit: float = CONDITION_LIMIT) -> Conditioning:
+                      limit: float = CONDITION_LIMIT,
+                      progress: Callable[[int, int], None] | None = None
+                      ) -> Conditioning:
     """The singular values and condition number of an FRF matrix, or of
     a cross-spectral matrix, at every line.
 
@@ -533,11 +569,11 @@ def read_conditioning(data: Any, records: Any = None, *,
     (all of them when omitted): the matrix they make must be complete
     (a CSD term held only by its mirror is taken as the mirror's
     conjugate) and in one unit. `limit` is the condition number lines
-    are flagged over.
+    are flagged over. `progress` is passed to `condition_matrix`.
 
     Raises TypeError for an object of neither kind, and ValueError for
-    an empty selection, records in different units, an incomplete matrix, an FRF with
-    one reference, or a CSD of one channel.
+    an empty selection, records in different units, an incomplete
+    matrix, an FRF with one reference, or a CSD of one channel.
     """
     from .data import Frf, Psd
 
@@ -565,7 +601,7 @@ def read_conditioning(data: Any, records: Any = None, *,
         return condition_matrix(data.abscissa, matrix, _labels(rows),
                                 _labels(columns), limit=limit,
                                 dimension=dimension, kind='FRF',
-                                notes=notes)
+                                notes=notes, progress=progress)
     if isinstance(data, Psd):
         if data.reference_dof is None:
             raise ValueError('an autospectrum set has no cross terms; the '
@@ -586,7 +622,8 @@ def read_conditioning(data: Any, records: Any = None, *,
         dimension, unit_notes = _one_unit(data, wanted)
         return condition_matrix(data.abscissa, matrix, labels, labels,
                                 limit=limit, dimension=dimension,
-                                kind='CSD', notes=unit_notes + notes)
+                                kind='CSD', notes=unit_notes + notes,
+                                progress=progress)
     raise TypeError(f'a {type(data).__name__} is neither an FRF nor a CSD; '
                     'there is no matrix to condition')
 
@@ -624,7 +661,9 @@ def _psd_part(matrix: np.ndarray) -> np.ndarray:
         np.swapaxes(vectors, -2, -1))
 
 
-def repair_coherence(matrix: Any, keep_diagonal: bool = True) -> np.ndarray:
+def repair_coherence(matrix: Any, keep_diagonal: bool = True,
+                     progress: Callable[[int, int], None] | None = None
+                     ) -> np.ndarray:
     """The nearest realizable matrix to each Hermitian coherence matrix,
     in the Frobenius norm.
 
@@ -634,8 +673,11 @@ def repair_coherence(matrix: Any, keep_diagonal: bool = True) -> np.ndarray:
     found by alternating projections with Dykstra's correction (Higham,
     2002), then scaled onto the diagonal exactly, which keeps it positive
     semi-definite. A line still moving after `REPAIR_ITERATIONS` passes
-    is realizable all the same, if not quite the nearest. Without it, the negative eigenvalues are set to zero
-    (Higham, 1988) and the diagonal moves too.
+    is realizable all the same, if not quite the nearest. Without it,
+    the negative eigenvalues are set to zero (Higham, 1988) and the
+    diagonal moves too. `progress`, when given, is told ``(done,
+    total)`` pass by pass, out of `REPAIR_ITERATIONS`; whatever it
+    raises stops the repair.
     """
     matrix = np.asarray(matrix, dtype=np.complex128)
     hermitian = 0.5 * (matrix + np.conj(np.swapaxes(matrix, -2, -1)))
@@ -652,9 +694,12 @@ def repair_coherence(matrix: Any, keep_diagonal: bool = True) -> np.ndarray:
     # each line stops when it has converged, so a target of thousands
     # of lines pays for its slowest lines alone
     active = np.arange(len(y))
+    ticker = Ticker(progress)
+    ticker.add(REPAIR_ITERATIONS)
     for _ in range(REPAIR_ITERATIONS):
         if not len(active):
             break
+        ticker.tick()
         r = y[active] - correction[active]
         projected = _psd_part(r)
         correction[active] = projected - r
@@ -664,6 +709,7 @@ def repair_coherence(matrix: Any, keep_diagonal: bool = True) -> np.ndarray:
         change = np.max(np.abs(moved - y[active]), axis=(1, 2))
         y[active] = moved
         active = active[change >= REPAIR_CONVERGED]
+    ticker.tick(ticker.total - ticker.done)
     # x is positive semi-definite and its diagonal is within the
     # convergence of the target: a scaling by a positive diagonal puts
     # it on the target exactly and keeps it positive semi-definite. A
@@ -876,14 +922,20 @@ class Realizability:
 def check_spectral_matrix(frequency: Any, matrix: Any, channels: Any, *,
                           tolerance: float = REALIZABLE_TOLERANCE,
                           keep_diagonal: bool = True,
-                          notes: Any = ()) -> Realizability:
+                          notes: Any = (),
+                          progress: Callable[[int, int], None] | None = None
+                          ) -> Realizability:
     """Whether a cross-spectral matrix is realizable at every line, and
     the nearest that is, as a `Realizability`.
 
     `matrix` is lines x n x n, complex, any units (the check is on the
     coherence matrix). A line holding a value that is not a finite
-    number is not judged, and is noted. Lines that fail are repaired
-    (`repair_coherence`); the rest are left exactly as they are.
+    number is not judged, and is noted with the first entry that holds
+    one; so is a line where the matrix is zero throughout, since a
+    matrix of nothing says nothing about how channels move together. A
+    channel with no power and no cross term at any line judged is named.
+    Lines that fail are repaired (`repair_coherence`, which `progress`
+    is passed to); the rest are left exactly as they are.
     """
     tolerance = float(tolerance)
     if not 0.0 < tolerance < 1.0:
@@ -899,15 +951,19 @@ def check_spectral_matrix(frequency: Any, matrix: Any, channels: Any, *,
         raise ValueError('the matrix is empty; there is nothing to judge')
     finite = np.isfinite(matrix).all(axis=(1, 2))
     safe = np.where(finite[:, None, None], matrix, 0.0)
+    # a line of zeros is judged by nothing: its eigenvalues are zero and
+    # would read as realizable, a pass on no evidence
+    zero = finite & ~np.any(safe, axis=(1, 2))
+    judged = finite & ~zero
     coherence, scale = _normalized(safe)
     conjugate = np.conj(np.swapaxes(coherence, -2, -1))
     asymmetry = 0.5 * np.max(np.abs(coherence - conjugate), axis=(1, 2))
     diagonal = np.real(np.diagonal(safe, axis1=1, axis2=2))
     negative = finite & (diagonal < 0.0).any(axis=1)
     eigenvalues = np.full((n, len(f)), np.nan)
-    if finite.any():
-        eigenvalues[:, finite] = np.linalg.eigvalsh(
-            0.5 * (coherence[finite] + conjugate[finite])).T
+    if judged.any():
+        eigenvalues[:, judged] = np.linalg.eigvalsh(
+            0.5 * (coherence[judged] + conjugate[judged])).T
     coherence = np.where(finite[:, None, None], coherence, np.nan + 0j)
     reading = Realizability(
         frequency=f, coherence=coherence, scale=scale,
@@ -919,11 +975,25 @@ def check_spectral_matrix(frequency: Any, matrix: Any, channels: Any, *,
     repaired = coherence.copy()
     if failing.any():
         repaired[failing] = repair_coherence(coherence[failing],
-                                             keep_diagonal)
+                                             keep_diagonal, progress)
     notes = list(notes)
+    labels = [str(c) for c in channels]
     if not finite.all():
-        notes.append(f'{int((~finite).sum())} lines hold a value that is '
-                     'not a finite number and are not judged')
+        notes.append(_not_finite_note(matrix, finite, labels, labels))
+    if zero.any():
+        count = int(zero.sum())
+        notes.append(f'{count} line{"s" * (count != 1)} '
+                     f'{"are" if count != 1 else "is"} zero throughout and '
+                     f'{"are" if count != 1 else "is"} not judged')
+    if judged.any():
+        live = np.any(safe[judged] != 0.0, axis=(0, 2))
+        dead = [labels[k] for k in range(n) if not live[k]]
+        if dead:
+            notes.append(f'{", ".join(dead)} '
+                         f'{"has" if len(dead) == 1 else "have"} no power '
+                         'and no cross term at any line judged: a dead '
+                         'channel is realizable, and says nothing about how '
+                         'the others move with it')
     if negative.any():
         notes.append(f'{int(negative.sum())} lines have an autospectrum '
                      'below zero, which no signal has; the repair takes '
@@ -946,7 +1016,9 @@ def check_spectral_matrix(frequency: Any, matrix: Any, channels: Any, *,
 
 def read_realizability(psd: Any, records: Any = None, *,
                        tolerance: float = REALIZABLE_TOLERANCE,
-                       keep_diagonal: bool = True) -> Realizability:
+                       keep_diagonal: bool = True,
+                       progress: Callable[[int, int], None] | None = None
+                       ) -> Realizability:
     """Whether a CSD (a specification, or a measured cross-spectral
     matrix) is realizable at every line, and the nearest that is.
 
@@ -954,11 +1026,16 @@ def read_realizability(psd: Any, records: Any = None, *,
     they make must be complete, a term held only by its mirror being
     taken as the mirror's conjugate. The channels may be of different
     quantities, since the check is on the coherence matrix, which has
-    no units. A specification written at breakpoints is judged at its
-    breakpoints.
+    no units; but the records are declared in units throughout or not
+    at all, since a coherence of a declared autospectrum against a cross
+    term in whatever units a file held is not a coherence. A
+    specification written at breakpoints is judged at its breakpoints.
+    `progress` is passed to the repair (`repair_coherence`).
 
     Raises TypeError for an object that is not a `Psd`, and ValueError
-    for an empty selection, an object with no cross terms, fewer than two channels, or an incomplete matrix.
+    for an empty selection, an object with no cross terms, records some
+    declared in units and some not, fewer than two channels, or an
+    incomplete matrix.
     """
     from .data import Psd
 
@@ -973,6 +1050,14 @@ def read_realizability(psd: Any, records: Any = None, *,
     if psd.reference_dof is None:
         raise ValueError('an autospectrum set has no cross terms, and '
                          'realizability is a statement about them')
+    undeclared = [i for i in wanted if str(psd.ordinate_dim[i]) == UNKNOWN]
+    if undeclared and len(undeclared) < len(wanted):
+        i = undeclared[0]
+        raise ValueError(
+            f'{psd.response_dof[i]} against {psd.reference_dof[i]} has no '
+            'declared units and other records do: a coherence of terms in '
+            'SI against terms in whatever units a file held is not a '
+            'coherence. Declare the units of every record, or of none')
     channels, matrix, filled = spectral_matrix(psd, wanted)
     if len(channels) < 2:
         raise ValueError('realizability is about how channels move '
@@ -981,12 +1066,15 @@ def read_realizability(psd: Any, records: Any = None, *,
     matrix, notes = _completed(matrix, filled, labels)
     return check_spectral_matrix(psd.abscissa, matrix, labels,
                                  tolerance=tolerance,
-                                 keep_diagonal=keep_diagonal, notes=notes)
+                                 keep_diagonal=keep_diagonal, notes=notes,
+                                 progress=progress)
 
 
 def made_realizable(psd: Any, records: Any = None, *,
                     tolerance: float = REALIZABLE_TOLERANCE,
-                    keep_diagonal: bool = True) -> tuple[Any, Realizability]:
+                    keep_diagonal: bool = True,
+                    progress: Callable[[int, int], None] | None = None
+                    ) -> tuple[Any, Realizability]:
     """A copy of a CSD with the matrix the picked records make repaired
     at every line that is not realizable, and the reading that says what
     moved.
@@ -995,12 +1083,13 @@ def made_realizable(psd: Any, records: Any = None, *,
     values at failing lines change, the cross terms and, without
     `keep_diagonal`, the autospectra. A specification's limits follow an
     autospectrum that moved, so its bands stay where they were in
-    decibels about it.
+    decibels about it. `progress` is passed to the repair.
     """
     from .data import _recast, channel_quantities
 
     reading = read_realizability(psd, records, tolerance=tolerance,
-                                 keep_diagonal=keep_diagonal)
+                                 keep_diagonal=keep_diagonal,
+                                 progress=progress)
     # every field copied, as reading a PSD as a specification does, so
     # nothing passes through a constructor that might drop one
     out = _recast(psd, psd.__class__)
@@ -1116,7 +1205,8 @@ def entries_refusal(channels: Any, pairs: Any, frequencies: Any,
             entry = repaired[a, b]
             # to a hundredth of a degree, so a phase the repair kept at
             # zero does not read as 1.7e-14
-            phase = round(float(np.degrees(np.angle(entry))), 2) + 0.0                 if abs(entry) > 0.0 else 0.0
+            phase = (round(float(np.degrees(np.angle(entry))), 2) + 0.0
+                     if abs(entry) > 0.0 else 0.0)
             shown.append(f'{channels[group[a]]}–{channels[group[b]]} '
                          f'coherence {abs(entry) ** 2:.3g} at {phase:g}°')
         more = (f' and {len(moves) - 3} more' if len(moves) > 3 else '')

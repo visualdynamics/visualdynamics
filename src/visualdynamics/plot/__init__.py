@@ -3774,6 +3774,74 @@ def plot_stroke(history: Any, channel: int | str | None = None, *,
                         size=size)
 
 
+def plot_drive_prediction(frf: Any, specification: Any, *,
+                          channel: int | str | None = None,
+                          unit_system: UnitSystem | None = None,
+                          theme: Any = None,
+                          path: str | os.PathLike | None = None,
+                          show: bool = True, title: str | None = None,
+                          size: tuple[int, int] = (1000, 950),
+                          **settings: Any) -> Any:
+    """Draw the drives a specification asks for through an FRF, one
+    channel's predicted response, and every quantity against its rating.
+
+        visualdynamics.plot.plot_drive_prediction(
+            frf, specification, drive_limit=10.0,
+            shakers=ShakerRating(force=26700.0, stroke=0.0508,
+                                 moving_mass=60.0),
+            path='drives.png')
+
+    Three rows from `core.drive_prediction.predict_drives`: each drive's
+    predicted autospectrum, titled with the drive nearest its limit; the
+    channel `channel` names (the first control channel by default)
+    predicted beside its target, the lines the inverse did not meet
+    hatched, or another channel against its own limit; and a bar for
+    every quantity judged, its expected peak as a share of its rating,
+    the one that runs out first named in the title.
+
+    Parameters
+    ----------
+    frf : Frf
+        Drives to responses.
+    specification : Psd
+        The target at the control channels.
+    channel : int or str, optional
+        The middle row's channel, by FRF row or label.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+    **settings
+        Passed to `core.drive_prediction.predict_drives`: `method`,
+        `tolerance`, `weight`, `drive_limit`, `shakers`, `tables`,
+        `limits`, `duration` and `peak_factor`.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        Whatever `predict_drives` refuses, or a `channel` the FRF does
+        not have.
+    """
+    from ..core.drive_prediction import predict_drives
+    from .drive_prediction import build_drive_prediction, channel_index
+
+    prediction = predict_drives(frf, specification, **settings)
+    channel_index(prediction, channel)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_drive_prediction(widget, prediction, channel=channel,
+                               unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'Drive prediction: '
+                                       f'{prediction.title}',
+                        size=size)
+
+
 def plot_snr(signal: Any, floor: Any, *,
              records: Sequence[int] | None = None,
              low: float | None = None, theme: Any = None,

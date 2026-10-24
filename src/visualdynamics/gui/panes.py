@@ -39,6 +39,7 @@ from ..theme import theme as resolve_theme
 from ..viz.geometry import annotate_scene
 from .author_panel import AuthorPanel
 from .averaging_panel import AveragingPanel
+from .drive_prediction_panel import DrivePredictionPanel
 from .editors import SpinBox
 from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
@@ -212,6 +213,8 @@ class DataPane(QWidget):
     tone_toggled = Signal(bool)
     #: the transmissibility reading was asked for (True) or put away
     transmissibility_toggled = Signal(bool)
+    #: the drive prediction was asked for (True) or put away
+    prediction_toggled = Signal(bool)
     #: a sine specification's sweep-rate reading was asked for (True)
     #: or put away (False)
     sweep_rate_toggled = Signal(bool)
@@ -268,6 +271,11 @@ class DataPane(QWidget):
         self.octave_wanted: bool = False
         self.tone_wanted: bool = False
         self.transmissibility_wanted: bool = False
+        #: the drive prediction of an FRF and a specification selected
+        #: together, and its settings in SI, kept across redraws so the
+        #: ratings survive clicking away and back
+        self.prediction_wanted: bool = False
+        self.prediction_settings: dict[str, Any] | None = None
         self.sweep_rate_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
         self.kurtosis_wanted: bool = False
@@ -380,6 +388,11 @@ class DataPane(QWidget):
         self.transmissibility_panel: TransmissibilityPanel = \
             TransmissibilityPanel()
         self.transmissibility_panel.hide()
+        # the settings a drive prediction is made with, and its verdict
+        self.prediction_panel: DrivePredictionPanel = DrivePredictionPanel()
+        self.prediction_panel.hide()
+        self.prediction_panel.changed.connect(
+            lambda settings: self._settings_edited('prediction', settings))
         # the modes a sine sweep is checked against, beside the sweep
         # drawn through their bands; the Sweep Rate reading shows it
         self.sweep_rate_panel: SweepRatePanel = SweepRatePanel()
@@ -435,6 +448,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.srs_tolerance_panel)
         plot_row.addWidget(self.tone_panel)
         plot_row.addWidget(self.transmissibility_panel)
+        plot_row.addWidget(self.prediction_panel)
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.signature_panel)
@@ -965,6 +979,26 @@ class DataPane(QWidget):
         # history, and by nothing else, so it starts put away
         self.transmissibility_action.setVisible(False)
         toolbar.addAction(self.transmissibility_action)
+        # an FRF and a specification selected together: the drives the
+        # specification asks for through the FRF, the response they
+        # make, and what they ask of the amplifiers and shakers. A
+        # reading of two objects that exist, so a toggle with no act
+        self.prediction_action: QAction = QAction(
+            control_icon('drive_prediction'), 'Drive Prediction', self)
+        self.prediction_action.setCheckable(True)
+        self.prediction_action.setToolTip(
+            'Predict the drives the specification asks for through the '
+            'FRF, open loop, with the inverse regularized where the FRF '
+            "is ill-conditioned: each drive's spectrum, the response it "
+            'makes, and the drive, force, velocity and travel against '
+            'the limits and shaker ratings typed beside it')
+        self.prediction_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('prediction',
+                                                      checked))
+        # offered by the render of an FRF and a specification together,
+        # and by nothing else, so it starts put away
+        self.prediction_action.setVisible(False)
+        toolbar.addAction(self.prediction_action)
         # a sine specification read against the modes it sweeps
         # through: the time and cycles in each half-power band, and
         # whether the rate lets the mode build. A reading of the
@@ -1031,6 +1065,7 @@ class DataPane(QWidget):
             [self.octave_action, self.tone_action],
             [self.sweep_rate_action],
             [self.transmissibility_action],
+            [self.prediction_action],
             self.comparison_group.actions(),
             self.spectra_group.actions(),
             self.replication_group.actions(),
@@ -1160,8 +1195,8 @@ class DataPane(QWidget):
         self.truncate_toggled.emit(checked)
 
     def _choose_toggle(self, key: str, checked: bool) -> None:
-        """The octave, tones, transmissibility or sweep-rate button,
-        each a toggle of its own: remember it, put its panel away when
+        """The octave, tones, transmissibility, drive prediction or
+        sweep-rate button, each a toggle of its own: remember it, put its panel away when
         it is unchecked, then say so."""
         setattr(self, f'{key}_wanted', bool(checked))
         if not checked:
@@ -1806,7 +1841,8 @@ class DataPane(QWidget):
                       residual: bool = False,
                       octave: bool = False, sine: bool = False,
                       tone: bool = False, fit: bool = False,
-                      transmissibility: bool = False) -> None:
+                      transmissibility: bool = False,
+                      prediction: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -1823,8 +1859,9 @@ class DataPane(QWidget):
         unit to integrate. `octave` offers the
         octave bands of a plain density, `tone` the tone readout of a plain
         autospectrum, `transmissibility` the ASD ratio and H1's band
-        behind an FRF computed from a time history, and `residual` the
-        fit's residual CMIF. The pair,
+        behind an FRF computed from a time history, `prediction` the
+        drive prediction of an FRF and a specification selected
+        together, and `residual` the fit's residual CMIF. The pair,
         3-D, frequency-axis, quantity and page controls are hidden here;
         the code that draws offers them afterwards.
         """
@@ -1879,6 +1916,7 @@ class DataPane(QWidget):
         # project, read on its magnitude
         self._offer('transmissibility', 'transmissibility_panel',
                     transmissibility)
+        self._offer('prediction', 'prediction_panel', prediction)
         self.residual_action.setVisible(residual)
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
@@ -1951,6 +1989,7 @@ class DataPane(QWidget):
                        self.drive_point_action, self.cmif_action,
                        self.octave_action, self.tone_action,
                        self.transmissibility_action,
+                       self.prediction_action,
                        self.sweep_rate_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,

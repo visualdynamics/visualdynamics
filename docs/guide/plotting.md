@@ -129,6 +129,11 @@ dwell against time](dwell.md)). `plot_transmissibility(reading)` draws
 H1 solid and the ASD ratio dashed with H1's band and the coherence
 beneath, the reading the FRF view's Transmissibility toggle shows ([The
 two transmissibilities](transmissibility.md)).
+`plot_drive_prediction(frf, specification)` draws the drives a
+specification asks for through an FRF, a channel against its target and
+every quantity against its rating, the reading the Drive Prediction
+toggle shows for an FRF and a specification selected together
+([predicting the drives](drive-prediction.md)).
 `plot_sine_distortion(history, specification, levels)` draws a tone's
 distortion against frequency with the limit across it, the reading the
 sine view's Distortion readout shows ([Checking a sine record for

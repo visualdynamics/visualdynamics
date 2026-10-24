@@ -1002,6 +1002,9 @@ class MainWindow(QMainWindow):
         # and the transmissibility behind an FRF: the toggle redraws
         self.data_pane.transmissibility_toggled.connect(
             lambda _wanted: self.render_current())
+        # and the drive prediction of an FRF beside a specification
+        self.data_pane.prediction_toggled.connect(
+            lambda _wanted: self.render_current())
         # the acts, asked for where their settings are set (Brandon,
         # 2026-08-28): each button is a second entrance to the same
         # verb the bar's act offers, so provenance, badges and the
@@ -12348,6 +12351,83 @@ class MainWindow(QMainWindow):
             # the plot went with the drawing it belonged to
             pass
 
+    def _prediction_source(self, series):
+        """(FRF name, FRF, its picked records, specification name,
+        specification) when the selection is one FRF and one
+        specification, the two a drive prediction reads
+        (`core.drive_prediction.predict_drives`). None otherwise, which
+        is also what hides the button."""
+        if len(series) != 2:
+            return None
+        frfs = [entry for entry in series if isinstance(entry[1], Frf)]
+        specs = [entry for entry in series
+                 if isinstance(entry[1], Specification)]
+        if len(frfs) != 1 or len(specs) != 1:
+            return None
+        (frf_name, frf, records), (spec_name, spec, _picked) = frfs[0], specs[0]
+        return frf_name, frf, records, spec_name, spec
+
+    def _render_prediction(self, frf_name, frf, records, spec_name, spec):
+        """The drives the specification asks for through the FRF, the
+        response they make and what they ask of the rig.
+
+        Made with the settings in the panel beside it, by the call a
+        script makes (`core.drive_prediction.predict_drives`), and drawn
+        as `plot.drive_prediction` draws it: the drives, one channel
+        against its target or limit (the response of the first record
+        picked in the FRF, or the first control channel), and every
+        quantity against its rating. A prediction refused says why, in
+        the panel and the status line, and draws nothing.
+        """
+        from ..core.drive_prediction import predict_drives
+        from ..plot.drive_prediction import build_drive_prediction, summary
+        from .drive_prediction_panel import prediction_arguments
+
+        panel = self.data_pane.prediction_panel
+        panel.set_unit_system(self.unit_system)
+        panel.set_settings(self.data_pane.prediction_settings)
+        panel.show()
+        self.data_pane.offer_waterfall(False)
+        self.data_pane.show_waterfall(False)
+        self.data_pane.graphics.clear()
+        settings = panel.settings()
+        arguments = prediction_arguments(settings)
+        try:
+            prediction = predict_drives(frf, spec, **arguments)
+        except ValueError as refusal:
+            panel.show_prediction(None, f'Not predicted: {refusal}.')
+            return f'No drive prediction: {refusal}'
+        channel = None
+        if records:
+            dof = str(frf.response_dof[int(records[0])])
+            channel = next((label for label in prediction.rows
+                            if label.split(' ')[0] == dof), None)
+        build_drive_prediction(self.data_pane.graphics, prediction,
+                               channel=channel, unit_system=self.unit_system,
+                               theme=self.theme_name)
+        panel.show_prediction(prediction)
+        given = ''.join(f', {key}={value!r}' for key, value in (
+            ('method', settings['method']),
+            ('tolerance', settings['tolerance']),
+            ('weight', settings['weight']),
+            ('duration', settings['duration']),
+            ('drive_limit', settings['drive_limit'])) if value is not None)
+        rating = arguments['shakers']
+        if rating is not None:
+            given += (', shakers=visualdynamics.core.shaker.ShakerRating('
+                      + ', '.join(f'{key}={getattr(rating, key)!r}'
+                                  for key in ('force', 'stroke', 'velocity',
+                                              'moving_mass', 'body_mass')
+                                  if getattr(rating, key) is not None)
+                      + ')')
+        if channel is not None:
+            given += f', channel={channel!r}'
+        prefix = ('visualdynamics.plot.plot_drive_prediction('
+                  f'project[{frf_name!r}], project[{spec_name!r}]')
+        self._journal_view(prefix, f"{prefix}{given}, "
+                                   "path='drive_prediction.png', show=False)")
+        return summary(prediction, self.unit_system)
+
     def _draw_truncation(self, history):
         """Gray the ends being cut away and put the span beside it.
 
@@ -12762,6 +12842,9 @@ class MainWindow(QMainWindow):
                                      transmissibility=self.
                                      _transmissibility_source(series)
                                      is not None,
+                                     prediction=self.
+                                     _prediction_source(series)
+                                     is not None,
                                      # a declared unit, as the readings
                                      # require (`core.shaker`)
                                      fit=history is not None and any(
@@ -12769,6 +12852,10 @@ class MainWindow(QMainWindow):
                                          for dim in history.ordinate_dim))
         if not (history is not None and self.data_pane.showing('fit')):
             self._held_fit = None
+        predicted = (self.data_pane.showing('prediction')
+                     and self._prediction_source(series))
+        if predicted:
+            return self._render_prediction(*predicted)
         if history is not None and self.data_pane.showing('kurtosis'):
             return self._render_kurtosis(history, series)
         if history is not None:

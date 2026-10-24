@@ -907,6 +907,80 @@ def sine_distortion():
           f'{check.frequency[over].max():.0f} Hz; {check.describe()}')
 
 
+def _two_shaker_plant():
+    """Two shakers driving one fixture, as (FRF, specification, rating):
+    each shaker's moving mass 60 lb on a 4 Hz suspension, the two tied
+    by a fixture whose first flexible mode, the two ends moving
+    opposite, is at 400 Hz with 4 % damping, and amplifiers of 150 and
+    120 lbf per volt. The FRF is from the two drives, in volts, to the
+    accelerations at the two drive points, on 2 Hz lines to 2 kHz. The
+    specification asks each drive point for 0.01 g²/Hz from 80 to
+    500 Hz, rolling off at 3 dB an octave either side to 20 and
+    2000 Hz, with a coherence of a quarter between the two, in phase."""
+    import numpy as np
+
+    from visualdynamics.core.data import Frf, Specification
+    from visualdynamics.core.shaker import ShakerRating
+    from visualdynamics.units import to_si
+
+    g = 9.80665
+    f = np.arange(0.0, 2001.0, 2.0)
+    m = float(to_si(60.0, 'lb'))
+    suspension = (2 * np.pi * 4.0) ** 2 * m
+    fixture = (2 * np.pi * 400.0) ** 2 * m / 2
+    stiffness = np.array([[suspension + fixture, -fixture],
+                          [-fixture, suspension + fixture]])
+    damping = (0.04 * np.sqrt(fixture * m) * np.array([[1, -1], [-1, 1]])
+               + 0.1 * np.sqrt(suspension * m) * np.eye(2))
+    gains = np.diag([float(to_si(150.0, 'lbf')), float(to_si(120.0, 'lbf'))])
+    plant = np.array([-(2 * np.pi * x) ** 2 * np.linalg.inv(
+        stiffness - (2 * np.pi * x) ** 2 * m * np.eye(2)
+        + 2j * np.pi * x * damping) @ gains for x in f])
+    pairs = [(i, j) for i in range(2) for j in range(2)]
+    frf = Frf(f, np.array([plant[:, i, j] for i, j in pairs]),
+              response_dof=[f'{i + 1}Z+' for i, _j in pairs],
+              reference_dof=[f'{j + 1}Z+' for _i, j in pairs],
+              ordinate_dim='acceleration/voltage')
+    breakpoints = np.array([20.0, 80.0, 500.0, 2000.0])
+    levels = np.array([0.0025, 0.01, 0.01, 0.0025]) * g ** 2
+    specification = Specification(
+        breakpoints, np.array([levels * (1.0 if i == j else 0.5)
+                               for i, j in pairs]),
+        response_dof=[f'{i + 1}Z+' for i, _j in pairs],
+        reference_dof=[f'{j + 1}Z+' for _i, j in pairs],
+        ordinate_dim='acceleration**2/frequency')
+    rating = ShakerRating(force=float(to_si(2000.0, 'lbf')),
+                          stroke=float(to_si(1.0, 'in')),
+                          velocity=float(to_si(70.0, 'in/s')),
+                          moving_mass=m)
+    return frf, specification, rating
+
+
+def drive_prediction():
+    """The drives two shakers on one fixture need for a specification
+    that asks the two drive points to move with a coherence of a
+    quarter: under the fixture's flexible mode the two drives reach the
+    control points nearly alike, the truncated inverse keeps the weak
+    direction down to a condition number of 100 and pays for it in
+    drive just above, and sets it aside below, where the target falls
+    short."""
+    from visualdynamics.core.drive_prediction import predict_drives
+    from visualdynamics.plot import plot_drive_prediction
+    from visualdynamics.units import DEFAULT_SYSTEM
+
+    frf, specification, rating = _two_shaker_plant()
+    for tolerance in (0.01, 0.1):
+        prediction = predict_drives(frf, specification, drive_limit=10.0,
+                                    shakers=rating, tolerance=tolerance)
+        print(f'  tolerance {tolerance}:')
+        for line in prediction.describe(DEFAULT_SYSTEM):
+            print(f'    {line}')
+    plot_drive_prediction(frf, specification, drive_limit=10.0,
+                          shakers=rating, unit_system=DEFAULT_SYSTEM,
+                          show=False, size=(1000, 950),
+                          path=str(OUT / 'drive-prediction.png'))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -927,6 +1001,7 @@ def main():
     dwell()
     transmissibility()
     sine_distortion()
+    drive_prediction()
     print('done')
 
 

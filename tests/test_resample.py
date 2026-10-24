@@ -943,3 +943,107 @@ def test_a_long_channel_is_read_on_the_worker(window, pump, monkeypatch):
     pump()
     assert ran and ran[-1] == 'Reading the resampling of 1Z+…'
     assert pane.resample_panel.values['rate'].text() == '10240 Hz'
+
+
+# ---- the survivors of tools/mutate.py, each pinned -------------------------
+
+
+def test_the_rules_hold_at_their_edges():
+    assert decimation_factor(10240.0, 5120.0) == 2, 'every 2nd sample'
+    # a rate read off an abscissa's step can be a few parts in ten
+    # million off and is still a whole factor
+    assert decimation_factor(FINE, RATE * (1.0 + 1e-7)) == 16
+    with pytest.raises(ValueError, match='above zero'):
+        decimation_factor(0.0, RATE)
+    with pytest.raises(ValueError, match='above zero'):
+        alias_frequency(100.0, 0.0)
+    assert line_counts(2) == (1, 0, 1)
+    with pytest.raises(ValueError, match='two samples'):
+        line_counts(1)
+    assert level_change(0.5) == '0.5 dB up'
+    assert level_change(-0.5) == '0.5 dB down'
+    assert ordinal(211) == '211th' and ordinal(201) == '201st'
+
+
+def test_the_refusals_and_the_warning_name_the_nyquist_frequency():
+    with pytest.raises(ValueError, match=r'above the Nyquist frequency '
+                                         r'\(2560 Hz\)'):
+        anti_alias_filter(RATE, ratio=2.1)
+    with pytest.warns(AliasWarning, match=r'has folded into 0 to 2560 Hz'):
+        resample(record(), RATE, anti_alias=False)
+
+
+def test_a_record_of_odd_length_keeps_its_first_and_every_qth_sample():
+    odd = record(samples=16 * 4096 + 1)
+    slow = resample(odd, RATE)
+    assert slow.ordinate.shape == (1, 4097)
+    assert slow.abscissa[-1] == pytest.approx(odd.abscissa[-1])
+
+
+def test_a_frequency_a_hair_under_the_new_nyquist_is_at_it():
+    reading = read_resample(record(), RATE, frequencies=[2559.999, 2000.0])
+    assert reading.notes == (
+        '2560 Hz is at the new Nyquist frequency and does not fold',
+        '2000 Hz is below the new Nyquist frequency and does not fold')
+
+
+def test_with_nothing_asked_and_nothing_found_the_words_end_at_the_lines():
+    reading = read_resample(record(), RATE, frequencies=[])
+    assert reading.folds == () and reading.notes == ()
+    assert reading.describe().endswith('400 of 512 lines kept.')
+
+
+def test_the_first_of_several_channels_is_read_alone():
+    one, two = record(((4600.0, 1.0),)), record(((3600.0, 1.0),))
+    both = TimeHistory(one.abscissa, np.vstack([one.ordinate, two.ordinate]),
+                       response_dof=['1Z+', '2Z+'],
+                       ordinate_dim=['acceleration', 'acceleration'])
+    reading = read_resample(both, RATE, 0)
+    assert reading.label.startswith('1Z+')
+    assert [fold.frequency for fold in reading.folds] == [4600.0]
+    with pytest.raises(ValueError, match='no channel 2'):
+        read_resample(both, RATE, 2)
+
+
+def test_a_level_is_read_within_one_line_and_nowhere_else():
+    from visualdynamics.core.resample import _level
+
+    f = np.arange(0.0, 50.0) * 5.0
+    g = np.ones(50)
+    g[20] = 100.0
+    assert _level((f, g), 100.0) == 100.0          # on the line
+    assert _level((f, g), 95.0) == 100.0           # one line off
+    assert _level((f, g), 90.0) == 1.0             # two lines off
+    assert _level((f, g), 110.0) == 1.0
+    g0 = np.ones(50)
+    g0[0] = 7.0
+    assert _level((f, g0), 0.0) == 7.0             # the first line
+    assert _level((f, g), f[-1]) == 1.0            # the last line
+    assert np.isnan(_level((f, g), f[-1] + 1.0))   # past the spectrum
+    assert np.isnan(_level((f[:1], g[:1]), 0.0))   # one line, no spacing
+    assert not np.isnan(_level((f[:2], g[:2]), 0.0))
+
+
+def test_the_shortest_record_the_filter_allows_is_read():
+    """Order 4: 32 decimated samples (`SHORTEST`) are enough, 31 are not.
+    Order 30: the filter's padding asks for 94."""
+    assert read_resample(record(samples=16 * 32), RATE, order=4).frame_length \
+        == 32
+    with pytest.raises(ValueError, match=r'keeps 31 samples, too few for a '
+                                         r'spectrum \(at least 32\)'):
+        read_resample(record(samples=16 * 31), RATE, order=4)
+    with pytest.raises(ValueError, match=r'keeps 93 samples, too few for a '
+                                         r'spectrum \(at least 94\)'):
+        read_resample(record(samples=16 * 93), RATE, order=30)
+    assert read_resample(record(samples=16 * 94), RATE,
+                         order=30).frame_length == 64
+
+
+def test_a_frame_the_length_of_the_record_fits_and_one_more_does_not():
+    source = record(samples=16 * 1024)
+    assert read_resample(source, RATE, frame_length=1024).frame_length == 1024
+    with pytest.raises(ValueError, match=r'longer than the record \(1024 '
+                                         r'samples there\)'):
+        read_resample(source, RATE, frame_length=2048)
+    assert read_resample(source, RATE, frame_length=2).frame_length == 2
+

@@ -421,8 +421,8 @@ def test_correlated_drives_through_a_complex_plant_read_their_simulated_truth():
     (W1 - conj(c) W2) / (1 + |c|^2), so its partial coherence is
     g / (g + s^2) with g = |H1|^2 / (1 + |c|^2). A real-valued case
     cannot tell a conditioning built with the conjugate transpose from
-    one built with the plain transpose; this one reads the plain one
-    more than 0.15 off on average."""
+    one built with the plain transpose; this one fails with the plain
+    one."""
     from scipy.signal import lfilter
 
     rng = np.random.default_rng(3)

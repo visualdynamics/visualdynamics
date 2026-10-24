@@ -35,8 +35,10 @@ class Report:
     marking drawn as a banner across the top and bottom of the rendered
     document, 'UNCLASSIFIED' by default; an empty string draws no
     banner. `marking_color` is 'ink' (the page's own text color) or
-    'red'; any other value is read as 'ink'. A block of a kind not in
-    `BLOCK_KINDS` raises `ValueError`.
+    'red'; any other value is read as 'ink'. `features` holds the keys
+    of the report features enabled on it (`visualdynamics.report.features`),
+    none by default; with none, the report renders as it always has. A
+    block of a kind not in `BLOCK_KINDS` raises `ValueError`.
 
     Block shapes:
       {'kind': 'text',  'text': str}
@@ -97,7 +99,8 @@ class Report:
     def __init__(self, title: str = 'Report',
                  blocks: Sequence[Mapping[str, Any]] | None = None,
                  marking: str = 'UNCLASSIFIED',
-                 marking_color: str = 'ink') -> None:
+                 marking_color: str = 'ink',
+                 features: Sequence[str] | None = None) -> None:
         self.title: str = str(title)
         #: the classification marking, carried as a banner across the
         #: top and bottom of the rendered document — one value, two
@@ -118,6 +121,37 @@ class Report:
         for block in self.blocks:
             if block.get('kind') not in BLOCK_KINDS:
                 raise ValueError(f"unknown block kind {block.get('kind')!r}")
+        self.features = features or []
+
+    @property
+    def features(self) -> list[str]:
+        """The keys of the report features enabled on this report.
+
+        Empty by default. Assigning keeps each key once, in the order
+        given, and refuses anything but strings with `TypeError`. Which
+        keys are known, available and allowed together is checked where
+        features are chosen (`visualdynamics.report.features.configure`,
+        `Project.report_features`); a key that is not known does nothing
+        when the report is rendered, so a file written by a later
+        version keeps its choice through this one.
+        """
+        return self._features
+
+    @features.setter
+    def features(self, keys: Sequence[str]) -> None:
+        # the model holds keys only; the registry lives with the
+        # renderer (`report/features.py`), which `core` does not import
+        if isinstance(keys, str):
+            raise TypeError('features is a list of feature keys, not one '
+                            'string')
+        out: list[str] = []
+        for key in keys:
+            if not isinstance(key, str):
+                raise TypeError(f'a report feature is named by its key, a '
+                                f'str, not {type(key).__name__}')
+            if key not in out:
+                out.append(key)
+        self._features: list[str] = out
 
     def __repr__(self) -> str:
         count = len(self.blocks)

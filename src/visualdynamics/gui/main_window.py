@@ -16934,6 +16934,11 @@ class MainWindow(QMainWindow):
             self.report_editor.template_requested.connect(
                 self.export_report_template)
             self.report_editor.edited.connect(self._journal_report_edit)
+            # the Report Features panel's changes go through the verb a
+            # script would call, and are journaled as that call
+            self.report_editor.features_changer = (
+                lambda report, **change: self.project.report_features(
+                    self.project.name_of(report), **change))
             self._table_layout.insertWidget(1, self.report_editor, 1)
         # the report has the pane to itself. Hiding the table and the
         # MAC is not enough: the splitter holding them keeps its share of

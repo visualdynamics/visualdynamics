@@ -1739,8 +1739,61 @@ def plan():
     close(window)
 
 
+def report_features():
+    """The report editor with the Test report preset chosen: the Report
+    Features panel in the pane, and a control figure on the page drawn
+    under the plot conventions.
+
+    The page is a web view, and web content paints into an offscreen
+    grab only when Chromium draws without a GPU: run with
+    QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu set before the application
+    starts. The view is nudged by a pixel so it paints again before the
+    grab."""
+    import time
+
+    print('report_features:', flush=True)
+    window = fresh_window()
+    window.resize(WINDOW[0], 1100)
+    window.import_paths([str(PLATE / 'random.nc4')])
+    pump(30)
+    window.work_up()
+    pump(30)
+    report = by_type(window, 'Report')
+    select(window, report)
+    window.render_current()
+    pump(60)
+    editor = window.report_editor
+    panel = editor.features_panel
+    panel.preset_box.setCurrentIndex(panel.preset_box.findData('test_report'))
+    # room for the panel's reasons beside the page
+    editor.split.setSizes([760, 440])
+    deadline = time.monotonic() + 30.0
+    while editor.page.isLoading() and time.monotonic() < deadline:
+        pump(5)
+        time.sleep(0.05)
+    pump(60)
+    # the page opens at its top; the first control figure is the one
+    # the conventions change, so it is brought into view
+    editor.page.runJavaScript(
+        "const grid = document.querySelector('.grid');"
+        "if (grid) grid.closest('section').scrollIntoView();")
+    for _ in range(3):
+        size = editor.view.size()
+        editor.view.resize(size.width() + 1, size.height())
+        pump(5)
+        editor.view.resize(size)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            pump(5)
+            time.sleep(0.05)
+    editor.grab().save(str(OUT / 'report-features.png'))
+    print('  report-features.png', flush=True)
+    close(window)
+
+
 def main(which=('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
-                'mixed', 'tree', 'fem', 'fem_solids', 'plan')):
+                'mixed', 'tree', 'fem', 'fem_solids', 'plan',
+                'report_features')):
     import traceback
 
     from PySide6.QtWidgets import QApplication
@@ -1750,7 +1803,7 @@ def main(which=('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
     QApplication.instance() or QApplication(['visualdynamics'])
     OUT.mkdir(parents=True, exist_ok=True)
     for build in (modal, random, transient, shock, sine, sysid, mixed, tree,
-                  fem, fem_solids, plan):
+                  fem, fem_solids, plan, report_features):
         if build.__name__ not in which:
             continue
         try:
@@ -1768,4 +1821,5 @@ if __name__ == '__main__':
     # kept their old pictures (2026-09-03)
     picked = tuple(a.lstrip('-') for a in sys.argv[1:])
     main(picked or ('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
-                    'mixed', 'tree', 'fem', 'fem_solids', 'plan'))
+                    'mixed', 'tree', 'fem', 'fem_solids', 'plan',
+                    'report_features'))

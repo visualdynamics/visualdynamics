@@ -135,6 +135,11 @@ def render_html(report: Report, objects: Mapping[str, Any],
     numbered figure and table, in order: what the editor's Reference
     menu offers, with the same numbering the page shows.
 
+    The report features enabled on `report` (`report.features`) act
+    here, each only as its description says; with none enabled the
+    document is the one this function has always written, byte for
+    byte.
+
     `fill` makes the page one figure filling its frame, without a title,
     marking or theme toggle (`export_html`). `theme`, 'light' or 'dark',
     fixes the page's theme, which otherwise follows the reader's.
@@ -163,6 +168,18 @@ def render_html(report: Report, objects: Mapping[str, Any],
                                 'dark': CURVE_COLORS}}
     if edit:
         payload['selected'] = -1 if selected is None else int(selected)
+    # the report features enabled on this report (`report.features`).
+    # Each acts only when enabled, so with none the page below is the
+    # page it always was, byte for byte
+    from .features import enabled as enabled_features
+
+    active = enabled_features(report)
+    conventions = 'plot_conventions' in active
+    if conventions:
+        from .plot_conventions import apply as apply_conventions
+        from .plot_conventions import figure_kind
+    #: (built block, its figure kind) for the plot conventions
+    kinded: list[tuple[dict[str, Any], str | None]] = []
     figures = tables = 0
     for index, block in enumerate(report.blocks):
         built = _build_block(block, objects, us, object_groups)
@@ -200,6 +217,12 @@ def render_html(report: Report, objects: Mapping[str, Any],
                 # click on any of them selects the block
                 built['index'] = index
             payload['blocks'].append(built)
+            if conventions:
+                kinded.append((built, figure_kind(block, objects,
+                                                  object_groups)))
+    if conventions:
+        apply_conventions(payload, kinded,
+                          shared='shared_decades' in active)
     # text renders last: only now does every figure have its number, so
     # {{figure:...}} references can resolve — and renumber themselves
     # the next time a block is added, removed, or moved
@@ -214,7 +237,8 @@ def render_html(report: Report, objects: Mapping[str, Any],
             built['html'] = to_html(
                 _resolve_figures(built.pop('text'), labeled))
     data = json.dumps(payload, allow_nan=False)
-    scripts = _JS + (_EDIT_JS if edit else '')
+    css, script = page_parts(active)
+    scripts = script + (_EDIT_JS if edit else '')
     shell = _PAGE
     if edit:
         # the app hands over Qt's own qwebchannel.js to inline, because
@@ -233,7 +257,7 @@ def render_html(report: Report, objects: Mapping[str, Any],
                               trap + channel + '\n<script id="data"')
     return (shell.replace('__TITLE__', html_escape.escape(report.title))
                  .replace('__DATA__', data.replace('</', '<\\/'))
-                 .replace('__CSS__', _CSS + (_EDIT_CSS if edit else ''))
+                 .replace('__CSS__', css + (_EDIT_CSS if edit else ''))
                  .replace('__JS__', scripts))
 
 
@@ -3089,11 +3113,10 @@ def _table_block(block, source, geometry=None):
 
 
 from .page import (
-    _CSS,
     _EDIT_CSS,
     _EDIT_JS,
-    _JS,
     _PAGE,
+    page_parts,
 )
 
 

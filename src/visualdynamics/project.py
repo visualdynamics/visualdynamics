@@ -43,6 +43,7 @@ from .core.report import Report
 from .core.shapes import ShapeSet
 from .core.sine import SineLevelSet, SineSweepSpecification
 from .names import display_name
+from .report.features import FeatureSelection
 
 # An object group: the objects declared to belong together, and what the
 # group is — 'Basis', or None for every other group. One field says it
@@ -4405,6 +4406,62 @@ class Project(dict):
             report.marking_color = marking_color
         return self.add(name, report)
 
+    def report_features(self, name: str, *, enable: Sequence[str] = (),
+                        disable: Sequence[str] = (),
+                        preset: str | None = None) -> FeatureSelection:
+        """Turn a report's optional features on or off (the report
+        editor's Report Features panel).
+
+        A report feature is an addition to the generated report, off
+        until it is enabled; with none enabled the report is exactly
+        what Visual Dynamics writes otherwise. The features, their
+        groups and what each one needs are listed in
+        `visualdynamics.report.features.FEATURES`, and the presets in
+        `PRESETS`. The choice is saved with the report and in a
+        `.vdreport` template.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        enable : sequence of str, optional
+            Feature keys to turn on. A feature that needs another can
+            be enabled in the same call as the one it needs.
+        disable : sequence of str, optional
+            Feature keys to turn off. A feature that needs one turned
+            off goes with it, and the notes say so.
+        preset : str, optional
+            'default' (no features), 'test_report' or 'flash_report':
+            the report's features are replaced by the preset's before
+            `disable` and `enable` apply. A feature the preset names
+            that is not available yet is skipped with a note.
+
+        Returns
+        -------
+        FeatureSelection
+            `enabled`, the report's features afterwards, and `notes`,
+            what was skipped or turned off along the way.
+
+        Raises
+        ------
+        ValueError
+            For an unknown feature or preset, a feature not yet
+            available, or a feature whose requirement is not met.
+            Nothing is changed.
+        TypeError
+            When `name` is not a report, or a key is not a string.
+        """
+        from .core.report import Report
+        from .report.features import configure
+
+        name = self.name_of(name)
+        report = self[name]
+        if not isinstance(report, Report):
+            raise TypeError(f'{name!r} is a {type(report).__name__}, not a '
+                            'report')
+        return configure(report, enable=enable, disable=disable,
+                         preset=preset)
+
     def work_up(self) -> list[str]:
         """Compute every missing object the project's type expects from
         what is loaded, with the report last (Automatic on the tree's
@@ -5775,7 +5832,8 @@ _JOURNALED_VERBS = (
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',
-    'generate_report', 'export_report', 'export', 'save', 'duplicate',
+    'generate_report', 'report_features', 'export_report', 'export', 'save',
+    'duplicate',
 )
 for _verb in _JOURNALED_VERBS:
     setattr(Project, _verb, _journaled(getattr(Project, _verb)))

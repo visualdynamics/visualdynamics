@@ -300,6 +300,20 @@ MEASURED_ALPHA = 0.75
 STOOD_BACK_WIDTH = 4.5
 #: the ring drawn at a sine reading that sat under its noise floor
 FLOOR_MARK_SIZE = 6
+#: line styles that tell curves apart without color, as dash lengths in
+#: pixels (on, off, ...; empty is solid): solid, dashed, dotted,
+#: dash-dot, long dash, dash-dot-dot, short dash, long dash-dot. Eight,
+#: one for each curve of a figure that is labeled at its ends. Drawn
+#: only where the report feature `plot_conventions` asks for them: the
+#: app and the default report tell curves apart by color, and the one
+#: measurement read against its specification by width and gray.
+LINE_PATTERNS = (
+    (), (7, 4), (1.5, 3), (8, 3, 1.5, 3), (14, 5), (8, 3, 1.5, 3, 1.5, 3),
+    (4, 3), (14, 4, 2, 4),
+)
+#: the most curves a report figure names at their ends; beyond this the
+#: labels crowd each other and the legend says it better
+END_LABEL_CURVES = 8
 
 #: categorical curve colors on a dark background
 CURVE_COLORS = [

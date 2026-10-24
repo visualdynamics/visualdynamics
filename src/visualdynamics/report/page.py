@@ -2496,3 +2496,173 @@ new QWebChannel(qt.webChannelTransport, channel => {
   window.__select(DATA.selected === undefined ? -1 : DATA.selected);
 });
 """
+
+
+# ---- what report features add to the page ---------------------------------
+#
+# A report with no features enabled carries the page above exactly, byte
+# for byte (`report.features`). A feature that changes how a figure is
+# drawn therefore cannot live in `_JS` itself: its code is spliced in at
+# named places only when a report enables it. Each splice is an anchor,
+# a line of `_JS` that must occur exactly once, and what replaces it;
+# `page_parts` refuses an anchor it cannot find, and the tests pin every
+# anchor, so an edit to `_JS` that moves one fails loudly instead of
+# quietly dropping the feature.
+
+#: line styles and end labels (feature `plot_conventions`)
+_STYLE_SPLICES = (
+    ("      if (curve.dash) item.className = 'dashed'; // the swatch says so too\n",
+     "      legendStyle(block, curve, i, item);\n"),
+    ("      g.setLineDash(curve.dash ? [6, 4] : []);\n",
+     ("      g.setLineDash(lineDash(block, curve, index));\n"
+      "      curve.pen = g.strokeStyle;\n")),
+    ("    g.setLineDash([]);\n    // mode bookmarks",
+     ("    g.setLineDash([]);\n"
+      "    endLabels(g, block, view, px, py, margin, plotW, plotH);\n"
+      "    // mode bookmarks")),
+)
+
+_STYLE_JS = r"""
+/* ---- plot conventions ------------------------------------------------
+   Curves told apart by line style as well as color, and named at their
+   ends on a figure of a few curves, so the figure reads in a monochrome
+   copy. DATA.line_patterns is `plot.LINE_PATTERNS`, sent rather than
+   restated. A curve standing back (the gray specification) or in the
+   page's ink is solid; the others take the patterns in turn. A figure
+   whose curves already carry a dash keeps its own styling: there the
+   dash pairs a curve with its companion, which a pattern would undo. */
+function styledPeers(block) {
+  return !!DATA.line_patterns && !block.curves.some(c => c.dash);
+}
+function peerIndex(block, index) {
+  let k = 0;
+  for (let i = 0; i < index; i++) {
+    const c = block.curves[i];
+    if (!c.gray && !c.ink) k++;
+  }
+  return k;
+}
+function lineDash(block, curve, index) {
+  if (!styledPeers(block) || curve.gray || curve.ink)
+    return curve.dash ? [6, 4] : [];
+  const patterns = DATA.line_patterns;
+  return patterns[peerIndex(block, index) % patterns.length];
+}
+function legendStyle(block, curve, index, item) {
+  const dash = lineDash(block, curve, index);
+  if (!styledPeers(block)) {
+    if (curve.dash) item.className = 'dashed';
+    return;
+  }
+  /* the swatch is the curve's own pattern, drawn: a glyph cannot say
+     dash-dot from dash-dot-dot */
+  item.classList.add('patterned');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'swatch');
+  svg.setAttribute('viewBox', '0 0 28 6');
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('x1', '0'); line.setAttribute('x2', '28');
+  line.setAttribute('y1', '3'); line.setAttribute('y2', '3');
+  line.setAttribute('stroke', 'var(--swatch)');
+  line.setAttribute('stroke-width', '2');
+  if (dash.length) line.setAttribute('stroke-dasharray', dash.join(' '));
+  svg.appendChild(line);
+  /* once the legend has written the item's label, which replaces
+     whatever the item held */
+  queueMicrotask(() => item.insertBefore(svg, item.firstChild));
+}
+function endLabels(g, block, view, px, py, margin, plotW, plotH) {
+  const limit = DATA.end_labels || 0;
+  if (!limit || block.curves.length > limit) return;
+  const finite = v => v !== null && isFinite(v);
+  const placed = [];
+  block.curves.forEach(curve => {
+    const xs = curve.x || block.x;
+    for (let i = curve.y.length - 1; i >= 0; i--) {
+      if (!finite(curve.y[i]) || !finite(xs[i])) continue;
+      if (xs[i] < view.x0 || xs[i] > view.x1) continue;
+      if (curve.y[i] < view.y0 || curve.y[i] > view.y1) continue;
+      placed.push({text: curve.label, color: curve.pen,
+                   X: Math.min(px(xs[i]), margin.left + plotW) - 4,
+                   Y: py(curve.y[i]) - 4});
+      return;
+    }
+  });
+  /* labels that would sit on each other are pushed apart, top down,
+     and kept inside the frame */
+  placed.sort((a, b) => a.Y - b.Y);
+  const gap = 12, top = margin.top + 10, bottom = margin.top + plotH - 2;
+  placed.forEach((p, k) => {
+    p.Y = Math.max(p.Y, top, k ? placed[k - 1].Y + gap : top);
+  });
+  for (let k = placed.length - 1; k >= 0; k--) {
+    const below = k < placed.length - 1 ? placed[k + 1].Y - gap : bottom;
+    placed[k].Y = Math.min(placed[k].Y, below);
+  }
+  const paper = getComputedStyle(document.body).backgroundColor;
+  g.font = '11px sans-serif'; g.textAlign = 'right'; g.globalAlpha = 1;
+  g.lineJoin = 'round';
+  placed.forEach(p => {
+    g.lineWidth = 3; g.strokeStyle = paper; g.strokeText(p.text, p.X, p.Y);
+    g.fillStyle = p.color; g.fillText(p.text, p.X, p.Y);
+  });
+  g.textAlign = 'left';
+}
+"""
+
+_STYLE_CSS = """
+.legend span.patterned::before { content: none; }
+.legend svg.swatch { width: 1.75em; height: .45em; margin-right: .3rem;
+                     vertical-align: middle; overflow: visible; }
+"""
+
+#: a fixed opening window (feature `shared_decades`)
+_WINDOW_SPLICES = (
+    ("  if (block.averaging) {\n    /* the app's make_room",
+     ("  if (block.home) fixedWindow(block, home, full);\n"
+      "  if (block.averaging) {\n    /* the app's make_room")),
+)
+
+_WINDOW_JS = r"""
+/* ---- shared decades --------------------------------------------------
+   A figure that opens on the window it was given, whole decades shared
+   with every figure of its kind in the report, instead of on its own
+   data. The window the reader can roam is widened to hold it. */
+function fixedWindow(block, home, full) {
+  Object.assign(home, block.home);
+  full.x0 = Math.min(full.x0, home.x0); full.x1 = Math.max(full.x1, home.x1);
+  full.y0 = Math.min(full.y0, home.y0); full.y1 = Math.max(full.y1, home.y1);
+}
+"""
+
+#: page code by feature: (splices into `_JS`, functions added, CSS added)
+FEATURE_PAGE = {
+    'plot_conventions': (_STYLE_SPLICES, _STYLE_JS, _STYLE_CSS),
+    'shared_decades': (_WINDOW_SPLICES, _WINDOW_JS, ''),
+}
+
+
+def page_parts(features=()):
+    """(CSS, JS) for a report page with `features` enabled.
+
+    With no feature that adds page code, `_CSS` and `_JS` themselves,
+    untouched. Otherwise each such feature's splices are made in `_JS`,
+    its functions added after it and its CSS after `_CSS`. Raises
+    `RuntimeError` when an anchor is not in `_JS` exactly once.
+    """
+    css, js, added = _CSS, _JS, ''
+    for key in features:
+        if key not in FEATURE_PAGE:
+            continue
+        splices, functions, style = FEATURE_PAGE[key]
+        for anchor, replacement in splices:
+            found = js.count(anchor)
+            if found != 1:
+                raise RuntimeError(
+                    f'the page code of report feature {key!r} is anchored '
+                    f'on a line found {found} times in the page script, '
+                    f'not once: {anchor.strip()[:60]!r}')
+            js = js.replace(anchor, replacement)
+        added += functions
+        css += style
+    return css, js + added

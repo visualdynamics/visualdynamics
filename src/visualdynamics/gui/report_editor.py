@@ -9,10 +9,11 @@ clicked. Everything else is in Qt. Above the page is a bar of actions
 (Insert, Reference, Move Up, Move Down, Delete, and Export as HTML or as
 a report template), and beside it is a settings pane for the selection:
 a figure block's sources and caption, a text block's Markdown in a Qt
-editor, or the report's title and marking when nothing is selected.
-Each action is one operation on the `Report` model, which the window
-records in the journal, followed by a new render of the page. The
-exported file carries none of the editor's controls.
+editor, or the report's title, marking and Report Features panel when
+nothing is selected (`report_features_panel`). Each action is one
+operation on the `Report` model, which the window records in the
+journal, followed by a new render of the page. The exported file
+carries none of the editor's controls.
 """
 
 from __future__ import annotations
@@ -65,6 +66,7 @@ from PySide6.QtWidgets import (
 )
 
 from .icons import control_icon
+from .report_features_panel import ReportFeaturesPanel
 
 # The bar and the pane are Qt, as for every other object (Brandon,
 # 2026-09-08: "the toolbar should be the same as the task bar at the top
@@ -245,6 +247,15 @@ class ReportEditor(QWidget):
         self.title_edit: QLineEdit | None = None
         self.marking_edit: QLineEdit | None = None
         self.color_box: QComboBox | None = None
+        #: the Report Features panel, while the report's own settings
+        #: are in the pane
+        self.features_panel: ReportFeaturesPanel | None = None
+        #: how a change of report features is made: the window sets the
+        #: project's verb, so the change is journaled as a script would
+        #: make it; on its own the editor calls the registry directly.
+        #: Called as `features_changer(report, enable=, disable=,
+        #: preset=)` and returns a `FeatureSelection`.
+        self.features_changer: Callable[..., Any] | None = None
         self.field_boxes: dict[str, QComboBox] = {}
         self._loading_pane = False
         self._text_timer: QTimer = QTimer(self)
@@ -436,6 +447,7 @@ class ReportEditor(QWidget):
         self._text_timer.stop()
         self.text_editor = self.caption_edit = None
         self.title_edit = self.marking_edit = self.color_box = None
+        self.features_panel = None
         self.field_boxes = {}
         body = QWidget()
         form = QFormLayout(body)
@@ -482,6 +494,11 @@ class ReportEditor(QWidget):
                 form.addRow(QLabel(
                     'Click a block in the page to edit it; Insert adds '
                     'one after the selection, or at the end.'))
+                self.features_panel = ReportFeaturesPanel(report.features)
+                self.features_panel.requested.connect(
+                    lambda change: self._operate({'op': 'features',
+                                                  **change}))
+                form.addRow(self.features_panel)
             elif block.get('kind') == 'text':
                 form.addRow(QLabel(f'<b>Block {self.selected + 1}</b> — text'))
                 self.text_editor = QPlainTextEdit(block.get('text', ''))
@@ -656,6 +673,28 @@ class ReportEditor(QWidget):
         self._restore = restore
         self.view.loadFinished.connect(restore)
         self._offer()
+
+    def _change_features(self, operation) -> bool:
+        """Make the Report Features panel's change, and show the panel
+        the outcome. Returns whether the report changed: a refused
+        change leaves it as it was, says why on the panel, and renders
+        nothing again."""
+        from ..report.features import configure
+
+        change = {key: operation[key]
+                  for key in ('enable', 'disable', 'preset')
+                  if operation.get(key) is not None}
+        before = list(self.report.features)
+        changer = self.features_changer or configure
+        try:
+            selection = changer(self.report, **change)
+        except (TypeError, ValueError) as refused:
+            notes = [str(refused)]
+        else:
+            notes = list(selection.notes)
+        if self.features_panel is not None:
+            self.features_panel.show_state(self.report.features, notes)
+        return self.report.features != before
 
     def _scroll_back(self) -> None:
         self.page.runJavaScript(f'window.scrollTo(0, {self._scroll_to});')
@@ -840,6 +879,9 @@ class ReportEditor(QWidget):
             wanted = str(operation.get('value', 'ink'))
             report.marking_color = wanted if wanted in ('ink', 'red') \
                 else 'ink'
+        elif op == 'features':
+            if not self._change_features(operation):
+                return
         elif op == 'field':
             index = int(operation.get('at', -1))
             if 0 <= index < report.num_blocks:

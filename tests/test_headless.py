@@ -296,6 +296,7 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_amplitude': 'plot_amplitude_spectrum',
         '_render_replication_fit': 'plot_replication_fit',
         '_render_stroke': 'plot_stroke',
+        '_render_notch': 'plot_limit_prediction',
         '_render_wavelet': ('plot_scalogram / '
                             'viz.scalogram.plot_scalogram_stage'),
         '_render_pulse': 'plot_pulse_check',

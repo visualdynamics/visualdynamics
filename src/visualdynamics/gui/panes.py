@@ -44,6 +44,7 @@ from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
 from .instrumentation_panel import InstrumentationPanel
 from .mate_panel import MatePanel
+from .matrix_comparison_panel import MatrixComparisonPanel
 from .merge_panel import MergePanel
 from .mesh_panel import MeshPanel
 from .mesh_solids_panel import MeshSolidsPanel
@@ -348,6 +349,12 @@ class DataPane(QWidget):
         # shows it. Made before the bar, whose readings put it away
         self.signature_panel: SignaturePanel = SignaturePanel()
         self.signature_panel.hide()
+        # the matrix comparison's tolerances and its table, beside a
+        # cross-spectral matrix read against its specification; the
+        # Matrix reading shows it. Made before the bar, whose readings
+        # put it away
+        self.matrix_panel: MatrixComparisonPanel = MatrixComparisonPanel()
+        self.matrix_panel.hide()
         self.toolbar: QToolBar = self._build_toolbar()
         # The comparison, replication and SRS readings are built
         # visible and were only ever put away by `reset_controls` —
@@ -438,6 +445,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.signature_panel)
+        plot_row.addWidget(self.matrix_panel)
         plot_row.addWidget(self.wavelet_panel)
         plot_row.addWidget(self.statistics_panel)
         plot_row.addWidget(self.pulse_panel)
@@ -605,6 +613,23 @@ class DataPane(QWidget):
             lambda _checked: self.reread.emit())
         toolbar.addAction(self.signature_action)
         self.signature_action.setVisible(False)
+        # a specification and a cross-spectral matrix selected together:
+        # the channels' comparison, or the whole matrix judged as a
+        # grid, levels on the diagonal and each cross term's coherence
+        # and phase off it. A toggle like the Signature one: unchecking
+        # is the way back to the channels
+        self.matrix_action: QAction = QAction(
+            control_icon('map'), 'Matrix', self)
+        self.matrix_action.setCheckable(True)
+        self.matrix_action.setToolTip(
+            'The whole matrix against its specification as a grid: each '
+            "level on the diagonal, each cross term's coherence above it "
+            'and phase below it against their tolerances, every cell with '
+            'its verdict')
+        self.matrix_action.triggered.connect(
+            lambda _checked: self.reread.emit())
+        toolbar.addAction(self.matrix_action)
+        self.matrix_action.setVisible(False)
         # two densities selected together: drawn over each other, or
         # read as signal over noise — line by line in dB (Brandon,
         # 2026-08-25), or one RMS number per channel as bars
@@ -1234,6 +1259,23 @@ class DataPane(QWidget):
             self.toolbar.setVisible(True)
         else:
             self.signature_panel.hide()
+
+    @property
+    def matrix_wanted(self) -> bool:
+        """Whether the Matrix reading of a specification and a
+        cross-spectral matrix is checked; like `rms_wanted`, only the
+        checked state is read."""
+        return self.matrix_action.isChecked()
+
+    def offer_matrix(self, offered: bool) -> None:
+        """Show or hide the Matrix toggle for a specification and a
+        cross-spectral matrix selected together. Put away, the
+        reading's panel goes with it."""
+        self.matrix_action.setVisible(offered)
+        if offered:
+            self.toolbar.setVisible(True)
+        else:
+            self.matrix_panel.hide()
 
     def offer_rms(self, offered: bool) -> None:
         """Show or hide the RMS toggle for a specification shown on
@@ -1905,8 +1947,8 @@ class DataPane(QWidget):
         """Hide the controls and acts on the bar.
 
         This hides everything `show_controls` sets, and the event box,
-        the scaling field, the RMS and Signature toggles, the
-        comparison, two-density,
+        the scaling field, the RMS, Signature and Matrix toggles,
+        the comparison, two-density,
         replication and shock-spectrum readings, and the acts.
 
         Called before every render, so a drawing that has no use for the
@@ -1927,6 +1969,7 @@ class DataPane(QWidget):
         self.rms_action.setVisible(False)
         self.offer_sweep_rate(False)
         self.offer_signature(False)
+        self.offer_matrix(False)
         self.show_replication_views(False)
         self.show_srs_views(False)
         # the comparison's and two densities' readings too: they were

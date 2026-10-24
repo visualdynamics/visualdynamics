@@ -992,6 +992,10 @@ class MainWindow(QMainWindow):
         # the plot is the preview of the settings being made
         self.data_pane.signature_panel.changed.connect(
             lambda _settings: self.render_current())
+        # the matrix comparison's tolerances redraw the grid at once:
+        # the grid is the preview of the settings being made
+        self.data_pane.matrix_panel.changed.connect(
+            lambda _settings: self.render_current())
         self.data_pane.octave_panel.apply_asked.connect(
             self.compute_octave)
         # the tone readout: the toggle redraws, and a window chosen in
@@ -1291,6 +1295,11 @@ class MainWindow(QMainWindow):
         #: a limit moved does not move them, and finding them again was
         #: a tenth of a second on every tick of a limit's box
         self._held_modes: tuple | None = None
+        #: and the matrix comparison last read, the same way: a
+        #: tolerance moved judges its cross terms again and reads nothing
+        #: twice, where reading the levels again was most of a second on
+        #: an eight-channel matrix
+        self._held_matrix: tuple | None = None
         #: why the sheet just asked for could not be opened, said once
         #: on the status line of the render that stood it down
         self._author_refusal: str | None = None
@@ -12823,6 +12832,18 @@ class MainWindow(QMainWindow):
             return self._render_signature(signature)
         self.data_pane.signature_panel.hide()
         self._held_modes = None
+        # a specification beside a cross-spectral matrix: compared
+        # channel by channel, or judged whole as a grid, the levels on
+        # the diagonal and each cross term's coherence and phase off it.
+        # The channels are the default and the toggle the other reading
+        matrix = self._matrix_found(series)
+        self.data_pane.offer_matrix(matrix is not None)
+        if matrix is not None and self.data_pane.matrix_wanted:
+            # a grid of small plots is read flat: no depth axis to offer
+            self.data_pane.offer_waterfall(False)
+            return self._render_matrix(*matrix)
+        self.data_pane.matrix_panel.hide()
+        self._held_matrix = None
         # a specification on its own reads two ways: its spectra, or
         # the level each channel asks for as bars over the table
         levels = self._specification_rows(series)
@@ -19044,6 +19065,93 @@ class MainWindow(QMainWindow):
             events = sorted({str(data.block[i]) for i in records})
         return (data, specs[0][0], channels, events,
                 [spectrum for spectrum, _records in measured])
+
+    def _matrix_found(self, series):
+        """(specification name, specification, measured name,
+        measured) when the two selected are a specification and a
+        cross-spectral matrix, one with cross terms, else None. Picks
+        within either are not read: the matrix is judged whole."""
+        from ..core.data import autospectrum
+
+        if len(series) != 2:
+            return None
+        specs = [(name, data) for name, data, _records in series
+                 if isinstance(data, Specification)]
+        measured = [(name, data) for name, data, _records in series
+                    if isinstance(data, Psd)
+                    and not isinstance(data, Specification)
+                    and data.reference_dof is not None
+                    and not all(autospectrum(data, i)
+                                for i in range(data.num_records))]
+        if len(specs) != 1 or len(measured) != 1:
+            return None
+        return (*specs[0], *measured[0])
+
+    def _render_matrix(self, spec_name, specification, name, measured):
+        """The Matrix reading: the measured matrix against its
+        specification as a grid, and every cell's verdict in the panel
+        beside it.
+
+        The tolerances are the panel's, the scale the project's for
+        the pair (`Project.comparison_scale`), and every number
+        `core.matrix_comparison.compare_matrix`'s.
+        """
+        from ..core.matrix_comparison import compare_matrix
+        from ..plot.matrix_comparison import build_matrix_comparison
+
+        pane = self.data_pane
+        panel = pane.matrix_panel
+        panel.show()
+        settings = panel.settings()
+        pane.graphics.clear()
+        scale = self.project.comparison_scale(specification, name)
+        key = (specification, specification.ordinate, measured,
+               measured.ordinate, scale)
+        held = self._held_matrix
+        try:
+            # the same two objects holding the same arrays, at the same
+            # scale: only a tolerance has moved
+            same = held is not None and held[0][4] == scale and all(
+                a is b for a, b in zip(held[0][:4], key[:4], strict=True))
+            if same:
+                comparison = held[1].with_tolerances(**settings)
+            else:
+                comparison = compare_matrix(specification, measured,
+                                            scale_db=scale, **settings)
+            self._held_matrix = (key, comparison)
+            build_matrix_comparison(
+                pane.graphics, specification, measured,
+                comparison=comparison, table=False,
+                unit_system=self.unit_system, theme=self.theme_name)
+        except ValueError as error:
+            # the pair cannot be judged as a matrix: the reason, and no
+            # numbers that would read as a verdict
+            pane.graphics.clear()
+            panel.show_result(None)
+            return f'Matrix: {error}'
+        panel.show_result(comparison)
+        self._journal_matrix(specification, measured, settings, scale)
+        return f'{name} against {spec_name}: {comparison.describe()}'
+
+    def _journal_matrix(self, specification, measured, settings, scale):
+        """The matrix reading, journaled as the headless call that
+        draws it (`_journal_view`), at the tolerances and the scale it
+        was read at."""
+        try:
+            names = (self.project.name_of(specification),
+                     self.project.name_of(measured))
+        except (KeyError, ValueError):
+            return
+        prefix = ('visualdynamics.plot.plot_matrix_comparison('
+                  f'project[{names[0]!r}], project[{names[1]!r}]')
+        self._journal_view(
+            prefix,
+            f'{prefix}, '
+            f"coherence_tolerance={settings['coherence_tolerance']!r}, "
+            f"phase_tolerance={settings['phase_tolerance']!r}, "
+            f"coherence_floor={settings['coherence_floor']!r}, "
+            f'scale_db={scale!r}, '
+            "path='matrix.png', show=False)")
 
     def _signature_found(self, series):
         """The two selected when they are two signatures of one kind,

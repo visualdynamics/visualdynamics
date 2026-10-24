@@ -105,3 +105,33 @@ def test_the_length_scale_is_in_the_display_unit(window, pump):
     pump()
     text = pane.transformation_panel.derived['length'].text()
     assert text.endswith(' in')
+
+
+def test_the_residual_is_read_off_the_window_thread_and_held(window, pump,
+                                                            monkeypatch):
+    """Splitting a long record's matrix is a second and more: the reading
+    is made on the worker, drawn again from the one held while the
+    density stands, and read again when it changes."""
+    import threading
+
+    threads = []
+    real = window.project.read_transformation
+
+    def recorded(*args, **kwargs):
+        threads.append(threading.current_thread())
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(window.project, 'read_transformation', recorded)
+    name, pane = _transformed(window, pump)
+    pane.transformation_action.trigger()
+    pump()
+    assert len(threads) == 1
+    assert threads[0] is not threading.main_thread()
+    window.render_current()
+    pump()
+    assert len(threads) == 1, 'the reading held is drawn again'
+    density = window.project[name]
+    density.ordinate = np.array(density.ordinate)
+    window.render_current()
+    pump()
+    assert len(threads) == 2, 'a density changed is read again'

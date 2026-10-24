@@ -1562,6 +1562,11 @@ class MainWindow(QMainWindow):
         #: made on the worker, and drawn again from here when nothing it
         #: was made of has changed. Let go when the reading is not up
         self._held_prediction: tuple | None = None
+        #: and the partial coherence and rigid-body residual last read,
+        #: by kind, as (name, object, its ordinate, the reading): each
+        #: is read on the worker, and drawn again from here while its
+        #: object stands. Let go when the reading is not up
+        self._held_readings: dict[str, tuple] = {}
         #: why the sheet just asked for could not be opened, said once
         #: on the status line of the render that stood it down
         self._author_refusal: str | None = None
@@ -14393,12 +14398,28 @@ class MainWindow(QMainWindow):
             return None
         return name, data, records
 
+    def _held_reading(self, kind, name, data, status, verb):
+        """The `kind` reading of `data`, by the project `verb` on its
+        name: the one held when it was read of this object as it stands,
+        otherwise read on the worker with the strip's bar and Cancel
+        (`_run_long`). Both readings condition or split a whole
+        cross-spectral matrix, a second and more on a long record."""
+        held = self._held_readings.get(kind)
+        if (held is not None and held[0] == name and held[1] is data
+                and held[2] is data.ordinate):
+            return held[3]
+        self._held_readings.pop(kind, None)
+        reading = self._run_long(status, verb, name)
+        self._held_readings[kind] = (name, data, data.ordinate, reading)
+        return reading
+
     def _render_partial_coherence(self, name, coherence, records):
         """The partial coherence reading of one response, drawn in place
         of the multiple coherence it is read behind
         (`plot.partial_coherence`), with its summary in the pane. The
         response is the first record picked, or the first record.
         Returns the status line."""
+        from ..core.progress import Cancelled
         from ..plot.partial_coherence import build_partial_coherence
 
         panel = self.data_pane.partial_coherence_panel
@@ -14408,7 +14429,13 @@ class MainWindow(QMainWindow):
         self.data_pane.graphics.clear()
         record = int(records[0]) if records else 0
         try:
-            reading = self.project.read_partial_coherence(name)
+            reading = self._held_reading(
+                'partial_coherence', name, coherence,
+                f'Reading the partial coherence behind {name}…',
+                self.project.read_partial_coherence)
+        except Cancelled:
+            panel.show_reading(None, refusal='cancelled')
+            return 'No partial coherence read: cancelled'
         except ValueError as refusal:
             panel.show_reading(None, refusal=str(refusal))
             return f'No partial coherence read: {refusal}'
@@ -14456,16 +14483,23 @@ class MainWindow(QMainWindow):
         transformed density it is read behind (`plot.transformation`),
         with the transformation and the residual in the pane. Returns
         the status line."""
+        from ..core.progress import Cancelled
         from ..plot.transformation import build_transformation_residual
 
-        del density, records          # the reading is of the whole transform
+        del records                   # the reading is of the whole transform
         panel = self.data_pane.transformation_panel
         panel.show()
         self.data_pane.offer_waterfall(False)
         self.data_pane.show_waterfall(False)
         self.data_pane.graphics.clear()
         try:
-            reading = self.project.read_transformation(name)
+            reading = self._held_reading(
+                'transformation', name, density,
+                f'Reading what the rigid body leaves of {name}…',
+                self.project.read_transformation)
+        except Cancelled:
+            panel.show_reading(None, refusal='cancelled')
+            return 'No rigid-body residual read: cancelled'
         except ValueError as refusal:
             panel.show_reading(None, refusal=str(refusal))
             return f'No rigid-body residual read: {refusal}'
@@ -14976,6 +15010,7 @@ class MainWindow(QMainWindow):
                   and self._transformation_source(series))
         if behind:
             return self._render_transformation(*behind)
+        self._held_readings.clear()
         if all_frf and self.data_pane.showing_cmif:
             drawn = build_cmif(self.data_pane.graphics, series,
                                unit_system=self.unit_system,

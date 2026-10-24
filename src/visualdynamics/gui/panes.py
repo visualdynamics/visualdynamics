@@ -502,9 +502,11 @@ class DataPane(QWidget):
         self.notch_panel.hide()
         self.notch_panel.changed.connect(
             lambda settings: self._settings_edited('notch', settings))
-        self.partial_coherence_panel: PartialCoherencePanel =             PartialCoherencePanel()
+        self.partial_coherence_panel: PartialCoherencePanel = \
+            PartialCoherencePanel()
         self.partial_coherence_panel.hide()
-        self.transformation_panel: TransformationPanel =             TransformationPanel()
+        self.transformation_panel: TransformationPanel = \
+            TransformationPanel()
         self.transformation_panel.hide()
         # the modes a sine sweep is checked against, beside the sweep
         # drawn through their bands; the Sweep Rate reading shows it

@@ -30,8 +30,10 @@ STYLES = ('dash', 'dot', 'dashdot', 'dashdotdot')
 SYMBOLS = ('o', 's', 't', 'd', '+', 'x')
 
 #: how often a curve's marker is drawn, in lines, so a marker names its
-#: curve without hiding it
+#: curve without hiding it; and the most markers a curve wears, so a
+#: long spectrum is marked as often across the plot as a short one
 MARK_EVERY = 8
+MOST_MARKS = 60
 
 #: the lowest share of the first principal reference drawn, in decibels
 FLOOR_DB = -60.0
@@ -55,9 +57,16 @@ def _curve(plot: Any, x: np.ndarray, y: np.ndarray, color: Any, index: int,
     import pyqtgraph as pg
 
     shown = np.isfinite(y)
-    plot.plot(x, y, pen=_pen(color, index), connect='finite', name=name)
+    # drawn at the plot's width, decimated to its peaks, and marked a
+    # bounded number of times: a reading of 2049 lines and four drives
+    # drew two thousand markers and every line, a third of a second of
+    # the window's time on every repaint
+    curve = plot.plot(x, y, pen=_pen(color, index), connect='finite',
+                      name=name)
+    curve.setDownsampling(auto=True, method='peak')
+    every = max(MARK_EVERY, len(x) // MOST_MARKS)
     marks = np.zeros(len(x), dtype=bool)
-    marks[index % MARK_EVERY::MARK_EVERY] = True
+    marks[index * every // len(STYLES) % every::every] = True
     marks &= shown
     plot.plot(x[marks], y[marks], pen=None,
               symbol=SYMBOLS[index % len(SYMBOLS)], symbolSize=7,

@@ -128,3 +128,27 @@ def test_put_away_the_coherence_is_drawn_again(window, pump):
     assert len(plots) != 3 or not any(
         'multiple, every reference' == item.name()
         for item in plots[0].listDataItems())
+
+
+def test_the_reading_is_made_off_the_window_thread_and_held(window, pump,
+                                                           monkeypatch):
+    """Conditioning a long record's matrix is a second and more: the
+    reading is made on the worker, and drawn again from the one held
+    while the coherence it is read behind stands."""
+    import threading
+
+    threads = []
+    real = window.project.read_partial_coherence
+
+    def recorded(*args, **kwargs):
+        threads.append(threading.current_thread())
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(window.project, 'read_partial_coherence', recorded)
+    _reading_on(window, pump)
+    assert len(threads) == 1
+    assert threads[0] is not threading.main_thread()
+    window.render_current()
+    pump()
+    assert len(threads) == 1, 'the reading held is drawn again'
+    assert 'most explained by' in window.statusBar().currentMessage()

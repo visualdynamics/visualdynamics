@@ -80,10 +80,11 @@ References
 The definition of the distortion and the estimator of the tone it is
 read against are set out in these.
 
-1. IEC 60068-2-6:2007, *Environmental testing - Part 2-6: Tests - Test
-   Fc: Vibration (sinusoidal)*. Distortion of a sinusoidal vibration as
-   the RMS of the motion other than the fundamental over the RMS of the
-   fundamental, read at the reference point.
+1. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 514.8,
+   Table 514.8-III, note 3: the distortion check on a sinusoidal test,
+   the unfiltered RMS within 5 percent of the filtered RMS, stated as
+   about 32 percent distortion.
 2. Brandt, A. (2011). *Noise and Vibration Analysis: Signal Analysis and
    Experimental Procedures*. Wiley. Order tracking, the Vold-Kalman
    filter among it: a component on a known frequency history read as a

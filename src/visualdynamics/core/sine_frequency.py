@@ -2,11 +2,11 @@
 the frequency the profile asks for, along the sweep.
 
 A sine test is held to its frequency as well as its level. Test
-documents write the band as a share of the frequency, sometimes with a
-floor in hertz below which the share would be too fine to hold: plus or
-minus 2 percent, or 2 percent or 1 Hz whichever is greater, are examples
-of what they ask for, and 2 percent is the default here
-(`FREQUENCY_TOLERANCE`). At a sharp resonance the frequency band is also
+documents write the band as a share of the frequency; MIL-STD-810H holds
+it to plus or minus 0.1 percent. The default here is 2 percent
+(`FREQUENCY_TOLERANCE`), for the governing document's own figure to
+replace, and the band can be given a floor in hertz (`floor`) for a
+document that writes one. At a sharp resonance the frequency band is also
 a level band: a tone held 2 percent off a mode with a Q of 40 drives it
 to about half the response it would at the center, since the one-mass
 response falls as 1 / sqrt(1 + (2 Q d)**2) for a fractional offset d.
@@ -77,10 +77,10 @@ are set out in these.
    filter among it: a component on a known frequency history read as a
    slowly varying complex amplitude by least squares, whose phase
    carries the component's departure from that history.
-2. IEC 60068-2-6:2007, *Environmental testing - Part 2-6: Tests - Test
-   Fc: Vibration (sinusoidal)*. The tolerance on the frequency of a
-   sinusoidal vibration, a share of the frequency with a floor in hertz
-   at low frequency.
+2. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 514.8,
+   Table 514.8-III: the frequency of a sinusoidal test held to plus or
+   minus 0.1 percent.
 """
 
 from __future__ import annotations

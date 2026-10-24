@@ -70,10 +70,12 @@ frequency between segments are set out in these.
    Vibration Handbook*, 6th ed. McGraw-Hill. Sinusoidal motion: peak
    displacement, velocity and acceleration of a tone as one amplitude
    times successive powers of its angular frequency.
-2. IEC 60068-2-6:2007, *Environmental testing - Part 2-6: Tests - Test
-   Fc: Vibration (sinusoidal)*. The crossover frequency, at which a
-   sinusoidal test's amplitude changes from a displacement to an
-   acceleration, and the frequency ranges written in each.
+2. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 514.8,
+   Annex E, Figure 514.8E-2: a sinusoidal profile written in segments of
+   displacement and acceleration (0.20 in double amplitude from 5 to
+   14 Hz, 2 g from 14 to 33 Hz, 0.036 in to 52.1 Hz, 5 g to 500 Hz),
+   each crossover where the two levels meet.
 """
 
 from __future__ import annotations

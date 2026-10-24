@@ -407,4 +407,7 @@ visualdynamics.export_html('dofs.html', geometry=geometry,
 
 `theme` fixes the figure's colors; without it, the figure follows the
 reader's theme. `fill=False` lays the figure out the way a report page
-does.
+does. `channels` keeps only some records and `max_points` thins every
+curve, keeping its peaks. For a website that allows no inline script,
+`export_figure` writes the same figure as a data file and a script;
+see [A figure in a page of your own](figures-in-a-page.md).

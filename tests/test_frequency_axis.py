@@ -177,7 +177,9 @@ def test_steps_and_power_laws_are_built_in_hertz_then_put_in_decades():
                           'mode': 'curves', 'caption': 'c'},
                          {'Spec': spec}, us, [])
     assert built['logx']
-    assert np.allclose(built['curves'][0]['x'], np.log10(law_x))
+    # drawn on the block's grid, which its zones share (2026-10-24)
+    drawn = built['curves'][0]['x'] or built['x']
+    assert np.allclose(drawn, np.log10(law_x))
     # and in hertz everything is where it was
     frequency_axis('linear')
     cx, _cz = waterfall_arrays(banded, unit_system=us)['curves'][0]

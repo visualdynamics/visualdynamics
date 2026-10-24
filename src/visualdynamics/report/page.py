@@ -6,7 +6,14 @@ network and contains no code from anyone else. The scene viewer uses the
 desktop animator's phase arithmetic on an orthographic canvas; the plot
 viewer is a line plot that zooms with the wheel, pans by dragging, and
 has decade ticks on log axes.
+
+The same viewers also go out as a script of their own, the figure
+renderer (`renderer_js`), for a host page that mounts a figure on an
+element of its own and loads its data as a JSON file.
 """
+
+import json
+import re
 
 _PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -194,10 +201,27 @@ html.fill section { margin: 0; }
 html.fill .caption strong { display: none; }
 """
 
-_JS = r"""
+#: Where the figures live, for the page that is one HTML file: the
+#: whole document, its data in the page. `_RENDERER` binds the same
+#: names to an element a host page provides, so one body of code
+#: draws both (`_JS_BODY`).
+_JS_PAGE = r"""
 'use strict';
 const DATA = JSON.parse(document.getElementById('data').textContent);
-if (DATA.fill) document.documentElement.classList.add('fill');
+const HOST = document.documentElement, BODY = document.body;
+const root = document.getElementById('report');
+const PAGE_SCROLL = false;
+const FRAME_HEIGHT = () => window.innerHeight;
+"""
+
+_JS_BODY = r"""
+/* The wheel zooms a figure that has its page to itself. A figure set
+   among a host page's text (`PAGE_SCROLL`) leaves the wheel to the page,
+   so a reader scrolling past it is not caught in it, and zooms with
+   Ctrl or Cmd held, which is also how a trackpad's pinch arrives. */
+const WHEEL = PAGE_SCROLL ? 'Ctrl+wheel' : 'wheel';
+const wheelZooms = e => !PAGE_SCROLL || e.ctrlKey || e.metaKey;
+if (DATA.fill) HOST.classList.add('fill');
 /* the app's curve palette, its light or dark shade by the page's
    theme (`plot.curve_colors`), sent rather than restated here */
 const curveColor = which => {
@@ -212,24 +236,23 @@ const ZONE_FILL = {warning: 'rgba(210, 193, 78, 0.16)',
                    below: 'rgba(76, 146, 217, 0.16)',
                    exceed_over: 'rgba(229, 83, 75, 0.60)',
                    exceed_under: 'rgba(76, 146, 217, 0.60)'};
-const root = document.getElementById('report');
 const h1 = document.createElement('h1');
 h1.textContent = DATA.title; root.appendChild(h1);
 /* the classification marking: one value, two banners. Blank means
    unmarked and draws nothing — edit mode replaces these with the
    editable pair, blank included, so the marking stays reachable. */
 function markingStrips(build) {
-  document.querySelectorAll('.marking').forEach(e => e.remove());
-  document.body.classList.remove('marked');
+  HOST.querySelectorAll('.marking').forEach(e => e.remove());
+  BODY.classList.remove('marked');
   const strips = [];
   if (build) {
     for (const place of ['top', 'bottom']) {
       const strip = document.createElement('div');
       strip.className = 'marking ' + place
         + (DATA.marking_color === 'red' ? ' red' : '');
-      document.body.appendChild(strip); strips.push(strip);
+      BODY.appendChild(strip); strips.push(strip);
     }
-    document.body.classList.add('marked');
+    BODY.classList.add('marked');
   }
   return strips;
 }
@@ -277,13 +300,13 @@ function sized(canvas, height) {
   if (typeof height === 'function') height = Math.round(height(width));
   // filling a frame: the height the window has left once everything
   // else on the page — caption, controls, legend — has its own
-  if (document.documentElement.classList.contains('fill')) {
+  if (HOST.classList.contains('fill')) {
     // the body's own height, not the document's scroll height: that
     // never falls below the window, so with the canvas nudged small to
     // be redrawn everything else measured as the whole window
-    const rest = document.body.getBoundingClientRect().height
+    const rest = BODY.getBoundingClientRect().height
       - canvas.getBoundingClientRect().height;
-    height = Math.max(120, Math.floor(window.innerHeight - rest));
+    height = Math.max(120, Math.floor(FRAME_HEIGHT() - rest));
   }
   canvas.width = width * scale; canvas.height = height * scale;
   canvas.style.height = height + 'px';
@@ -305,7 +328,7 @@ const viridis = t => {
    with the page (`DATA.marks_color`) rather than restated here. Read
    per draw and per side, so a theme flip repaints them — and shared
    by the flat figure and the stage, which draw the same marks. */
-const darkPage = () => (document.documentElement.dataset.theme
+const darkPage = () => (HOST.dataset.theme
   || (matchMedia('(prefers-color-scheme: dark)').matches
       ? 'dark' : 'light')) === 'dark';
 const rgbOf = hex => [1, 3, 5].map(
@@ -364,7 +387,8 @@ function orbitView(canvas, homeBasis, redraw) {
     dragging = [e.clientX, e.clientY];
     redraw(); });
   canvas.addEventListener('pointerup', () => dragging = null);
-  canvas.addEventListener('wheel', e => { e.preventDefault();
+  canvas.addEventListener('wheel', e => { if (!wheelZooms(e)) return;
+    e.preventDefault();
     view.zoom *= Math.exp(-e.deltaY * 0.002);
     redraw(); }, { passive: false });
   return view;
@@ -454,7 +478,7 @@ function barsBlock(block) {
       canvas, margin.top + margin.bottom + block.values.length * ROW_HEIGHT);
     const plotW = width - margin.left - margin.right;
     const plotH = height - margin.top - margin.bottom;
-    const ink = getComputedStyle(document.body).color;
+    const ink = getComputedStyle(BODY).color;
     /* where a bar grows from: zero for a reading whose zero means no
        error at all, the nominal for one that has a nominal — a
        kurtosis bar drawn from zero is three units of agreement
@@ -600,6 +624,7 @@ function barsBlock(block) {
   const rowAt = y => first + (y - margin.top)
     / Math.max(canvas.clientHeight - margin.top - margin.bottom, 1) * shown;
   canvas.addEventListener('wheel', e => {
+    if (!wheelZooms(e)) return;
     e.preventDefault();
     const at = rowAt(e.offsetY);
     const factor = e.deltaY > 0 ? 1.25 : 0.8;
@@ -691,7 +716,7 @@ function plotBlock(block, into) {
   REDRAWS.push(fillLegend);     // its swatches take the theme's shade
   s.appendChild(legend);
   const reset = controlBar(s, block, into ? '' :
-    'drag to pan, wheel to zoom — over an axis, that axis alone; '
+    'drag to pan, ' + WHEEL + ' to zoom — over an axis, that axis alone; '
     + 'double-click also resets',
     i => { picked = i; applyChannel(); draw(); });
   const c = captionFor(block);
@@ -832,7 +857,7 @@ function plotBlock(block, into) {
     const plotH = height - margin.top - margin.bottom;
     const px = v => margin.left + (v - view.x0) / (view.x1 - view.x0) * plotW;
     const py = v => margin.top + (view.y1 - v) / (view.y1 - view.y0) * plotH;
-    const ink = getComputedStyle(document.body).color;
+    const ink = getComputedStyle(BODY).color;
     g.clearRect(0, 0, width, height);
     g.save(); g.beginPath();
     g.rect(margin.left, margin.top, plotW, plotH); g.clip();
@@ -1127,6 +1152,7 @@ function plotBlock(block, into) {
     clampView(); draw(); });
   canvas.addEventListener('pointerup', () => dragging = null);
   canvas.addEventListener('wheel', e => {
+    if (!wheelZooms(e)) return;
     e.preventDefault();
     const r = canvas.getBoundingClientRect();
     const { xOnly, yOnly } = axisOnly(e);
@@ -1158,7 +1184,7 @@ function macBlock(block) {
   const s = document.createElement('section'); root.appendChild(s);
   const canvas = document.createElement('canvas'); s.appendChild(canvas);
   const reset = controlBar(s, block,
-    'drag to pan, wheel to zoom; double-click resets');
+    'drag to pan, ' + WHEEL + ' to zoom; double-click resets');
   const c = captionFor(block); if (c) s.appendChild(c);
 
   const rows = block.matrix.length, columns = block.matrix[0].length;
@@ -1223,7 +1249,7 @@ function macBlock(block) {
                        sx / n + 0.5, sy / n + 0.5);
     });
     g.restore();
-    const ink = getComputedStyle(document.body).color;
+    const ink = getComputedStyle(BODY).color;
     g.strokeStyle = ink; g.globalAlpha = 0.6;
     g.strokeRect(left, top, plotW, plotH);
     g.globalAlpha = 1; g.fillStyle = ink; g.font = '10px sans-serif';
@@ -1263,6 +1289,7 @@ function macBlock(block) {
     clampView(); draw(); });
   canvas.addEventListener('pointerup', () => dragging = null);
   canvas.addEventListener('wheel', e => {
+    if (!wheelZooms(e)) return;
     e.preventDefault();
     const r = canvas.getBoundingClientRect();
     const f = frame();
@@ -1302,7 +1329,7 @@ function mapBlock(block) {
         g.fillRect(left + j * cellW, top + i * cellH,
                    cellW + 0.5, cellH + 0.5);
       }
-    const ink = getComputedStyle(document.body).color;
+    const ink = getComputedStyle(BODY).color;
     g.fillStyle = ink; g.font = '10px sans-serif';
     const every = Math.ceil(rows / 24);
     g.textAlign = 'right';
@@ -1385,7 +1412,7 @@ function sceneBlock(block) {
      a real scale, so naming the length the points happen to be in
      answered a question the figure does not raise (Brandon,
      2026-09-22) */
-  hint.textContent = 'drag to rotate, wheel to zoom';
+  hint.textContent = 'drag to rotate, ' + WHEEL + ' to zoom';
   controls.appendChild(hint);
   const c = captionFor(block); if (c) s.appendChild(c);
 
@@ -1725,7 +1752,7 @@ function stageBlock(block) {
   resetView.className = 'reset'; resetView.textContent = 'Reset View';
   controls.appendChild(resetView);
   const hint = document.createElement('span'); hint.className = 'hint';
-  hint.textContent = 'drag to rotate, wheel to zoom';
+  hint.textContent = 'drag to rotate, ' + WHEEL + ' to zoom';
   controls.appendChild(hint);
   const c = captionFor(block); if (c) s.appendChild(c);
 
@@ -1756,7 +1783,7 @@ function stageBlock(block) {
 
   function draw() {
     const [g, width, height] = sized(canvas, 420);
-    const ink = getComputedStyle(document.body).color;
+    const ink = getComputedStyle(BODY).color;
     /* the view, published the way the line plots publish theirs: what
        is being looked at is a fact about the figure, and reading it
        off the pixels is guesswork — two identical draws differ by a
@@ -2400,13 +2427,13 @@ function copyButton(target, copier, what) {
   });
   target.parentElement.insertBefore(button, target.nextSibling);
 }
-document.querySelectorAll('section canvas').forEach(
+HOST.querySelectorAll('section canvas').forEach(
   canvas => copyButton(canvas, copyCanvas, 'figure as an image'));
-document.querySelectorAll('.photoholder img').forEach(
+HOST.querySelectorAll('.photoholder img').forEach(
   img => copyButton(img, copyImage, 'photo'));
 // the button hangs on the section, not the scrolling wrap: a wide
 // table scrolls sideways inside its wrap and would carry it away
-document.querySelectorAll('section .tablewrap').forEach(
+HOST.querySelectorAll('section .tablewrap').forEach(
   wrap => copyButton(wrap, () => copyTable(wrap.querySelector('table')),
                      'table as cells and as a table'));
 
@@ -2418,7 +2445,7 @@ document.querySelectorAll('section .tablewrap').forEach(
   const toggle = document.createElement('button');
   toggle.className = 'themetoggle';
   const apply = (theme, remember = true) => {
-    document.documentElement.dataset.theme = theme;
+    HOST.dataset.theme = theme;
     toggle.textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
     REDRAWS.forEach(redraw => redraw());
     if (!remember) return;
@@ -2439,13 +2466,15 @@ document.querySelectorAll('section .tablewrap').forEach(
   // a filled frame that changes height is redrawn to it: the viewers
   // watch their canvas's size, so nudging it is what asks them
   if (DATA.fill)
-    addEventListener('resize', () => document.querySelectorAll(
+    addEventListener('resize', () => HOST.querySelectorAll(
       'section canvas').forEach(c => { c.style.height = '1px'; }));
   toggle.onclick = () => apply(
-    document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
-  document.body.appendChild(toggle);
+    HOST.dataset.theme === 'dark' ? 'light' : 'dark');
+  BODY.appendChild(toggle);
 })();
 """
+
+_JS = _JS_PAGE + _JS_BODY
 
 
 _EDIT_CSS = """
@@ -2496,3 +2525,192 @@ new QWebChannel(qt.webChannelTransport, channel => {
   window.__select(DATA.selected === undefined ? -1 : DATA.selected);
 });
 """
+
+
+# ---- the figure renderer: the page's viewers as a script of their own ----
+#
+# A host page with a strict Content-Security-Policy runs no inline
+# script and frames nothing, so neither the one-file page nor an iframe
+# of it can be shown there. The renderer is the same viewers as one
+# same-origin script, mounted on an element the host page provides,
+# with each figure's data in a JSON file of its own (`export_figure`).
+# It is generated from `_JS_BODY` and `_CSS`, never edited by hand, so
+# the two pages cannot drift apart.
+
+#: The data a renderer draws, by number. A renderer refuses data of
+#: another number rather than draw it wrongly; it changes when the
+#: payload changes in a way an older renderer would misread.
+FIGURE_FORMAT = 1
+
+#: The class the renderer gives the element it draws in. Every rule of
+#: the page's stylesheet is scoped under it, so a figure styles nothing
+#: of the host page.
+FIGURE_SCOPE = '.vdfig'
+
+#: How the mounted figure sits in a host page: no title, marking, theme
+#: toggle or figure number (the host page numbers its own figures), no
+#: page margin; and, with `pageScroll`, a vertical swipe over the figure
+#: scrolls the page rather than being taken by the figure.
+_MOUNT_CSS = """
+{s} {{ padding: 0; margin: 0; }}
+{s} h1, {s} .themetoggle, {s} .marking {{ display: none; }}
+{s} section {{ margin: 0; }}
+{s} .caption strong {{ display: none; }}
+{s}.pagescroll canvas {{ touch-action: pan-y pinch-zoom; }}
+"""
+
+#: The license the renderer carries at its head, since it is a copy of
+#: the package's code that travels on its own (the repository's
+#: LICENSE, word for word; a test holds the two together).
+_LICENSE_NOTICE = """MIT License
+
+Copyright (c) 2026 Brandon Zwink
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+
+_RENDERER = r"""/*! Visual Dynamics figure renderer, visualdynamics __VERSION__,
+    figure format __FORMAT__. Written by visualdynamics.export_figure.
+
+__NOTICE__*/
+(function () {
+'use strict';
+const FORMAT = __FORMAT__;
+const VERSION = '__VERSION__';
+const CSS = __CSS__;
+/* a host page whose style-src takes a nonce rather than 'unsafe-inline'
+   gives this script one; the stylesheet it adds carries the same */
+const NONCE = (document.currentScript && document.currentScript.nonce) || '';
+function addStyle(doc) {
+  if (doc.querySelector('style[data-visualdynamics]')) return;
+  const style = doc.createElement('style');
+  style.setAttribute('data-visualdynamics', VERSION);
+  if (NONCE) style.nonce = NONCE;
+  style.textContent = CSS;
+  (doc.head || doc.documentElement).appendChild(style);
+}
+/* the page's own viewers, bound to the host's element in place of the
+   document: `_JS_BODY`, as the one-file page runs it */
+function drawFigure(HOST, DATA, PAGE_SCROLL) {
+const BODY = HOST;
+const root = document.createElement('div'); HOST.appendChild(root);
+const FRAME_HEIGHT = () => HOST.clientHeight;
+__BODY__
+}
+function mount(host, data, options) {
+  if (!host || host.nodeType !== 1)
+    throw new TypeError('mount needs the element to draw the figure in');
+  if (!data || data.format !== FORMAT)
+    throw new Error('this renderer draws figure format ' + FORMAT
+                    + ', the data is format ' + (data ? data.format : 'none'));
+  const pageScroll = !!(options && options.pageScroll);
+  addStyle(host.ownerDocument);
+  host.textContent = '';
+  host.classList.add('__SCOPE__');
+  host.classList.toggle('pagescroll', pageScroll);
+  drawFigure(host, data, pageScroll);
+  return host;
+}
+function load(host, url, options) {
+  return fetch(url, {credentials: 'same-origin'}).then(response => {
+    if (!response.ok) throw new Error(url + ': ' + response.status);
+    return response.json();
+  }).then(data => mount(host, data, options));
+}
+window.VisualDynamicsFigure = Object.freeze(
+  {mount, load, format: FORMAT, version: VERSION});
+})();
+"""
+
+#: one plain rule, `selectors { declarations }`, with nothing nested
+_RULE = re.compile(r'\s*([^{}@]+?)\s*\{([^{}]*)\}')
+
+
+def scoped_css(css: str, scope: str = FIGURE_SCOPE) -> str:
+    """`css` with every rule confined to the elements under `scope`.
+
+    The page's stylesheet styles a whole document: `:root` holds its
+    colors, `body` its font and `html.fill` the one-figure layout. Under
+    a scope those become the scope element itself, `.fill` a class on
+    it, and every other selector a descendant of it. `@media` blocks
+    are scoped inside. Any other at-rule, or a selector reaching above
+    the body, is refused: a rule this cannot place would style the host
+    page.
+    """
+    css = re.sub(r'/\*.*?\*/', '', css, flags=re.DOTALL)
+
+    def selector(one: str) -> str:
+        one = ' '.join(one.split())
+        if one == '*':
+            return f'{scope}, {scope} *'
+        if one.startswith(':root'):
+            return scope + one[len(':root'):]
+        if one == 'html.fill body':
+            return f'{scope}.fill'
+        if one.startswith('html.fill '):
+            return f'{scope}.fill {one[len("html.fill "):]}'
+        if one == 'body' or one.startswith(('body.', 'body:')):
+            return scope + one[len('body'):]
+        if one.startswith(('html', 'body')):
+            raise ValueError(f'cannot scope the selector {one!r}')
+        if one.startswith('.marked '):
+            # `marked` is a class of the body's, so of the scope's
+            return scope + one
+        return f'{scope} {one}'
+
+    def rules(text: str) -> list[str]:
+        out, at = [], 0
+        while text[at:].strip():
+            start = at + len(text[at:]) - len(text[at:].lstrip())
+            if text.startswith('@', start):
+                if not text.startswith('@media', start):
+                    raise ValueError('cannot scope the at-rule '
+                                     + repr(text[start:start + 30]))
+                open_ = text.index('{', start)
+                depth, end = 1, open_ + 1
+                while depth:
+                    depth += {'{': 1, '}': -1}.get(text[end], 0)
+                    end += 1
+                out.append(' '.join(text[start:open_].split()) + ' { '
+                           + ' '.join(rules(text[open_ + 1:end - 1])) + ' }')
+                at = end
+                continue
+            found = _RULE.match(text, at)
+            if found is None:
+                raise ValueError('cannot read the rule at '
+                                 + repr(text[start:start + 40]))
+            selectors = ', '.join(selector(s) for s in found.group(1).split(','))
+            out.append(f'{selectors} {{ {" ".join(found.group(2).split())} }}')
+            at = found.end()
+        return out
+
+    return '\n'.join(rules(css)) + '\n'
+
+
+def renderer_js(version: str) -> str:
+    """The figure renderer's text: one script for every figure of
+    format `FIGURE_FORMAT`, marked with the package `version` that
+    wrote it."""
+    css = scoped_css(_CSS) + _MOUNT_CSS.format(s=FIGURE_SCOPE)
+    return (_RENDERER.replace('__NOTICE__', _LICENSE_NOTICE)
+            .replace('__VERSION__', version)
+            .replace('__FORMAT__', str(FIGURE_FORMAT))
+            .replace('__SCOPE__', FIGURE_SCOPE.lstrip('.'))
+            .replace('__CSS__', json.dumps(css))
+            .replace('__BODY__', _JS_BODY))

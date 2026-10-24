@@ -397,3 +397,8 @@ def test_independent_drives_are_never_said_to_be_coupled_by_chance():
         lines = reading.frequency > 0.0
         assert np.nanmedian(reading.reference[0, 1, lines]) < 0.03
     assert named == 0
+
+
+def test_independent_drives_are_not_said_to_be_explained_by_each_other():
+    reading = _history().read_partial_coherence()
+    assert not any('explained completely' in note for note in reading.notes)

@@ -126,6 +126,10 @@ of shifts beside ([comparing signatures](signature-comparison.md)).
 `plot_dwell(history, specification)` draws a held tone's level against
 time, the reading the sine view's Dwell readout shows ([Reading a
 dwell against time](dwell.md)).
+`plot_import_preview('run.csv')` draws each channel of a delimited text
+import as read, its missing samples crossed and a dead channel named,
+the preview the import dialog shows ([Importing a time history from
+delimited text](text-import.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

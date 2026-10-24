@@ -821,6 +821,45 @@ def dwell():
           f'{reading.describe()}')
 
 
+def text_import():
+    """A recorder's text export read as it would be imported: a preamble
+    stating 5,120 samples a second, a header with each unit in brackets,
+    the time written to six places, and four channels: a random control
+    channel in g, a 40 Hz drive in volts, a monitor that dropped out for
+    a tenth of a second (empty cells) and a channel that never moved."""
+    import tempfile
+    import warnings
+
+    import numpy as np
+
+    from visualdynamics.io.delimited import read_delimited
+    from visualdynamics.plot import plot_import_preview
+
+    rate, seconds = 5120.0, 1.0
+    t = np.arange(int(rate * seconds)) / rate
+    rng = np.random.default_rng(11)
+    control = rng.standard_normal(t.size) * 1.2
+    drive = 0.8 * np.sin(2.0 * np.pi * 40.0 * t)
+    monitor = 1.1 * control + 0.05 * rng.standard_normal(t.size)
+    gap = (t >= 0.42) & (t < 0.52)
+    lines = ['Recorder export', 'Sample Rate: 5120 Hz',
+             'Time (s),Control (g),Drive (V),Monitor (g),Spare (g)']
+    for k in range(t.size):
+        lines.append(f'{t[k]:.6f},{control[k]:.5f},{drive[k]:.5f},'
+                     f'{"" if gap[k] else format(monitor[k], ".5f")},0.0')
+    with tempfile.TemporaryDirectory() as folder:
+        path = os.path.join(folder, 'run.csv')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines) + '\n')
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            read_delimited(path)
+        plot_import_preview(path, show=False, size=(1000, 820),
+                            path=str(OUT / 'text-import.png'))
+    for note in caught:
+        print(f'text import: {note.message}')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -839,6 +878,7 @@ def main():
     replication_fit()
     stroke_readout()
     dwell()
+    text_import()
     print('done')
 
 

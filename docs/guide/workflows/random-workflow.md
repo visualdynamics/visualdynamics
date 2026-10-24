@@ -56,6 +56,14 @@ as a new `.nc4` with every channel and every setting of the original,
 its clock starting at zero. **File → Truncate Rattlesnake File…** opens
 the same window for any run, whatever its size, with no import.
 
+A run exported as text (a `.csv` or a recorder's `.txt`) imports the
+same way, through a dialog that shows the delimiter, the time column,
+the sample rate and each channel's name and unit as found, on a preview
+of the channels; [Importing a time history from delimited
+text](../text-import.md) says what is found and what is refused. Such
+a file carries no specification and no channel table, so those slots
+stay gray until they are added.
+
 ![The imported run: the control time histories drawn, the
 specification and channel table beside them in the tree, and the
 type's remaining slots in gray](../images/random-import.png)

@@ -36,6 +36,7 @@ One row per format; R/W means both read and written:
 | STEP / IGES ⁶ | `.step`/`.stp`/`.iges`/`.igs` | R | — | — | — |
 | MATLAB ⁷ | `.mat` | R/W | R/W | R/W | R/W |
 | Engineering Sciences Common Data Format ⁸ | `.h5` | R/W | R/W | R/W | R/W |
+| Delimited text ⁹ | `.csv` (read also as `.tsv`, `.txt`, `.tab`, `.asc` and `.prn`) | — | — | R/W (time histories) | — |
 
 Three more go in and out whole rather than as one object. The first is
 the project file itself: `.vdyn`, with everything a project holds;
@@ -287,6 +288,16 @@ A file is written as `.h5`, the container's suffix, which is how the
 format's files are named where it is used; a file named `.hdf5` or
 `.escdf` keeps its name, and reading looks at the contents, never the
 suffix.
+
+⁹ Delimited text is the column export of controllers, recorders and
+spreadsheets: one column per channel, with or without a time column,
+a header and a preamble. The reader finds the delimiter, the decimal
+point, the header, the units, the time column and a stated sample
+rate, takes any of them as stated instead, and refuses with the line
+and column what it cannot read; [Importing a time history from
+delimited text](guide/text-import.md) gives the rules. A time history
+is written back as a `.csv` with a header of names and units that the
+reader takes back in, in the display system itself, g included.
 
 SEP 005, the sdypy project's standard for time series, is exchanged in
 the API rather than as a file, since it is an in-memory dict format.

@@ -24,6 +24,8 @@ that is not an alpha.
 - [Units](units.md): SI inside, display units where values are shown
   or written out
 - [Plotting](plotting.md): every plot the app draws, from code
+- [Importing a time history from delimited text](text-import.md): a
+  CSV or a recorder's text export, its layout found and checked
 - [The modal workflow](workflows/modal-workflow.md): the app and a
   script, step by step
 - [How the mode fitting works](modal-fitting.md): the algorithm, and

@@ -447,6 +447,27 @@ def _draw_transmissibility(painter, color):
     painter.drawPath(_curve([(42, 40), (50, 36), (58, 34)]))
 
 
+def _draw_notch(painter, color):
+    """A flat control line with a notch cut down into it, hatched, under
+    a dashed reference.
+
+    What the button puts on the plot, in miniature: the reference the
+    controller would hold, and the band where a limit channel pulls the
+    control below it, hatched as on the plot so it reads without color.
+    """
+    reference = _pen(color, 3)
+    reference.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(reference)
+    painter.drawLine(QPointF(6, 20), QPointF(58, 20))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color), Qt.BrushStyle.BDiagPattern))
+    painter.drawRect(QRectF(24, 8, 16, 50))
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPath(_curve([(6, 24), (24, 24), (28, 30), (32, 52),
+                             (36, 30), (40, 24), (58, 24)]))
+
+
 def _draw_tone(painter, color):
     """A spike standing on a flat floor, a triangle on its top.
 
@@ -2345,6 +2366,7 @@ def control_icon(name: str) -> QIcon:
      'filter': _draw_filter,
      'truncate': _draw_truncate, 'octave': _draw_octave,
      'tone': _draw_tone, 'transmissibility': _draw_transmissibility,
+     'notch': _draw_notch,
      'confidence': _draw_confidence,
      'amplitude': _draw_amplitude,
      'log_axis': _draw_log_axis,

@@ -171,6 +171,15 @@ exceedances striped, the Scaling field reading 0 dB, and the
 compliance table accounting for all eight
 channels](../images/random-comparison.png)
 
+Before a full-level run with limit channels, the low-level run answers
+where they will notch. Compute its FRFs against the control channel,
+select them with the specification (and the limit profiles, if they are
+held apart from it) and press **Notch Prediction**: each limit channel
+is predicted at full level against its profile, and each notch the
+controller would cut is given with its band, its depth and whether it
+leaves the tolerance ([Predicting the notch before the
+test](../limit-prediction.md)).
+
 ### 6. Geometry, photos, report
 
 Drag the article's geometry in and declare its units, drop the setup

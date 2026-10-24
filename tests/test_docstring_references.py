@@ -61,6 +61,9 @@ THEORY = {
                             'read through before its first pass',
     'core.stroke': 'the compensated pulse and the stroke, velocity and '
                    'force it needs of a shaker',
+    'core.limit_prediction': 'the output autospectrum of a single-input '
+                             'linear system, through which the notch is '
+                             'predicted',
     'core.dwell': 'the build-up and free decay of a resonator under a '
                   'held tone',
     'core.transmissibility': 'the H1 estimate, the coherence and the '

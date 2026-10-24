@@ -76,6 +76,9 @@ that is not an alpha.
 - [The two transmissibilities, and what H1 is
   worth](transmissibility.md): the ASD ratio beside H1, and the band
   H1's coherence and averages give
+- [Predicting the notch before the test](limit-prediction.md): where
+  each limit channel would exceed its profile at full level, and the
+  notch it would cut in the control
 - [Checking a sine record for distortion](sine-distortion.md): the
   record less the tracked tones against the tones, along the sweep,
   against a limit

@@ -3563,6 +3563,75 @@ def plot_transmissibility(reading: Any, *, spread: float = 1.0,
                         size=size)
 
 
+def plot_limit_prediction(transmissibility: Any, specification: Any,
+                          profiles: Any = None, *, tolerance: str = 'abort',
+                          unit_system: UnitSystem | None = None,
+                          theme: Any = None,
+                          path: str | os.PathLike | None = None,
+                          show: bool = True, title: str | None = None,
+                          size: tuple[int, int] | None = None) -> Any:
+    """Draw the notch a set of limit channels would cut in a random test
+    at full level, predicted from the transmissibilities from the control
+    channel.
+
+        visualdynamics.plot.plot_limit_prediction(
+            project['Low level H1'], project['Profile'],
+            project['Limit profiles'], path='notch.png')
+
+    From `core.limit_prediction.predict_limits`, drawn by
+    `plot.limit_prediction.build_limit_prediction`: the control row on
+    top, the reference dashed, the control the controller could hold
+    solid, the tolerance's lower edge dotted and every notch hatched
+    with its depth and channel written on it; then a row per response
+    channel, its predicted response solid against its limit profile
+    dashed, the bands over it hatched. Each row's title is its reading
+    in words.
+
+    Parameters
+    ----------
+    transmissibility : Frf
+        The response channels over the control channel.
+    specification : Specification
+        The reference at the control channel, with its tolerance.
+    profiles : Psd, optional
+        The limit profiles; the specification's own records at the
+        response channels when omitted.
+    tolerance : {'abort', 'warning'}, default 'abort'
+        Which tolerance a notch is read against.
+    unit_system, theme, path, show, title
+        As for every standalone plot.
+    size : tuple of int, optional
+        The image's size; 1000 wide and taller with every channel when
+        omitted.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        Whatever `predict_limits` refuses.
+    """
+    from ..core.limit_prediction import predict_limits
+    from .limit_prediction import build_limit_prediction
+
+    prediction = predict_limits(transmissibility, specification, profiles,
+                                tolerance=tolerance)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_limit_prediction(widget, prediction,
+                                      unit_system=unit_system, theme=theme)
+
+    rows = 1 + len(prediction.channels)
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'Limit and notch prediction at '
+                                       f'{prediction.control_label}',
+                        size=size or (1000, 160 + 280 * rows))
+
+
 def build_ratio(layout: Any, signal: Any, floor: Any,
                 records: Sequence[int] | None = None,
                 theme: Any = None) -> int:

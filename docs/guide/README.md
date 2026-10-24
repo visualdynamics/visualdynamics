@@ -92,6 +92,9 @@ that is not an alpha.
 - [Writing a random specification by slope](breakpoint-slopes.md): a
   level, a slope in dB per octave and the next frequency, each
   segment's area and the running rms
+- [Judging a multi-point control run](multi-point.md): the composite
+  of several control channels against its band, and each channel
+  against its own
 - [Checking a spectrum against its record](rms-check.md): the rms from
   the area under an ASD beside the rms of its time history, and the
   scaling errors the gap names

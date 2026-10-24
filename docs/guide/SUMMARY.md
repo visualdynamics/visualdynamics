@@ -23,6 +23,7 @@
     - [How a comparison is judged](compliance.md)
     - [Lines outside a band by chance](comparison-chance.md)
     - [Writing a random specification by slope](breakpoint-slopes.md)
+    - [Judging a multi-point control run](multi-point.md)
     - [Checking a spectrum against its record](rms-check.md)
     - [Reading a tone off an ASD](tone-readout.md)
     - [Reading a tone's amplitude from a record](amplitude-spectrum.md)

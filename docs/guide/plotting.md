@@ -123,6 +123,10 @@ slope](breakpoint-slopes.md)).
 comparison as its level over the target in dB, the lines outside each
 band counted beside what chance puts there
 ([Lines outside a band by chance](comparison-chance.md)).
+`plot_multi_point(psd, specification)` draws a multi-point control
+run, the composite heavy over its channels with both bands, the
+Composite reading ([Judging a multi-point control
+run](multi-point.md)).
 `plot_shock_check(history)` draws a shock record's raw velocity beside
 its positive and negative spectra, a figure the app does not show: the
 Shocks view states the same check in words

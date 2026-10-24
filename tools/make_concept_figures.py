@@ -1770,6 +1770,56 @@ def limit_prediction():
                           path=str(OUT / 'limit-prediction.png'))
 
 
+def multi_point():
+    """Four control channels on a fixture under average control: the
+    controller holds their mean to the reference, so the composite
+    sits on it. One channel rides a fixture mode near 600 Hz up past
+    the composite band and stays inside its own (an average of four
+    lets no channel run more than 6 dB over), and one reads less and
+    less above 800 Hz, as a sensor on a cracked mount does, and falls
+    out of its own band while the composite is inside."""
+    import numpy as np
+
+    from visualdynamics.core.compliance import log_interpolate
+    from visualdynamics.core.data import Psd
+    from visualdynamics.core.multi_point import multi_point as read
+    from visualdynamics.plot import plot_multi_point
+
+    spec = _breakpoints()
+    f = np.arange(20.0, 2000.0 + 0.5, 2.5)
+    target = log_interpolate(f, spec.abscissa, np.real(spec.ordinate[0]))
+    target = np.where(np.isfinite(target), target, 0.002)
+    octaves = np.log2(np.maximum(f, 1.0) / 20.0)
+    # each channel's transmissibility from the interface: one flat, one
+    # through a fixture mode at 600 Hz, one whose reading falls away
+    # above 800 Hz, one a little high everywhere
+    gains = np.vstack([
+        np.ones(f.size),
+        1.0 + 12.0 / (1.0 + ((f - 600.0) / 45.0) ** 2),
+        1.0 / (1.0 + (f / 800.0) ** 6),
+        np.full(f.size, 1.3) * 10 ** (0.05 * np.sin(octaves * 2.0)),
+    ])
+    rng = np.random.default_rng(11)
+    # the scatter of an average of about 120 DOF, each channel its own
+    scatter = rng.chisquare(120.0, gains.shape) / 120.0
+    values = target * gains / gains.mean(axis=0) * scatter
+    run = Psd(f, values, response_dof=['1Z+', '2Z+', '3Z+', '4Z+'],
+              ordinate_dim=['acceleration**2/frequency'] * 4,
+              ordinate_unit=['m/s**2'] * 4)
+    run.scale_db = 0
+    plot_multi_point(run, spec, channels=[0, 1, 2, 3],
+                     individual_band=(-6.0, 6.0), show=False,
+                     size=(1000, 680), path=str(OUT / 'multi-point.png'))
+    reading = read(spec, run, [0, 1, 2, 3], individual_band=(-6.0, 6.0))
+    print(f'multi-point: composite {reading.outside_lines} lines outside '
+          f'{reading.composite_text}, '
+          f'{reading.result["difference_db"]:+.2f} dB rms; '
+          + '; '.join(f'{c.label} {c.outside_lines} out, '
+                      f'{c.hidden_lines} hidden, '
+                      f'{c.result["difference_db"]:+.2f} dB'
+                      for c in reading.channels))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -1807,6 +1857,7 @@ def main():
     mixed_mode()
     matrix_comparison()
     limit_prediction()
+    multi_point()
     print('done')
 
 

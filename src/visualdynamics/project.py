@@ -1479,6 +1479,43 @@ class Project(dict):
             return active, self[active]
         return None
 
+    def channel_table_for(self, name: Any) -> tuple[str, ChannelTable] | None:
+        """(name, table) for the channel table linked with an object:
+        the one lookup the overload check and the shape values share.
+
+        For a time history, the first table in its group with a row
+        naming one of its channels: a table in the group that names
+        none of them describes some other recording and is passed over,
+        as the role pairing passes it over. For anything else (a shape
+        set, whose values are read at a table's channels), the first
+        table in its group. A table has none of its own.
+
+        Parameters
+        ----------
+        name : str or object
+            The object.
+
+        Returns
+        -------
+        tuple of (str, ChannelTable), or None
+            The table's name and the table, or None when no linked table
+            fits.
+        """
+        # One lookup where there were two: this, and the shape values'
+        # first-table-in-the-group (Brandon, 2026-10-23).
+        name = self.name_of(name)
+        obj = self.get(name)
+        if isinstance(obj, TimeHistory):
+            for other, _rows in self._role_partners(name):
+                return other, self[other]
+            return None
+        if obj is None or isinstance(obj, ChannelTable):
+            return None
+        for member in self.object_group_of(name) or []:
+            if member != name and isinstance(self[member], ChannelTable):
+                return member, self[member]
+        return None
+
     def _group(self, name: str) -> ObjectGroup | None:
         return next((group for group in self.object_groups
                      if name in group['members']), None)
@@ -4659,14 +4696,6 @@ class Project(dict):
         view = matrix_at(self[name], self._shape_dofs(name, dofs), form)
         return plot_transformation(found[1], view, row, **kwargs)
 
-    def _channel_table_of(self, name: str) -> ChannelTable | None:
-        """The channel table in `name`'s object group, the first when
-        there are several, or None."""
-        for member in self.object_group_of(name) or []:
-            if member != name and isinstance(self[member], ChannelTable):
-                return self[member]
-        return None
-
     def _shape_dofs(self, name: str, dofs: Any) -> list[str] | None:
         """`dofs` as DOF strings for the shape values of `name`: a list as
         given, None for every DOF of the set, or a channel choice read
@@ -4675,10 +4704,11 @@ class Project(dict):
         the window's drop-down and a script's `table`."""
         if dofs is None or not isinstance(dofs, str):
             return None if dofs is None else [str(dof) for dof in dofs]
-        table = self._channel_table_of(name)
-        if table is None:
+        found = self.channel_table_for(name)
+        if found is None:
             raise ValueError(f'{name} has no channel table in its object '
                              f'group to take {dofs!r} channels from')
+        table = found[1]
         strings = table.dof_strings()
         # a channel with no node or direction yet names no DOF
         return [strings[i] for i in table.chosen(dofs)
@@ -5415,24 +5445,11 @@ def _has_both_sides(history) -> bool:
 
 
 def _table_identities(table, history) -> list:
-    """Each channel-table row as the (DOF, quantity) channel it names —
-    the table's channel type is the quantity, the same word — or None
-    where it names none of `history`'s channels. A row with no channel
-    type names the history's channel at that DOF when there is exactly
-    one. With no history, each row's own (DOF, type)."""
-    dofs, types = table.dof_strings(), table.types()
-    if history is None:
-        return list(zip(dofs, types))
-    identities = history.channel_identities()
-    known = set(identities)
-    out = []
-    for dof, kind in zip(dofs, types):
-        if kind:
-            out.append((dof, kind) if (dof, kind) in known else None)
-        else:
-            at = [identity for identity in identities if identity[0] == dof]
-            out.append(at[0] if len(at) == 1 else None)
-    return out
+    """Each channel-table row as the (DOF, quantity) channel it names,
+    or None where it names none of `history`'s channels; with no
+    history, each row's own (DOF, type). `ChannelTable.identities`
+    holds the rule."""
+    return table.identities(history)
 
 
 def _is_time(project, obj):

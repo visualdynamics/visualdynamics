@@ -806,6 +806,42 @@ class ChannelTable:
             self.set_cell('direction', i, direction)
         return len(rows)
 
+    def identities(self, history: Any = None) -> list[Any]:
+        """Each row as the (DOF, quantity) channel of `history` it names.
+
+        The row's channel type is the quantity, the same word a time
+        history's `ordinate_dim` uses. A row with no channel type names
+        the history's channel at its DOF when there is exactly one
+        there. A row that names none of the history's channels is None.
+
+        Parameters
+        ----------
+        history : TimeHistory, optional
+            The recording the table describes. Without one, each row's
+            own (DOF, type) is returned.
+
+        Returns
+        -------
+        list of (str, str) or None
+            One entry per row.
+        """
+        # The rule the project's role pairing used privately, made the
+        # table's so the overload check reads ranges by the same match.
+        dofs, types = self.dof_strings(), self.types()
+        if history is None:
+            return list(zip(dofs, types))
+        identities = history.channel_identities()
+        known = set(identities)
+        out: list[Any] = []
+        for dof, kind in zip(dofs, types):
+            if kind:
+                out.append((dof, kind) if (dof, kind) in known else None)
+            else:
+                at = [identity for identity in identities
+                      if identity[0] == dof]
+                out.append(at[0] if len(at) == 1 else None)
+        return out
+
     def roles(self) -> list[str]:
         """Each channel's declared role ('reference', 'response' or
         'monitor'), '' where undeclared."""

@@ -50,6 +50,8 @@ THEORY = {
                          'bandwidth and leakage of a window',
     'core.time_statistics': 'the moments, the Gaussian tails, the crossing '
                             'rate and the expected largest peak',
+    'core.overload': 'the range a channel is read against, its clipping and '
+                     'the headroom over its peak',
     'core.replication_segments': 'the averaged periodogram, the shock '
                                  'response spectrum and the tapered '
                                  'cosine window each segment is read by',

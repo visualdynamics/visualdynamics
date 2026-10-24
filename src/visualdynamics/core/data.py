@@ -52,7 +52,9 @@ from numpy.typing import ArrayLike
 if TYPE_CHECKING:
     from ..units import UnitSystem
     from .averaging import Averaging
+    from .channel_table import ChannelTable
     from .half_power import HalfPower
+    from .overload import OverloadCheck
     from .time_statistics import TimeStatistics
     from .tone_readout import ToneReading
 
@@ -1839,6 +1841,37 @@ class TimeHistory(DataArray):
         """
         from .time_statistics import record_statistics
         return record_statistics(self, record, **options)
+
+    def overload_check(self, ranges: ChannelTable | ArrayLike | float,
+                       **options: Any) -> OverloadCheck:
+        """Read each channel against its range: the samples on the
+        rail (a count, a share and a rate), the crest factor, the
+        headroom of the range over the largest peak in dB, and that
+        peak scaled to the next level, each channel judged for the rail,
+        the next level and samples beyond the range.
+
+        `core.overload.overload_check` does the reading, over the span
+        the kurtosis bars read, and says how;
+        `visualdynamics.plot.plot_overload` draws it.
+
+        Parameters
+        ----------
+        ranges : ChannelTable, array_like or float
+            The channel table describing this record (its Range in
+            volts over its Sensitivity), or the ranges in SI, one per
+            channel or one for all.
+        **options
+            `records`, `step_db`, `margin` and `rail_samples`, as
+            `core.overload.overload_check` takes them.
+
+        Returns
+        -------
+        OverloadCheck
+            Every channel's numbers, in SI as the record is stored, its
+            flags and the judgement.
+        """
+        from .overload import overload_check
+        return overload_check(self, ranges, **options)
 
     def srs_windows(self, shocks: Sequence[Any] | None = None
                     ) -> list[Any]:

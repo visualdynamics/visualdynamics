@@ -33,6 +33,9 @@ that is not an alpha.
 - [Reading a record's time statistics](time-statistics.md): the
   moments, the rail, the tails against the Gaussian, the expected
   largest peak and the kurtosis frame by frame
+- [Checking each channel against its range](overload.md): the samples
+  on the rail, the headroom over the peak and the peak at the next
+  level, from the channel table's ranges
 - [The transient workflow](workflows/transient-workflow.md): a target
   waveform compared with what the test article did
 - [Judging a replication by segment](replication-segments.md): each

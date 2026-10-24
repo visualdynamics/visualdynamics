@@ -93,7 +93,9 @@ here can make it for the reader:
 References
 ----------
 The moments, the Gaussian tails, the crossing rate and the expected
-largest peak are standard results; these are where they are set out.
+largest peak are standard results; this is where they are set out. The
+skewness and kurtosis are `core.kurtosis`'s estimators, which cites
+them.
 
 1. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
    Measurement Procedures*, 4th ed. Wiley. The moments of a record, the
@@ -101,14 +103,6 @@ largest peak are standard results; these are where they are set out.
    spectrum's moments, the expected largest peak of a stationary
    Gaussian process over a duration, and the statistical bandwidth
    that sets how many independent values a stretch of record holds.
-2. Newland, D. E. (1993). *An Introduction to Random Vibrations,
-   Spectral and Wavelet Analysis*, 3rd ed. Longman. The crossing rate
-   and the distribution of the largest peak in a run, and how slowly it
-   grows with the run's length.
-3. Joanes, D. N., & Gill, C. A. (1998). "Comparing measures of sample
-   skewness and kurtosis." *Journal of the Royal Statistical Society:
-   Series D*. The plain moment ratios reported here, and their sampling
-   scatter.
 """
 
 from __future__ import annotations

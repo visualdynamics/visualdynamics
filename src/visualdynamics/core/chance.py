@@ -67,22 +67,15 @@ References
 ----------
 That an averaged autospectrum is the true one times a chi-square
 variable over its degrees of freedom is the standard result for the
-averaged periodogram; the degrees of freedom of a weighted sum of such
-estimates are Satterthwaite's.
+averaged periodogram, and this is where it is set out. The degrees of
+freedom of a weighted sum of such estimates (Satterthwaite's
+approximation) and the correlation a window leaves between adjacent
+lines are worked out above, from the variance of the sum and from the
+window itself.
 
 1. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
    Measurement Procedures*, 4th ed. Wiley. The sampling distribution
    of an autospectral density estimate and its random error.
-2. Satterthwaite, F. E. (1946). "An Approximate Distribution of
-   Estimates of Variance Components." *Biometrics Bulletin*, 2(6),
-   110-114. [doi:10.2307/3002019](https://doi.org/10.2307/3002019)
-   The equivalent degrees of freedom of a weighted sum of chi-square
-   variables.
-3. Harris, F. J. (1978). "On the Use of Windows for Harmonic Analysis
-   with the Discrete Fourier Transform." *Proceedings of the IEEE*,
-   66(1), 51-83.
-   [doi:10.1109/PROC.1978.10837](https://doi.org/10.1109/PROC.1978.10837)
-   The correlation a window leaves between adjacent lines.
 """
 
 from __future__ import annotations

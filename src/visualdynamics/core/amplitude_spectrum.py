@@ -63,10 +63,13 @@ autospectrum beside it is scaled.
    66(1), 51-83.
    [doi:10.1109/PROC.1978.10837](https://doi.org/10.1109/PROC.1978.10837)
    Coherent gain, equivalent noise bandwidth and scalloping loss,
-   window by window, and the flat-top window.
+   window by window.
 2. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
    Measurement Procedures*, 4th ed. Wiley. The finite Fourier transform
    of a record and its one-sided spectra.
+3. Brandt, A. (2011). *Noise and Vibration Analysis: Signal Analysis and
+   Experimental Procedures*. Wiley. The flat-top window, for reading
+   a tone's amplitude off a spectrum wherever it falls between lines.
 """
 
 from __future__ import annotations

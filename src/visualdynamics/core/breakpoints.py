@@ -56,8 +56,10 @@ References
 The slope in decibels per octave as a power-law exponent, the level it
 reaches, and the closed-form area under each segment, with its
 logarithmic case at an exponent of minus one, are standard results of
-random vibration practice; this is where they are set out with a
-worked example, which `tests/test_breakpoint_slopes.py` repeats.
+random vibration practice; these are where they are set out, the
+first with a worked example, which `tests/test_breakpoint_slopes.py`
+repeats, and the second with a written spectrum whose printed overall
+level they reproduce.
 
 1. Irvine, T. (2000). ["Integration of the Power Spectral Density
    Function"](https://www.vibrationdata.com/tutorials2/psdinteg.pdf),
@@ -66,6 +68,11 @@ worked example, which `tests/test_breakpoint_slopes.py` repeats.
    rms as the root of the summed areas, and, in its Appendix A, the
    level a slope in decibels per octave reaches over any frequency
    ratio (equation A-12).
+2. GSFC-STD-7000B (2021), *General Environmental Verification
+   Standard (GEVS)*. Table 2.4-4: a workmanship random vibration
+   spectrum written as levels joined by slopes of plus and minus 3 dB
+   per octave, with its overall level printed as 6.8 grms, which these
+   closed forms give as 6.78.
 """
 
 from __future__ import annotations

@@ -60,22 +60,17 @@ Q it reads, and what Q a mode would need to read that low at that rate.
 References
 ----------
 The effect is a standard result of the response of a linear oscillator
-to a tone of changing frequency; these are where it is set out, and
-where the filter the simulation uses comes from.
+to a tone of changing frequency, which the review below credits to
+Lewis (1932) and Cronin (1965); this is where it is set out. The
+one-mass simulation runs through `core.srs`'s filter, which cites its
+source.
 
-1. Lewis, F. M. (1932). "Vibration During Acceleration Through a
-   Critical Speed." *Transactions of the American Society of
-   Mechanical Engineers*. The peak reached by an oscillator swept
-   through its resonance, lower and later the faster it is swept.
-2. Cronin, D. L. (1965). *Response of Linear, Viscous Damped Systems to
-   Excitations Having Time-Varying Frequency.* Doctoral thesis. The
-   same response worked out
-   for linear and logarithmic sweeps, with the shift of the peak and
-   the spread of its width.
-3. Smallwood, D. O. (1981). "An Improved Recursive Formula for
-   Calculating Shock Response Spectra." *Shock and Vibration
-   Bulletin*. The ramp-invariant recursion the one-mass simulation is
-   run through.
+1. Reed, C. C., & Kabe, A. M. (2019). "Peak Response of
+   Single-Degree-of-Freedom Systems to Swept-Frequency Excitation."
+   *The Mathematica Journal*. The response of a one-mass system to
+   linear and octave sweeps in closed form: the faster the sweep, the
+   lower its peak and the further the peak moves in the sweep's
+   direction.
 """
 
 from __future__ import annotations

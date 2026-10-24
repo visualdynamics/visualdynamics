@@ -110,24 +110,20 @@ of millions of samples per channel is better read with the extraction.
 References
 ----------
 The tracking filter here is complex demodulation followed by a
-Butterworth low-pass, integrated with its input held over each sample;
-these are where the three are set out, and the test this reading is
-used to understand.
+Butterworth low-pass from scipy's analog prototype, integrated with
+its input held over each sample, each worked through above; these are
+where reading a tone along a known frequency history, and the test
+this reading is used to understand, are set out.
 
-1. Bloomfield, P. (2000). *Fourier Analysis of Time Series: An
-   Introduction*, 2nd ed. Wiley. Complex demodulation: a component
-   near a known frequency moved to zero and low-passed to read its
-   amplitude and phase as they vary.
-2. Oppenheim, A. V., & Schafer, R. W. (2010). *Discrete-Time Signal
-   Processing*, 3rd ed. Prentice Hall. The Butterworth low-pass and
-   its analog prototype.
-3. Franklin, G. F., Powell, J. D., & Workman, M. L. (1998). *Digital
-   Control of Dynamic Systems*, 3rd ed. Addison-Wesley. A continuous
-   system integrated exactly across a sample with its input held: the
-   zero-order-hold equivalent each mode is stepped with.
-4. IEC 60068-2-6:2007, *Environmental testing - Part 2-6: Tests - Test
-   Fc: Vibration (sinusoidal)*. The swept sine test whose drive level a
-   tracking filter and detector measure.
+1. Brandt, A. (2011). *Noise and Vibration Analysis: Signal Analysis and
+   Experimental Procedures*. Wiley. Order tracking: a component that
+   follows a known frequency history, read as an amplitude and a phase
+   that vary slowly along it.
+2. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 514.8,
+   Table 514.8-III and its note 3: the tolerances of a sinusoidal
+   test, among them the unfiltered RMS held within 5 percent of the
+   filtered RMS, the level a tracking filter reads.
 """
 
 from __future__ import annotations

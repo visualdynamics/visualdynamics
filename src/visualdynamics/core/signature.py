@@ -50,12 +50,18 @@ transmissibility) are refused, since their heights are not one scale.
 
 References
 ----------
-The peak reading is a standard method; this is where it is described.
+The peak reading is a standard method, and the criterion is of the
+kind test documents write; these are where each is described.
 
-1. Ewins, D. J. (2000). *Modal Testing: Theory, Practice and
-   Application*, 2nd ed. Research Studies Press. The peak-amplitude
-   (half-power point) reading of a mode's frequency and Q from its
-   peak, which each mode here is read with before and after.
+1. Piersol, A. G., & Paez, T. L. (Eds.) (2010). *Harris' Shock and
+   Vibration Handbook*, 6th ed. McGraw-Hill. The half-power reading of a
+   resonance, its Q as the peak frequency over the width between the
+   points 3 dB down, which each mode here is read with before and
+   after.
+2. ECSS-E-ST-10-03C Rev.1 (2022), *Space Engineering: Testing*.
+   Requirement 0750143: the resonance search before and after a test,
+   passed when each mode with an effective mass over 10 percent moves
+   less than 5 percent in frequency and 20 percent in amplitude.
 """
 
 from __future__ import annotations

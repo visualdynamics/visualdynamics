@@ -68,22 +68,19 @@ can fit a stroke its one-sided excursion does not.
 
 References
 ----------
-The check is a standard one; these set out what it asks for and why
-integration needs the low end edited first.
+The check is a standard one; this sets out what it asks for and why
+integration needs the low end edited first. The zero-phase filter is
+`core.filters`'s, which cites its own source.
 
-1. MIL-STD-810H (2019), *Environmental Engineering Considerations and
-   Laboratory Tests*, Method 525.2, Time Waveform Replication. Before
-   the first pass the reference is band-limited, filtered of the low
-   content that would over-travel the exciter, its force estimated from
-   the peak acceleration and the total moving mass, and integrated to
-   velocity and displacement.
-2. Boore, D. M., & Bommer, J. J. (2005). "Processing of strong-motion
-   accelerograms: needs, options and consequences." *Soil Dynamics
-   and Earthquake Engineering*. The drift a double integration invents
-   from an offset, and what a high-pass does and does not cure.
-3. Oppenheim, A. V., & Schafer, R. W. (2010). *Discrete-Time Signal
-   Processing*, 3rd ed. Prentice Hall. Zero-phase forward-backward
-   filtering.
+1. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 525.2,
+   Time Waveform Replication, paragraph 4.5.1. Before the first pass
+   the reference is band-limited, filtered of the low content that
+   would over-travel the exciter, its force estimated from the peak
+   acceleration and the total moving mass, and integrated to velocity
+   and displacement, with the caution that the integration can give
+   unreliable answers and that its drift is to be removed without a
+   phase lag.
 """
 
 from __future__ import annotations

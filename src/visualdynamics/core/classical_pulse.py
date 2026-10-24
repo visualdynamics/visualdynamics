@@ -32,10 +32,9 @@ argument, and the document the procedure cites decides its values):
   within a fifth of the nominal pulse's (`VELOCITY_TOLERANCE`). The
   window is part of the rule: a shaker's compensated pulse changes
   velocity by nothing over the whole record, by design, so the area is
-  taken around the main pulse only. The fifth is this package's
-  default, not a document's figure; documents and their revisions
-  differ on this tolerance, so it is set from the one the procedure
-  cites.
+  taken around the main pulse only. The fifth is MIL-STD-810H's;
+  documents and their revisions differ on this tolerance, so it is set
+  from the one the procedure cites.
 
 The nominal velocity change is the area formula of each shape, with
 `A` the peak and `T` the duration: ``2AT/π`` for the half-sine,
@@ -102,16 +101,17 @@ The check is a standard one, and its tolerances are the test
 document's; these set out the pulses, their envelopes and their
 velocity change.
 
-1. IEC 60068-2-27:2008, *Environmental testing - Part 2-27: Tests -
-   Test Ea and guidance: Shock*. The classical pulses, their tolerance
-   envelopes, and the velocity change read over a window around the
-   pulse.
-2. Lalanne, C. (2009). *Mechanical Vibration and Shock Analysis,
-   Volume 2: Mechanical Shock* (2nd ed.). Wiley. The simple shock
-   shapes, their velocity changes and their shock response spectra.
-3. Harris, C. M. and Piersol, A. G., eds. (2002). *Harris' Shock and
-   Vibration Handbook* (5th ed.). McGraw-Hill. Shock testing machines
-   and the pulses they are asked to make.
+1. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 516.8,
+   Figures 516.8-3 to 516.8-5: the classical pulses' tolerance
+   envelopes, a band of a fifth of the peak on the pulse and for 2.5
+   durations either side of it, the duration within a tenth, a
+   sawtooth's fall and a trapezoid's rise and fall within a tenth of
+   the duration, and the velocity change within a fifth over a window
+   from 0.4 durations before the pulse to 0.1 after it.
+2. Piersol, A. G., & Paez, T. L. (Eds.) (2010). *Harris' Shock and
+   Vibration Handbook*, 6th ed. McGraw-Hill. Shock testing machines and
+   the pulses they are asked to make.
 """
 
 from __future__ import annotations
@@ -130,11 +130,10 @@ if TYPE_CHECKING:                                    # pragma: no cover
 # 93.4 in/s against the formula's 84.9: a tenth over, in tolerance, and
 # half the way to the edge of it before anything else varied.
 #
-# 2026-10-16, on review: the velocity tolerance's default was described
-# as what IEC 60068-2-27 commonly asks for, with older revisions at a
-# tenth. Neither figure was checked against the standard, so the fifth
-# is stated as this package's default and the attribution is gone; the
-# value stands until a source says otherwise.
+# The defaults below are MIL-STD-810H Method 516.8's classical-pulse
+# envelope (its Figures 516.8-3 to 516.8-5), the velocity tolerance
+# among them. Other documents and revisions differ, which is why each
+# is an argument.
 
 #: the shapes, as `ClassicalPulse` names them
 SHAPES = ('half-sine', 'sawtooth', 'trapezoid')

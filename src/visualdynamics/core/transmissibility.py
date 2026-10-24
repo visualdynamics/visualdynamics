@@ -85,21 +85,20 @@ References
 ----------
 The single-input frequency response estimate, the coherence function
 and the random error of an estimated gain factor are Bendat and
-Piersol's; the bias of a coherence estimated from few averages is
-Carter, Knapp and Nuttall's.
+Piersol's; the discount for overlapped frames is Welch's.
 
 1. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
    Measurement Procedures*, 4th ed. Wiley. The H1 estimate, the
    ordinary coherence function, and the normalized random error of the
    gain factor estimate, sqrt(1 - gamma^2) / (|gamma| sqrt(2 n)), with
    its limit to small errors.
-2. Carter, G. C., Knapp, C. H., & Nuttall, A. H. (1973). "Estimation of
-   the magnitude-squared coherence function via overlapped fast Fourier
-   transform processing." *IEEE Transactions on Audio and
-   Electroacoustics*, 21(4), 337-344.
-   [doi:10.1109/TAU.1973.1162496](https://doi.org/10.1109/TAU.1973.1162496)
-   Why a coherence from few frames reads high, and what overlapped
-   frames are worth.
+2. Welch, P. D. (1967). "The Use of Fast Fourier Transform for the
+   Estimation of Power Spectra: A Method Based on Time Averaging Over
+   Short, Modified Periodograms." *IEEE Transactions on Audio and
+   Electroacoustics*, 15(2), 70-73.
+   [doi:10.1109/TAU.1967.1161901](https://doi.org/10.1109/TAU.1967.1161901)
+   The variance of an average of overlapped frames, which is why such
+   frames are worth fewer independent averages than their count.
 """
 
 from __future__ import annotations

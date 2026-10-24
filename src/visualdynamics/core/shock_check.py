@@ -42,19 +42,17 @@ or an offset does.
 
 References
 ----------
-The check itself is integration and the arithmetic above; these set
-out the tests a record like this comes from and the spectrum the
-check is made before.
+The check itself is integration and the arithmetic above; this sets
+out why a shock record is checked by its velocity before its spectrum
+is read. The spectrum is `core.srs`'s, which cites its filter.
 
-1. MIL-STD-810H (2019), *Environmental Engineering Considerations and
-   Laboratory Tests*, Method 516 (Shock) and Method 517 (Pyroshock).
-   Laboratory shock tests, specified as shock response spectra.
-2. ISO 18431-4:2007, *Mechanical vibration and shock - Signal
-   processing - Part 4: Shock-response spectrum analysis*. The
-   spectrum the check is made before.
-3. Smallwood, D. O. (1981). "An Improved Recursive Formula for
-   Calculating Shock Response Spectra." *Shock and Vibration
-   Bulletin*. The filter `core.srs` computes the spectrum with.
+1. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 516.8,
+   paragraphs 4.4 and 4.5: a shock record integrated to velocity to
+   show a zero shift, clipping, a cable fault or a slew-rate limit, the
+   false low-frequency content a zero shift puts in the spectrum, and
+   an invalid record discarded; paragraph 2.3.1.1 and Annex A: the
+   spectrum computed by the ramp-invariant algorithm.
 """
 
 from __future__ import annotations

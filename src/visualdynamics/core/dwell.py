@@ -70,15 +70,16 @@ The build-up and the free decay are the transient and the free response
 of a damped one-degree-of-freedom system, a standard result; these are
 where it and the dwell test it is read for are set out.
 
-1. Thomson, W. T., & Dahleh, M. D. (1998). *Theory of Vibration with
-   Applications*, 5th ed. Prentice Hall. The response of a damped
-   oscillator to a harmonic force switched on at rest, its transient
-   decaying as exp(-zeta omega t) into the steady state, and the free
-   decay of the same system, read as the logarithmic decrement.
-2. IEC 60068-2-6:2007, *Environmental testing - Part 2-6: Tests - Test
-   Fc: Vibration (sinusoidal)*. The endurance test by dwelling at fixed
-   frequencies and at resonances found in a search, whose level a
-   tracking detector reads.
+1. Piersol, A. G., & Paez, T. L. (Eds.) (2010). *Harris' Shock and
+   Vibration Handbook*, 6th ed. McGraw-Hill. Basic vibration theory: the
+   free vibration of a damped one-degree-of-freedom system, decaying
+   as exp(-zeta omega t) and read as the logarithmic decrement, and
+   its response to a harmonic force.
+2. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 514.8,
+   paragraph 4.2.1.1: resonance dwells, held on the resonance as it
+   moves by searching for the largest response or by holding the phase
+   between the control and monitoring points.
 """
 
 from __future__ import annotations

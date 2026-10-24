@@ -46,15 +46,20 @@ something the record can show.
 
 References
 ----------
-Decimation and the folding rule are textbook; these are where they and
-the anti-alias filter a sampled record needs are set out.
+Decimation and the folding rule are textbook; these are where the
+folding rule and the anti-alias filter a sampled record needs are set
+out, and decimation is the same rule applied to a record already
+sampled.
 
-1. Oppenheim, A. V., & Schafer, R. W. (2010). *Discrete-Time Signal
-   Processing*, 3rd ed. Prentice Hall. Sampling, aliasing, and
-   downsampling by an integer factor behind a low-pass.
-2. Crochiere, R. E., & Rabiner, L. R. (1983). *Multirate Digital
-   Signal Processing*. Prentice Hall. Decimation and the filter it
-   needs ahead of it.
+1. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 516.8,
+   Annex A, paragraph 1.1: the alias frequency |n Fs - F|, and an
+   anti-alias filter ahead of the sampling that attenuates by 50 dB or
+   more anything that would fold into the passband.
+2. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
+   Measurement Procedures*, 4th ed. Wiley. Sampling, aliasing, and the
+   folding of content above the Nyquist frequency into the band below
+   it.
 """
 
 from __future__ import annotations

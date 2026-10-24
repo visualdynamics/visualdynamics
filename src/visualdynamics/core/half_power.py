@@ -42,18 +42,16 @@ Three things are said rather than hidden:
 
 References
 ----------
-The half-power reading is a standard method; these are where it and the
-peak interpolation are described.
+The half-power reading is a standard method; this is where it is
+described. The parabola through the logarithm of the tallest line and
+its two neighbors, which places the top between lines, is worked
+through where the top is read.
 
-1. Ewins, D. J. (2000). *Modal Testing: Theory, Practice and
-   Application*, 2nd ed. Research Studies Press. The peak-amplitude
-   (half-power point) method of reading a mode's damping from the width
-   of its peak, and the error it carries when modes are close.
-2. Smith, J. O., & Serra, X. (1987). "PARSHL: An Analysis/Synthesis
-   Program for Non-Harmonic Sounds Based on a Sinusoidal
-   Representation." *Proceedings of the International Computer Music
-   Conference*. A parabola through the logarithm of a sampled peak and
-   its two neighbors, to place the top between lines.
+1. Piersol, A. G., & Paez, T. L. (Eds.) (2010). *Harris' Shock and
+   Vibration Handbook*, 6th ed. McGraw-Hill. The half-power bandwidth
+   of a resonance: its Q as the peak frequency over the width between
+   the points where the response has fallen to 1/sqrt(2) of its peak,
+   and the damping ratio as 1/(2Q).
 """
 
 from __future__ import annotations

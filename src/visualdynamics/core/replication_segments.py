@@ -64,20 +64,24 @@ segment's miss is on the page next to the one that shows it.
 
 References
 ----------
-The segment readings are standard estimators; these are where they
-are set out.
+The segments and the forms of their tolerances follow the first of
+these; the readings are standard estimators, set out in the others.
+Each shock segment's spectra come from `core.srs`, which cites its
+filter.
 
-1. Welch, P. D. (1967). "The Use of Fast Fourier Transform for the
+1. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 525.2,
+   paragraph 4.2.2c: a replication judged segment by segment, each
+   stretch stationary, a short transient or a long transient, a
+   stationary or long one tapered at its ends by a 10 percent cosine
+   window, and each held to tolerances of the forms used here.
+2. Welch, P. D. (1967). "The Use of Fast Fourier Transform for the
    Estimation of Power Spectra: A Method Based on Time Averaging Over
    Short, Modified Periodograms." *IEEE Transactions on Audio and
    Electroacoustics*, 15(2), 70-73.
    [doi:10.1109/TAU.1967.1161901](https://doi.org/10.1109/TAU.1967.1161901)
    The averaged, windowed periodogram each ASD here is, the estimator
    `TimeHistory.compute_psds` computes.
-2. Smallwood, D. O. (1981). "An Improved Recursive Formula for
-   Calculating Shock Response Spectra." *Shock and Vibration
-   Bulletin*. The ramp-invariant filter `core.srs` runs for each shock
-   segment's spectra.
 3. Harris, F. J. (1978). "On the Use of Windows for Harmonic Analysis
    with the Discrete Fourier Transform." *Proceedings of the IEEE*,
    66(1), 51-83.

@@ -73,12 +73,20 @@ controller's own prediction and to a measurement.
 References
 ----------
 The double integration and the compensated pulse are standard; these
-are where the arrangement and the integration are set out.
+are where the compensation, and why the table must end at rest, are
+set out.
 
-1. Lalanne, C. (2009). *Mechanical Vibration and Shock Analysis,
-   Volume 2: Mechanical Shock*, 2nd ed. ISTE and Wiley. Shocks on a
-   shaker with pre- and post-pulses, the velocity and displacement
-   they need, and why the table must end at rest.
+1. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 516.8,
+   paragraph 2.3.2.3.2: a classical pulse on a vibration exciter
+   compensated, what the compensation costs the pulse's spectrum, and
+   the band that limits it; Figures 516.8-3 to 516.8-5: the
+   acceleration before and after the pulse, where its compensation
+   goes, held within a fifth of the peak over 2.5 durations either
+   side.
+2. NASA-STD-7003A (2011), *Pyroshock Test Criteria*. Paragraph 4.4: a
+   shock on a shaker changes velocity by nothing over the whole event,
+   or the armature reaches its stops.
 """
 
 from __future__ import annotations

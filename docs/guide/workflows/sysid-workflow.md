@@ -84,6 +84,10 @@ behind it. With one drive, the FRF view's **Transmissibility** toggle
 puts the random error the coherence and the averages give around H1,
 and the ASD ratio beside it, which parts from H1 wherever the
 coherence is low ([The two transmissibilities](../transmissibility.md)).
+With several drives, the multiple coherence's **Partial Coherence**
+toggle says which drive explains each response once the others are
+removed, and whether the drives were independent enough to be told
+apart ([Which drive explains a response](../partial-coherence.md)).
 
 ![Where to click: with Excitation Time History selected (1), press
 Multiple Coherence in the Averaging view (2)](../images/sysid-coherence-click.png)

@@ -71,6 +71,11 @@ that is not an alpha.
 - [Checking a sine record for distortion](sine-distortion.md): the
   record less the tracked tones against the tones, along the sweep,
   against a limit
+- [Which drive explains a response](partial-coherence.md): partial,
+  reference and virtual coherence of a test with several drives
+- [The transformation to a point, and where the rigid body
+  holds](transformation.md): the matrix from channels to six motions,
+  its conditioning, and the residual it leaves against frequency
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):

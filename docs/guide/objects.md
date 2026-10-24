@@ -786,7 +786,10 @@ together and press *Transform to Modal Responses* on the bar (or
 at once, since a transform has no settings, and the status line reports
 the DOFs shared, the DOFs left out and the residual the fit leaves. The
 same report is kept on the object as its `transform_report`
-([`core.transform`](../api/visualdynamics.core.transform.md)).
+([`core.transform`](../api/visualdynamics.core.transform.md)). The
+matrix itself, with its conditioning and the residual it leaves against
+frequency, is a `Transformation` ([The transformation to a
+point](transformation.md)).
 
 Methods: `plot`, `animate`, `animate_pair`, `plot_mac`, `auto_mac`,
 `synthesize_frf`, `covers`, `delete_modes`, `save`.

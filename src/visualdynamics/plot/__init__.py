@@ -3144,6 +3144,51 @@ def plot_transmissibility(reading: Any, *, spread: float = 1.0,
                         size=size)
 
 
+def plot_transformation_residual(reading: Any, *,
+                                 unit_system: UnitSystem | None = None,
+                                 theme: Any = None,
+                                 path: str | os.PathLike | None = None,
+                                 show: bool = True, title: str | None = None,
+                                 size: tuple[int, int] = (1000, 760)) -> Any:
+    """Draw what a transformation explains of the measured power at its
+    inputs, and the residual, against frequency.
+
+        reading = project.read_transformation('Run CPSDs Modal Responses')
+        visualdynamics.plot.plot_transformation_residual(
+            reading, path='residual.png')
+
+    Drawn by `plot.transformation.build_transformation_residual`: above,
+    the measured power solid, the explained part dotted and the residual
+    dashed; beneath, the residual's share with the threshold and the
+    frequency the transformation holds to. The window's Rigid-Body
+    Residual toggle on a transformed density draws the same.
+
+    Parameters
+    ----------
+    reading : TransformationResidual
+        From `Project.read_transformation`,
+        `Transformation.read_residual` or
+        `core.transformation.read_residual`.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from .transformation import build_transformation_residual
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_transformation_residual(
+            widget, reading, unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or 'What the transformation leaves',
+                        size=size)
+
+
 def build_ratio(layout: Any, signal: Any, floor: Any,
                 records: Sequence[int] | None = None,
                 theme: Any = None) -> int:

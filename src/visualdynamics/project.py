@@ -4732,6 +4732,120 @@ class Project(dict):
         view = matrix_at(self[name], self._shape_dofs(name, dofs), form)
         return plot_transformation(found[1], view, row, **kwargs)
 
+    def transformation_of(self, name: Any, dofs: Any = None, *,
+                          max_condition: float | None = None) -> Any:
+        """A rigid set's transformation at a choice of DOFs, as an object
+        (`core.transformation.Transformation.from_shapes`): the matrix
+        from motions at the DOFs to the set's six coordinates, with its
+        conditioning, its residual projector and its table.
+
+        Parameters
+        ----------
+        name : str or ShapeSet
+            Six unscaled rigid-body shapes.
+        dofs : str or sequence of str, optional
+            Where, as for `table`: a list of DOFs or a channel choice
+            ('control', 'response', ...) of the channel table in the
+            set's object group. Every DOF of the set when left out.
+        max_condition : float, optional
+            The conditioning past which it is refused; the package's
+            limit (`core.transformation.MAX_CONDITION`) when left out.
+
+        Returns
+        -------
+        Transformation
+
+        Raises
+        ------
+        ValueError
+            If the set is not unscaled rigid shapes, a DOF is not in it,
+            or the DOFs resolve too little or too poorly.
+        TypeError
+            If the object is not a shape set.
+        """
+        from .core.transformation import MAX_CONDITION, Transformation
+
+        name = self.name_of(name)
+        shapes = self[name]
+        if not isinstance(shapes, ShapeSet):
+            raise TypeError(f'{name} is a {type(shapes).__name__}, not a '
+                            'shape set')
+        chosen = self._shape_dofs(name, dofs)
+        return Transformation.from_shapes(
+            shapes, list(shapes.coordinate) if chosen is None else chosen,
+            max_condition=(MAX_CONDITION if max_condition is None
+                           else float(max_condition)))
+
+    def read_transformation(self, name: Any, *,
+                            threshold: float | None = None) -> Any:
+        """What a rigid-body transformation leaves unexplained of the
+        density it was applied to, line by line
+        (`core.transformation.read_residual`).
+
+        `name` is a density transformed in this project (Transform to
+        Modal Responses) from a cross-spectral density through six
+        unscaled rigid-body shapes. The transformation is rebuilt from
+        the set at the channels the transform used, and the source's
+        measured power at those channels is split into the part the six
+        motions explain and the residual, with the frequency up to which
+        the residual stays under `threshold` of it. The conditioning is
+        reported, not refused: a reading of a poor layout is the point.
+
+        Parameters
+        ----------
+        name : str or object
+            The transformed density, by name or as the object itself.
+        threshold : float, optional
+            The residual's share of the measured power at which the
+            rigid-body assumption is said to stop holding; a tenth when
+            left out (`core.transformation.RESIDUAL_THRESHOLD`).
+
+        Returns
+        -------
+        TransformationResidual
+
+        Raises
+        ------
+        ValueError
+            If the object was not transformed in this project from a
+            cross-spectral density through rigid shapes, or no motion
+            channel of the source is in the set.
+        """
+        from .core.transform import MOTIONS, to_modal
+        from .core.transformation import (
+            RESIDUAL_THRESHOLD,
+            Transformation,
+            read_residual,
+        )
+
+        name = self.name_of(name)
+        provenance = self.provenance.get(name, {})
+        params = provenance.get('params', {}) or {}
+        source = self.get(provenance.get('source'))
+        shapes = self.get(params.get('shapes'))
+        if (provenance.get('verb') != 'transform'
+                or not isinstance(source, Psd)
+                or source.reference_dof is None
+                or not isinstance(shapes, ShapeSet)):
+            raise ValueError(
+                f'{name!r} was not transformed in this project from a '
+                'cross-spectral density, so there is no measured matrix '
+                'behind it to split')
+        picked = params.get('records')
+        _modal, report = to_modal(source, shapes, picked)
+        motions = [quantity for quantity in report.shared
+                   if quantity in MOTIONS]
+        if not motions:
+            raise ValueError(f'no motion density of {provenance["source"]!r} '
+                             f'is at a DOF of {params["shapes"]!r}')
+        quantity = motions[0]
+        transformation = Transformation.from_shapes(
+            shapes, report.shared[quantity], max_condition=np.inf)
+        return read_residual(
+            transformation, source, picked, quantity=quantity,
+            threshold=(RESIDUAL_THRESHOLD if threshold is None
+                       else float(threshold)))
+
     def _channel_table_of(self, name: str) -> ChannelTable | None:
         """The channel table in `name`'s object group, the first when
         there are several, or None."""

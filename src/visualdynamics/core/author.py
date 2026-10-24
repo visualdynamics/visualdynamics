@@ -22,11 +22,13 @@ What an author enters in a `SpecificationDraft`:
   written specification is read (`Specification.interpolation =
   'log_log'`).
 - Each pair's cross term, as a coherence and a phase, from which
-  `S_ij = √(γ² S_ii S_jj) e^{iφ}`. A pair that has not been entered is
-  not assumed to be zero; the specification made from the draft has no
-  cross term for it. Independent channels are a statement too, and the
-  author has to make it. `with_all_pairs` enters one coherence and
-  phase for every pair at once.
+  `S_ij = √(γ² S_ii S_jj) e^{iφ}`. The entries must be able to hold
+  together, which each in [0, 1] does not ensure: a sheet whose entries
+  no set of signals has is refused (`core.matrix_checks`). A pair that
+  has not been entered is not assumed to be zero; the specification
+  made from the draft has no cross term for it. Independent channels
+  are a statement too, and the author has to make it. `with_all_pairs`
+  enters one coherence and phase for every pair at once.
 - The bands: warning and abort, in decibels below and above the
   target, set per channel and per segment between breakpoints, under
   each channel's `symmetric` and `uniform` constraints.
@@ -52,6 +54,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from ..units import UNKNOWN
+from .matrix_checks import entries_refusal
 from .transform import MOTIONS, _modal_dim, modal_dofs
 
 if TYPE_CHECKING:                                    # pragma: no cover
@@ -638,12 +641,15 @@ class SpecificationDraft:
         That is: no channels, a channel named twice, a channel with no
         quantity, fewer than two breakpoints or breakpoints that are
         not positive and increasing, a level that is not finite and
-        positive, a coherence outside [0, 1], a pair across two
-        specifications, a band that is not below and above the
-        target, a band that breaks its channel's `symmetric` or
-        `uniform` constraint, a form other than 'breakpoints' or
-        'lines', a spacing that is not positive, or an entry other than
-        'levels' or 'slopes'. Every draft is checked when it is made.
+        positive, a coherence outside [0, 1], coherence and phase
+        entries that cannot hold together (no set of signals has them;
+        the reason names the channels and the nearest entries that would
+        hold), a pair across two specifications, a band that is not
+        below and above the target, a band that breaks its channel's
+        `symmetric` or `uniform` constraint, a form other than
+        'breakpoints' or 'lines', a spacing that is not positive, or an
+        entry other than 'levels' or 'slopes'. Every draft is checked
+        when it is made.
         """
         n = self.num_channels
         if not n:
@@ -686,6 +692,14 @@ class SpecificationDraft:
                     f'the coherence of {self.channels[i]} and '
                     f'{self.channels[j]} is {value[0]:g}; a coherence lies '
                     'in [0, 1]')
+        # the entries together, not only each on its own: three pairs
+        # each in [0, 1] can still ask for a motion no signals make
+        # (core.matrix_checks), and a sheet that held them would make a
+        # specification no controller can play
+        refusal = entries_refusal(self.channels, self.pairs,
+                                  self.frequencies)
+        if refusal is not None:
+            raise ValueError(refusal)
         segments = len(self.frequencies) - 1
         if len(self.bands) != n:
             raise ValueError(f'{len(self.bands)} band entries for {n} channels')

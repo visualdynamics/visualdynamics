@@ -65,6 +65,9 @@ THEORY = {
                   'held tone',
     'core.transmissibility': 'the H1 estimate, the coherence and the '
                              'random error of a gain factor',
+    'core.matrix_checks': 'the singular values and condition number of a '
+                          'matrix, and the nearest positive semi-definite '
+                          'matrix',
     'core.sine_distortion': 'the distortion of a sinusoidal vibration and '
                             'the tracked tone it is read against',
     'core.breakpoints': 'a slope in dB per octave as a power law, and the '

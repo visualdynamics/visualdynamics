@@ -577,7 +577,7 @@ def time_statistics():
 
 def overload():
     """Three channels against the 25 g range a channel table gives them
-    (5 V over 200 mV/g): the flat profile's twelve seconds at minus
+    (10 V over 400 mV/g): the flat profile's twelve seconds at minus
     6 dB, at full level through the range, and at minus 12 dB."""
     import numpy as np
 
@@ -605,7 +605,7 @@ def overload():
     table = ChannelTable({'channel': [1, 2, 3], 'node': [1, 2, 3],
                           'direction': ['Z+'] * 3, 'unit': ['g'] * 3,
                           'channel_type': ['acceleration'] * 3,
-                          'sensitivity': [200.0] * 3, 'range': [5] * 3})
+                          'sensitivity': [400.0] * 3, 'range': [10] * 3})
     check = history.overload_check(table)
     for channel in check.channels:
         print(channel.describe('g', g))

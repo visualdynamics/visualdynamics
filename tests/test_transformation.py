@@ -636,3 +636,41 @@ def test_the_project_builds_a_sets_transformation_at_chosen_dofs():
     assert t.inputs == tuple(chosen)
     with pytest.raises(TypeError, match='not a shape set'):
         project.transformation_of('Run')
+
+
+def test_a_density_with_other_channels_is_split_to_its_inputs():
+    """A cross-spectral matrix of the two inputs' accelerations, their
+    velocities and an accelerometer elsewhere: the terms touching the
+    other DOF are dropped, the velocity terms are skipped and counted,
+    and what is left transforms as the inputs' matrix alone does."""
+    from visualdynamics.core.averaging import Averaging
+
+    rng = np.random.default_rng(7)
+    a = rng.standard_normal((3, len(T)))
+    v = rng.standard_normal((2, len(T)))
+    whole = visualdynamics.TimeHistory(
+        T, np.vstack([a, v]),
+        response_dof=['1Z+', '2Z+', '9Z+', '1Z+', '2Z+'],
+        ordinate_dim=['acceleration'] * 3 + ['velocity'] * 2)
+    alone = visualdynamics.TimeHistory(
+        T, a[:2], response_dof=['1Z+', '2Z+'],
+        ordinate_dim=['acceleration'] * 2)
+    for history in (whole, alone):
+        history.averaging = Averaging(frame_length=256, overlap=0.5).filled(
+            len(T), 1024.0)
+    out, report = _beam().apply(whole.compute_cpsds(),
+                                quantity='acceleration')
+    expected, _report = _beam().apply(alone.compute_cpsds())
+    assert report.dropped == ['9Z+']
+    assert sum(report.skipped.values()) == 12
+    assert set(report.skipped) == {'velocity**2/frequency',
+                                   'acceleration*velocity/frequency',
+                                   'velocity*acceleration/frequency'}
+    np.testing.assert_allclose(out.ordinate, expected.ordinate)
+
+
+def test_three_inputs_are_all_named_and_no_more_implied():
+    three = Transformation.typed(np.ones((1, 3)), ['1Z+', '2Z+', '3Z+'],
+                                 ['9Z+'])
+    with pytest.raises(ValueError, match=r'\(1Z\+, 2Z\+, 3Z\+\)$'):
+        three.apply(_beam_record(dims='temperature'))

@@ -16,7 +16,7 @@ import re
 
 import numpy as np
 import pytest
-from conftest import fixture_path
+from conftest import fixture_path, web_close, web_read, web_view
 
 import visualdynamics
 from visualdynamics.core.averaging import Averaging
@@ -105,7 +105,7 @@ def test_records_of_one_channel_pooled_count_in_full():
     history.averaging = AVERAGING
     pooled = history.compute_psds()
     caption = record_caption(pooled, 0, averaging=AVERAGING)
-    assert caption.pooled == 2 and caption.nominal_dof == (36,)
+    assert caption.pooled == (2,) and caption.nominal_dof == (36,)
     rows = _rows(caption)
     assert rows['DOF'] == '34.31 equivalent (36 nominal)'
     assert rows['Estimate'].endswith('of 9 frames in each of 2 records')
@@ -219,10 +219,35 @@ def test_the_requirement_row_carries_the_comparisons_own_rms(measured):
     assert caption.limits == ('abort',), 'no warning pair was written'
     said = _rows(caption)['Requirement']
     assert said.startswith('Profile A, reference with its abort limits drawn; ')
-    assert 'rms measured against' in said and 'scaled' not in said
-    scaled = record_caption(measured, 0, specification=spec, scale_db=6)
-    assert _rows(scaled)['Requirement'].endswith(
-        'measured scaled +6 dB for the comparison')
+    assert ' rms measured against ' in said and said.count(' rms specified')
+    assert 'as drawn' not in said and 'asked' not in said
+    assert caption.drawn_rms is None
+
+
+def test_a_scaled_comparison_gives_the_rms_as_measured_and_as_drawn(measured):
+    """Scaled for the comparison, the record has two rms values: the one
+    a reader holding the raw data computes, and the one the figure draws
+    and the verdict judges. The scale itself is said in the figure's
+    legend and caption, not again here."""
+    from visualdynamics.core.compliance import compare
+
+    level = float(np.median(measured.ordinate[0, 10:400]))
+    spec = visualdynamics.Specification(
+        abscissa=np.array([20.0, 400.0]), ordinate=np.full((1, 2), level),
+        response_dof=['1Z+'], ordinate_dim=['acceleration**2/frequency'],
+        abort_upper=np.full((1, 2), 4 * level),
+        abort_lower=np.full((1, 2), level / 4))
+    caption = record_caption(measured, 0, specification=spec, scale_db=6,
+                             unit_system=visualdynamics.SI)
+    raw = compare(spec, measured, 0, 0, 0)['measured_rms']
+    drawn = compare(spec, measured, 0, 0, 6)['measured_rms']
+    assert caption.measured_rms == pytest.approx(raw)
+    assert caption.drawn_rms == pytest.approx(drawn)
+    assert caption.drawn_rms == pytest.approx(raw * 10 ** (6 / 20))
+    said = _rows(caption)['Requirement']
+    assert (f'{raw:.3g} m/s² rms measured, {drawn:.3g} m/s² rms as drawn, '
+            'against ') in said
+    assert 'dB' not in said, 'the legend and the caption say the scale'
 
 
 def test_a_caption_reads_only_a_measured_spectrum(measured):
@@ -245,6 +270,105 @@ def test_the_text_is_every_row_in_order(measured):
     assert text.endswith('Requirement: none drawn.')
     starts = [text.index(f'{label}: ') for label in ROWS]
     assert starts == sorted(starts)
+
+
+def test_unequal_pooling_is_said_channel_by_channel():
+    """Two records at 1Z+ and one at 2Z+: the pooling clause read off
+    the first channel said '9 frames in each of 2 records' of both."""
+    rng = np.random.default_rng(13)
+    t = np.arange(int(6 * FS)) / FS
+    history = visualdynamics.TimeHistory(
+        t, rng.standard_normal((3, t.size)),
+        response_dof=['1Z+', '1Z+', '2Z+'],
+        ordinate_dim=['acceleration'] * 3)
+    history.averaging = AVERAGING
+    psds = history.compute_psds()
+    both = record_caption(psds, [0, 1], averaging=AVERAGING)
+    assert both.pooled == (2, 1) and both.nominal_dof == (36, 18)
+    assert _rows(both)['Estimate'] == (
+        'ASD of each of 2 channels, linear average of 9 frames in each '
+        'record, pooled over 2 records at 1Z+, 1 record at 2Z+')
+    assert _rows(both)['DOF'] == '17.15 to 34.31 equivalent (18 to 36 nominal)'
+    alone = record_caption(psds, 1, averaging=AVERAGING)
+    assert _rows(alone)['Estimate'].endswith('linear average of 9 frames')
+
+
+def test_a_cross_term_names_both_its_channels(table):
+    """A CPSD's cross term is of two channels; by its response alone,
+    1Z+ against 2Z+ read as 1Z+ a second time beside 1Z+'s own ASD."""
+    rng = np.random.default_rng(17)
+    t = np.arange(int(6 * FS)) / FS
+    history = visualdynamics.TimeHistory(
+        t, rng.standard_normal((2, t.size)), response_dof=['1Z+', '2Z+'],
+        ordinate_dim=['acceleration', 'force'])
+    history.averaging = AVERAGING
+    cpsd = history.compute_cpsds()
+    pairs = [cpsd.record_pair(record) for record in range(cpsd.num_records)]
+    cross = pairs.index(('1Z+', '2Z+'))
+    auto = pairs.index(('1Z+', '1Z+'))
+    caption = record_caption(cpsd, [auto, cross], averaging=AVERAGING)
+    assert caption.kind == 'ASD and CPSD'
+    assert _rows(caption)['Channel'] == (
+        '1Z+ acceleration; 1Z+ acceleration against 2Z+ force')
+    assert _rows(caption)['Location and axis'] == (
+        'node 1, Z+; node 1, Z+; against node 2, Z+')
+    numbered = record_caption(cpsd, cross, channel_table=ChannelTable(
+        {'channel': [3, 4], 'node': [1, 2], 'direction': ['Z+', 'Z+'],
+         'unit': ['m/s^2', 'N'], 'channel_type': ['acceleration', 'force'],
+         'comment': ['bracket', 'load cell']}))
+    assert _rows(numbered)['Channel'] == (
+        'channel 3, 1Z+ acceleration against channel 4, 2Z+ force')
+    assert _rows(numbered)['Location and axis'] == (
+        'node 1 (bracket), Z+; against node 2 (load cell), Z+')
+
+
+def test_the_stretch_starts_where_the_averaging_does_on_the_runs_clock():
+    """A run whose clock starts at 10 s, averaged from 0.5 s into it:
+    the stretch is 10.5 s to 15.5 s, read through the project."""
+    rng = np.random.default_rng(19)
+    t = 10.0 + np.arange(int(6 * FS)) / FS
+    history = visualdynamics.TimeHistory(
+        t, rng.standard_normal((1, t.size)), response_dof=['1Z+'],
+        ordinate_dim=['acceleration'])
+    history.averaging = AVERAGING
+    project = visualdynamics.Project('Clock')
+    project.add('Run 7', history)
+    name = project.compute_psds('Run 7')
+    caption = project.caption_of(name)
+    assert caption.stretch == pytest.approx((10.5, 15.5))
+    assert _rows(caption)['Run'] == 'Run 7, 10.5 s to 15.5 s'
+
+
+def test_the_window_row_is_the_averagings_own_description():
+    """One statement of an averaging, with the window's parameter and
+    the detrend, which the row once left out; and two-thirds overlap
+    reads the same here as everywhere else."""
+    tukey = Averaging(frame_length=1024, overlap=2 / 3, window='tukey',
+                      window_parameter=0.25, frames=9, detrend='mean')
+    assert tukey.overlap_text() == '66.7%'
+    assert tukey.window_text() == 'tukey (alpha 0.25)'
+    assert tukey.describe() == ('tukey (alpha 0.25), 66.7% overlap, frames '
+                                'of 1024 samples, mean removed from each '
+                                'frame')
+    bare = visualdynamics.Psd(np.arange(1.0, 101.0), np.ones((1, 100)),
+                              response_dof='5Y-',
+                              ordinate_dim='acceleration**2/frequency')
+    assert _rows(record_caption(bare, averaging=tukey))['Window'] == \
+        tukey.describe()
+    assert AVERAGING.describe() == 'hann, 50% overlap, frames of 1024 samples'
+    linear = Averaging(frame_length=64, detrend='linear')
+    assert linear.describe().endswith(', linear trend removed from each frame')
+
+
+def test_a_reports_overlap_reference_reads_the_same_as_the_caption():
+    from visualdynamics.report import _field_value
+    from visualdynamics.units import DEFAULT_SYSTEM
+
+    history = visualdynamics.TimeHistory(
+        np.arange(4096) / FS, np.zeros((1, 4096)), response_dof=['1Z+'])
+    history.averaging = Averaging(frame_length=1024, overlap=2 / 3,
+                                  frames=3)
+    assert _field_value(history, 'overlap', DEFAULT_SYSTEM) == '66.7%'
 
 
 # ---- read off a project --------------------------------------------------
@@ -280,11 +404,12 @@ def test_a_stored_banded_spectrum_reads_through_its_narrowband_source(run):
     assert drawn.reference_rms == pytest.approx(stored.reference_rms)
 
 
-def test_an_imported_spectrum_is_its_own_run(run):
+def test_an_imported_spectrum_names_no_run(run):
+    """The name an import or a person gave the object is not a run."""
     project = visualdynamics.Project('Imported')
     project.add('Run 9 ASD', run['Time History PSDs'])
     rows = _rows(project.caption_of('Run 9 ASD'))
-    assert rows['Run'] == 'Run 9 ASD'
+    assert rows['Run'] == NOT_RECORDED
     assert rows['Window'] == NOT_RECORDED
     with pytest.raises(TypeError, match='not a measured spectrum'):
         run.caption_of('Specification')
@@ -361,6 +486,110 @@ def test_the_editor_reads_out_what_the_figure_will_carry(run):
                                      specification='Specification')
     assert block_caption({'kind': 'plot', 'source': 'Time History'}, run) is None
     assert block_caption({'kind': 'text', 'text': ''}, run) is None
+
+
+def test_each_grid_cell_carries_its_own_channels_values(run):
+    """Every cell's rows are its own record's: the channel it draws and
+    the rms of that channel against its own reference."""
+    from visualdynamics.core.report import Report
+    from visualdynamics.report import render_html
+
+    block = {'kind': 'plot', 'source': 'Time History PSDs',
+             'specification': 'Specification', 'grid': True,
+             'caption': 'Control', 'record_caption': True}
+    [grid] = _payload(render_html(Report('R', [block]), run,
+                                  object_groups=run.object_groups))['blocks']
+    psds = run['Time History PSDs']
+    cells = [cell for row in grid['rows'] for column in row['cells']
+             for cell in column]
+    named = []
+    for cell in cells:
+        said = dict(cell['facts'])
+        dof = said['Channel'].split(', ')[-1].split(' ')[0]
+        record = list(psds.response_dof).index(dof)
+        expected = dict(run.caption_of('Time History PSDs', record,
+                                       specification='Specification').rows())
+        assert said == {label: expected[label] for label in CHANNEL_ROWS}
+        named.append(dof)
+    assert len(set(named)) == len(cells) == 8, 'eight cells, eight channels'
+
+
+def _caption_page(run, tmp_path, drop=None):
+    """The report page of one comparison block drawn a channel at a
+    time with its record's caption, the facts of channel `drop` taken
+    out of the payload, written to a file."""
+    from visualdynamics.core.report import Report
+    from visualdynamics.report import render_html
+
+    block = {'kind': 'plot', 'source': 'Time History PSDs',
+             'specification': 'Specification', 'caption': 'Control',
+             'record_caption': True}
+    page = render_html(Report('R', [block]), run,
+                       object_groups=run.object_groups)
+    found = re.search(r'(<script id="data"[^>]*>)(.*?)(</script>)', page,
+                      re.DOTALL)
+    payload = json.loads(found.group(2))
+    channels = payload['blocks'][0]['channels']
+    if drop is not None:
+        channels[drop].pop('facts')
+    page = (page[:found.start(2)] + json.dumps(payload)
+            + page[found.end(2):])
+    path = tmp_path / 'caption.html'
+    path.write_text(page, encoding='utf-8')
+    return path, channels
+
+
+def test_the_page_shows_the_picked_channels_caption_and_none_for_none(
+        run, tmp_path):
+    """Executed in a browser engine: picking a channel puts its caption
+    block under the figure, and a channel with none clears the last
+    one's rather than leaving it standing under the wrong curve."""
+    import os
+
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    pytest.importorskip('PySide6.QtWebEngineWidgets')
+    from PySide6.QtCore import QUrl
+    from PySide6.QtWidgets import QApplication
+
+    path, channels = _caption_page(run, tmp_path, drop=1)
+    assert len(channels) > 2
+    QApplication.instance() or QApplication(['x'])
+    view = web_view()
+    view.resize(1000, 800)
+    facts = ("(() => { const f = document.querySelector('.caption .facts');"
+             " const pick = document.querySelector('select.channel');"
+             " if (!pick) return null;"
+             " return JSON.stringify({facts: f ? f.textContent : null,"
+             "  picked: pick.selectedIndex}); })()")
+
+    def pick(index):
+        return ("(() => { const pick = document.querySelector("
+                "'select.channel');"
+                f" pick.selectedIndex = {index};"
+                " pick.dispatchEvent(new Event('change'));"
+                " const f = document.querySelector('.caption .facts');"
+                " return JSON.stringify({facts: f ? f.textContent : null,"
+                "  count: document.querySelectorAll('.facts').length});"
+                " })()")
+
+    seen = {}
+    view.load(QUrl.fromLocalFile(str(path)))
+    view.show()
+    try:
+        seen['open'] = json.loads(web_read(view, facts))
+        seen['none'] = json.loads(web_read(view, pick(1)))
+        seen['third'] = json.loads(web_read(view, pick(2)))
+    finally:
+        web_close(view)
+
+    def text(rows):
+        return ''.join(f'{label}: {said}' for label, said in rows)
+
+    assert seen['open']['facts'] == text(channels[0]['facts'])
+    assert seen['none'] == {'facts': None, 'count': 0}, \
+        'a channel with no caption shows none, not the last one'
+    assert seen['third']['facts'] == text(channels[2]['facts'])
+    assert seen['third']['count'] == 1
 
 
 # ---- on a saved plot -----------------------------------------------------

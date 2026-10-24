@@ -1721,8 +1721,10 @@ class Project(dict):
         and comment come from a channel table that names the channel,
         the one linked with the spectrum or its run first, and the
         global axis from the geometry linked with them, or the Basis
-        geometry. An imported spectrum names itself as the run and has
-        no averaging, so its window and frames read "not recorded".
+        geometry. An imported spectrum has no run and no averaging the
+        project knows of, so its run, window and frames read "not
+        recorded" (a block label, where its records carry one, is the
+        run): the name an import gave the object is not a run.
 
         `per_octave` is for a narrowband spectrum drawn on bands without
         being stored banded, as a report block that bands its data
@@ -1782,12 +1784,12 @@ class Project(dict):
         history = self.get(history_name) if history_name else None
         if not isinstance(history, TimeHistory):
             history_name, history = None, None
-        # an imported spectrum is its own run: its name is what the
-        # import called the measurement. A block label, where the
-        # records carry one, says it better and `record_caption` reads it
+        # an imported spectrum names no run: the object's name is what
+        # the import or a person called it, which may be the file's,
+        # the channel's or anything else (Brandon, 2026-10-23). A block
+        # label, where the records carry one, is read by
+        # `record_caption`
         run = history_name
-        if run is None and spectrum.block is None:
-            run = name
         sample_rate, origin = None, 0.0
         if history is not None and len(history.abscissa) > 1:
             sample_rate = history.sample_rate

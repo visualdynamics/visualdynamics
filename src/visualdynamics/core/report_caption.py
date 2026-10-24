@@ -31,8 +31,9 @@ them into a `RecordCaption`:
   not carry itself (`Project.averaging_of` gives it from the
   provenance);
 - the requirement is the specification drawn with the spectrum: which
-  limits it has, and the overall rms the record measured beside the one
-  the specification asks for, over the band it is written.
+  limits it has, and the overall rms the record measured (and, where
+  the comparison scales the measurement, the rms as drawn) beside the
+  one the specification calls for, over the band it is written.
 
 A fact nothing records is written as "not recorded" rather than left
 out, so a reader sees the gap instead of assuming the line was never
@@ -44,7 +45,7 @@ block that asks for it, and `plot.plot_captioned` under a saved plot.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -74,6 +75,8 @@ class CaptionChannel:
     is the signed global axis the measured direction is nearest on the
     geometry ('Z+') and `axis_angle` how far off it the direction sits,
     in degrees; both None without a geometry that places the channel.
+    `against` is the reference channel of a cross term, read the same
+    way; None for an autospectrum.
     """
 
     dof: str
@@ -84,16 +87,25 @@ class CaptionChannel:
     description: str = ''
     nearest_axis: str | None = None
     axis_angle: float | None = None
+    against: CaptionChannel | None = None
 
     def name(self) -> str:
         """'channel 3, 110Z+ acceleration', or the DOF and quantity
-        alone when no channel table numbers it."""
+        alone when no channel table numbers it; a cross term names its
+        reference after it, '1Z+ acceleration against 2Z+
+        acceleration'."""
         what = f'{self.dof} {self.quantity}'.strip()
-        return what if self.channel is None else f'channel {self.channel}, {what}'
+        own = what if self.channel is None else f'channel {self.channel}, {what}'
+        if self.against is None:
+            return own
+        return f'{own} against {self.against.name()}'
 
     def place(self) -> str:
         """The location and the axis: 'node 110 (bracket), Z+ (nearest
-        global Z+)'."""
+        global Z+)', and a cross term's reference after it."""
+        if self.against is not None:
+            alone = replace(self, against=None).place()
+            return f'{alone}; against {self.against.place()}'
         where = NOT_RECORDED if self.node is None else f'node {self.node}'
         if self.description:
             where += f' ({self.description})'
@@ -140,9 +152,10 @@ class RecordCaption:
         The samples in a frame.
     frames : int or None
         Frames averaged in each record.
-    pooled : int or None
-        Records of the same channel pooled into each average, as a
-        capture saved one record per average is.
+    pooled : tuple of int or None
+        Records of each channel pooled into its average, as a capture
+        saved one record per average is, one count per channel; the
+        channels of one figure need not have the same.
     dof : tuple of float or None
         The equivalent statistical degrees of freedom of each channel's
         average, discounted for overlap.
@@ -154,10 +167,12 @@ class RecordCaption:
         Which of the specification's limit pairs are drawn: 'warning',
         'abort', or both.
     measured_rms, reference_rms : float or None
-        The overall rms of the one record captioned, scaled as it is
-        drawn, and the rms the specification asks for, both over the
-        band the comparison judged (`compliance.compare`), in
-        `rms_unit`.
+        The overall rms of the one record captioned, as measured, and
+        the rms the specification calls for, both over the band the
+        comparison judged (`compliance.compare`), in `rms_unit`.
+    drawn_rms : float or None
+        The measured rms scaled as it is drawn and judged, where the
+        comparison scales it (`scale_db` not zero); None otherwise.
     rms_unit : str
         The display unit of the two rms values.
     rms_band : tuple of float or None
@@ -165,6 +180,9 @@ class RecordCaption:
     scale_db : int
         The decibels the measured curve is drawn scaled by against the
         specification (`compliance.comparison_scale_db`); 0 for none.
+    averaging : Averaging or None
+        The averaging the spectrum was made with, whose `describe` is
+        the window row.
     """
 
     channels: tuple[CaptionChannel, ...]
@@ -177,7 +195,7 @@ class RecordCaption:
     overlap: float | None = None
     frame_length: int | None = None
     frames: int | None = None
-    pooled: int | None = None
+    pooled: tuple[int, ...] | None = None
     dof: tuple[float, ...] | None = None
     nominal_dof: tuple[int, ...] | None = None
     requirement: str | None = None
@@ -187,6 +205,8 @@ class RecordCaption:
     rms_unit: str = ''
     rms_band: tuple[float, float] | None = None
     scale_db: int = 0
+    drawn_rms: float | None = None
+    averaging: Any = None
 
     def rows(self) -> list[tuple[str, str]]:
         """The caption as (label, text) rows, one per `ROWS` entry, in
@@ -240,11 +260,24 @@ class RecordCaption:
             # a peak hold
             said += (f', linear average of {self.frames} '
                      f'frame{"s" * (self.frames != 1)}')
-            if self.pooled and self.pooled > 1:
-                said += f' in each of {self.pooled} records'
+            said += self._pooling()
         if self.per_octave is not None:
             said += f', banded to 1/{self.per_octave} octave'
         return said
+
+    def _pooling(self) -> str:
+        """How many records each channel pooled, when any pooled more
+        than one: one count when every channel has the same, else each
+        channel's own, since the counts set each channel's DOF."""
+        if not self.pooled or max(self.pooled) <= 1:
+            return ''
+        if len(set(self.pooled)) == 1:
+            return f' in each of {self.pooled[0]} records'
+        each = ', '.join(
+            f'{count} record{"s" * (count != 1)} at {channel.dof}'
+            for channel, count in zip(self.channels, self.pooled,
+                                      strict=True))
+        return f' in each record, pooled over {each}'
 
     def _resolution(self) -> str:
         lines = (None if self.line_spacing is None
@@ -255,11 +288,13 @@ class RecordCaption:
         return lines or 'lines not evenly spaced'
 
     def _window(self) -> str:
+        if self.averaging is not None:
+            return self.averaging.describe()
         if self.window is None:
             return NOT_RECORDED
         said = self.window
         if self.overlap is not None:
-            said += f', {self.overlap * 100:.4g}% overlap'
+            said += f', {self.overlap * 100.0:.3g}% overlap'
         if self.frame_length is not None:
             said += f', frames of {self.frame_length} samples'
         return said
@@ -284,15 +319,17 @@ class RecordCaption:
         said = (f'{self.requirement}, reference with its {drawn} limits drawn'
                 if drawn else f'{self.requirement}, reference drawn')
         if self.measured_rms is not None and self.reference_rms is not None:
+            # the measured value as measured and, where the comparison
+            # scales it, as drawn; the scale itself is in the figure's
+            # legend and its caption, and is not said a third time
             unit = f' {self.rms_unit}' if self.rms_unit else ''
-            said += (f'; {self.measured_rms:.3g}{unit} rms measured against '
-                     f'{self.reference_rms:.3g}{unit} rms asked')
+            said += f'; {self.measured_rms:.3g}{unit} rms measured'
+            if self.drawn_rms is not None:
+                said += f', {self.drawn_rms:.3g}{unit} rms as drawn,'
+            said += f' against {self.reference_rms:.3g}{unit} rms specified'
             if self.rms_band is not None:
                 said += (f', {self.rms_band[0]:.4g} Hz to '
                          f'{self.rms_band[1]:.4g} Hz')
-        if self.scale_db:
-            said += (f'; measured scaled {self.scale_db:+d} dB for the '
-                     'comparison')
         return said
 
 
@@ -349,11 +386,27 @@ def caption_channel(spectrum: Any, record: int, channel_table: Any = None,
     -------
     CaptionChannel
     """
-    from .data import channel_quantities, parse_dof
+    from .data import channel_quantities
 
-    dof = str(spectrum.response_dof[record])
+    response, reference = (str(dof) for dof in spectrum.record_pair(record))
     dimension = str(spectrum.known_dim(record))
-    quantity = '' if dimension == 'unknown' else channel_quantities(dimension)[0]
+    out, into = (('', '') if dimension == 'unknown'
+                 else channel_quantities(dimension))
+    own = _channel_at(response, out, channel_table, geometry)
+    if response == reference and out == into:
+        return own
+    # a cross term is of two channels, and names both: by its response
+    # alone, a CPSD's 1Z+ against 2Z+ read as 1Z+ a second time
+    return replace(own, against=_channel_at(reference, into, channel_table,
+                                            geometry))
+
+
+def _channel_at(dof: str, quantity: str, channel_table: Any,
+                geometry: Any) -> CaptionChannel:
+    """One channel by its DOF and quantity, with its channel table row
+    and the global axis nearest its direction."""
+    from .data import parse_dof
+
     node, direction = parse_dof(dof)
     number, description = None, ''
     nearest, angle = None, None
@@ -511,7 +564,7 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
         one = averaging.statistical_dof(records=1)
         counts = [max(round(each / one.equivalent), 1) for each in dof]
         nominal = tuple(one.nominal * count for count in counts)
-        pooled = counts[0]
+        pooled = tuple(counts)
 
     if run is None and spectrum.block is not None:
         labels = {spectrum.block[record] for record in wanted}
@@ -522,7 +575,7 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
                    averaging.stop(sample_rate, origin))
 
     limits: tuple[str, ...] = ()
-    measured_rms = reference_rms = None
+    measured_rms = reference_rms = drawn_rms = None
     band: tuple[float, float] | None = None
     unit = ''
     if specification is not None:
@@ -551,12 +604,23 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
                 if compared.get('lines'):
                     band = tuple(float(edge) for edge in compared['band'])
                     dimension = str(spectrum.known_dim(mi))
-                    measured_rms = float(compared['measured_rms'])
                     reference_rms = float(compared['specification_rms'])
+                    # as measured, and as drawn where the comparison
+                    # scales the measurement: a reader holding the raw
+                    # data reads the first, the figure shows the second
+                    measured_rms = float(
+                        compare(specification, spectrum, si, mi,
+                                0)['measured_rms'] if scale_db
+                        else compared['measured_rms'])
+                    if scale_db:
+                        drawn_rms = float(compared['measured_rms'])
                     if dimension != 'unknown':
                         amplitude = channel_quantities(dimension)[0]
                         measured_rms = float(us.from_si(measured_rms, amplitude))
                         reference_rms = float(us.from_si(reference_rms,
+                                                         amplitude))
+                        if drawn_rms is not None:
+                            drawn_rms = float(us.from_si(drawn_rms,
                                                          amplitude))
                         unit = us.label_text(amplitude)
     return RecordCaption(
@@ -571,4 +635,5 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
                      else requirement or 'specification'),
         limits=limits, measured_rms=measured_rms,
         reference_rms=reference_rms, rms_unit=unit, rms_band=band,
-        scale_db=int(scale_db or 0) if specification is not None else 0)
+        scale_db=int(scale_db or 0) if specification is not None else 0,
+        drawn_rms=drawn_rms, averaging=averaging)

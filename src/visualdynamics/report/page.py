@@ -752,9 +752,12 @@ function plotBlock(block, into) {
       ch.responses.forEach(r =>
         block.curves.push({label: r.label, x: null, y: r.y}));
     }
-    /* the caption block is the picked channel's own */
-    const shown = c && ch.facts ? c.querySelector('.facts') : null;
-    if (shown) shown.replaceWith(factsFor(ch.facts));
+    /* the caption block is the picked channel's own, and a channel
+       with none shows none rather than the last one's */
+    const shown = c ? c.querySelector('.facts') : null;
+    if (shown && ch.facts) shown.replaceWith(factsFor(ch.facts));
+    else if (shown) shown.remove();
+    else if (c && ch.facts) c.appendChild(factsFor(ch.facts));
     fillLegend();
     fillReadouts();
   }

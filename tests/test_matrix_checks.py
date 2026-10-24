@@ -826,3 +826,137 @@ def test_progress_is_told_and_a_raise_in_it_stops_the_repair():
     _frf(np.diag([3.0, 1.0])).conditioning(
         progress=lambda d, t: told.append((d, t)))
     assert told == [(0, BUSY)]
+
+
+# ---- what a mutation run found untested ------------------------------------
+
+def test_the_counts_in_the_words_are_exact():
+    from visualdynamics.core.matrix_checks import _span_text
+
+    assert _span_text([(10.0, 20.0), (40.0, 40.0)]) == '10 to 20 Hz and 40 Hz'
+    three = [(10.0, 20.0), (40.0, 40.0), (60.0, 70.0)]
+    assert _span_text(three) == '10 to 20 Hz, 40 Hz and 60 to 70 Hz'
+    spec = SpecificationDraft.at_dofs(['1Z+', '2Z+', '3Z+'], 'acceleration')
+    one_missing = spec._copy(pairs={(0, 1): (0.5, 0.0), (1, 2): (0.5, 0.0),
+                                    (0, 2): None}).make()
+    with pytest.raises(ValueError) as refused:
+        one_missing.realizability()
+    assert str(refused.value).startswith(
+        'the matrix is incomplete: 1Z+ and 3Z+ have no cross term. It is')
+    three_units = _frf(np.diag([3.0, 1.0]),
+                       dims=['acceleration/force', 'velocity/force',
+                             'acceleration/voltage', 'acceleration/force'])
+    with pytest.raises(ValueError, match=r'different units \(acceleration/'
+                                         r'force and velocity/force\): '):
+        three_units.conditioning()
+    csd = _csd(np.eye(3), dims=['acceleration', 'force', 'voltage'])
+    with pytest.raises(ValueError, match=r'quantities \(acceleration and '
+                                         r'force\): '):
+        csd.conditioning()
+
+
+def test_a_matrix_of_the_wrong_length_and_a_rank_one_line():
+    with pytest.raises(ValueError, match='one rows-by-columns matrix per'):
+        condition_matrix(F, np.ones((3, 2, 2)), ['a', 'b'], ['c', 'd'])
+    reading = condition_matrix(F, np.ones((4, 2, 2)), ['a', 'b'], ['c', 'd'])
+    assert reading.ill.all() and reading.notes == ()
+
+
+def test_a_line_with_no_power_on_any_channel_and_a_cross_term_fails():
+    s = np.repeat(np.eye(2, dtype=complex)[None], 4, axis=0)
+    s[1] = [[0.0, 0.3], [0.3, 0.0]]
+    reading = check_spectral_matrix(F, s, ['a', 'b'])
+    np.testing.assert_allclose(reading.scale[1], [1.0, 1.0])
+    assert list(reading.failing) == [False, True, False, False]
+    assert np.isfinite(reading.eigenvalues).all()
+
+
+def test_the_tolerance_and_the_rank_scale_with_the_largest_eigenvalue():
+    # two channels, eigenvalues 1 - |c| and 1 + |c|: the smallest is
+    # judged against the tolerance times the largest, about 2
+    over = np.array([[1.0, 1.0 + 1.5e-6], [1.0 + 1.5e-6, 1.0]])
+    reading = check_spectral_matrix(F[:1], over[None], ['a', 'b'])
+    assert reading.realizable, '-1.5e-6 is within 1e-6 times 2'
+    near = np.array([[1.0, 1.0 - 1e-6], [1.0 - 1e-6, 1.0]])
+    reading = check_spectral_matrix(F[:1], near[None], ['a', 'b'])
+    assert list(reading.rank) == [1], '1e-6 is under 1e-6 times 2'
+    s = np.repeat(OPPOSED[None], 4, axis=0)
+    s[2, 0, 1] = np.nan
+    reading = check_spectral_matrix(F, s, ['a', 'b', 'c'])
+    assert list(reading.rank) == [2, 2, 0, 2]
+
+
+def test_the_largest_eigenvalue_is_the_one_named():
+    pairs = {(0, 1): (1.0, 0.0), (1, 2): (0.64, 0.0), (0, 2): (0.81, 180.0)}
+    m = np.eye(3, dtype=complex)
+    for (i, j), (coherence, phase) in pairs.items():
+        m[i, j] = np.sqrt(coherence) * np.exp(1j * np.radians(phase))
+        m[j, i] = np.conj(m[i, j])
+    reading = _csd(m).realizability()
+    assert reading.at(20.0).describe() == (
+        '20 Hz: not realizable; smallest eigenvalue -0.8025 against largest '
+        '2.017, rank 2 of 3')
+    words = entries_refusal(['1Z+', '2Z+', '3Z+'], pairs, [20.0, 2000.0])
+    assert '(the matrix they make has an eigenvalue of -0.802 against a ' \
+           'largest of 2.02)' in words
+
+
+def test_the_repair_reports_the_term_it_moved_most():
+    """Four channels: three that cannot hold together, and a fourth
+    coherent with two of them. The fourth's terms are the largest and
+    move least; the conflicting three move most, and are the ones
+    reported and offered."""
+    a = np.sqrt(0.81)
+    m = np.array([[1, 1, -1, a], [1, 1, 1, a], [-1, 1, 1, 0], [a, a, 0, 1]],
+                 dtype=complex)
+    reading = check_spectral_matrix(F, np.repeat(m[None], 4, 0),
+                                    ['1Z+', '2Z+', '3Z+', '4Z+'])
+    assert reading.worst()[:2] == (0, 2)
+    pairs = {(0, 1): (1.0, 0.0), (1, 2): (1.0, 0.0), (0, 2): (1.0, 180.0),
+             (0, 3): (0.81, 0.0), (1, 3): (0.81, 0.0), (2, 3): (0.0, 0.0)}
+    words = entries_refusal(['1Z+', '2Z+', '3Z+', '4Z+'], pairs,
+                            [20.0, 2000.0])
+    shown = words.split('nearest entries that hold are ')[1]
+    assert shown.startswith('1Z+–3Z+ coherence ')
+    assert '4Z+' not in shown.split(' and 3 more')[0]
+
+
+def test_a_phase_where_the_coherence_was_zero_is_not_a_change():
+    """A pair written at no coherence has no phase to change: the repair
+    gives it a coherence at 120 degrees, and that is not counted as a
+    turn of 120 degrees."""
+    turn = np.exp(1j * np.radians(60.0))
+    m = np.array([[1, turn, 0], [np.conj(turn), 1, turn],
+                  [0, np.conj(turn), 1]])
+    reading = check_spectral_matrix(F, np.repeat(m[None], 4, 0),
+                                    ['a', 'b', 'c'])
+    coherence, phase = reading.changes()
+    assert coherence > 0.4
+    assert phase == pytest.approx(0.0, abs=1e-6)
+
+
+def test_the_refusal_names_the_channels_that_carry_the_conflict():
+    names = ['1Z+', '2Z+', '3Z+']
+    # two nearly one channel, the third coupled weakly: the conflict is
+    # carried by the first two, the third's share of it under the line
+    two = {(0, 1): (0.99, 0.0), (0, 2): (0.1, 0.0), (1, 2): (0.1, 180.0)}
+    words = entries_refusal(names, two, [20.0, 2000.0])
+    assert words.startswith('the cross terms of 1Z+ and 2Z+ cannot hold')
+    # a phase the repair keeps at zero reads 0, not -0, and the three
+    # terms of three channels have no 'more'
+    assert words.endswith('The nearest entries that hold are 1Z+–2Z+ '
+                          'coherence 0.759 at 0°; 2Z+–3Z+ coherence 0.0643 '
+                          'at 180°; 1Z+–3Z+ coherence 0.0643 at 0°')
+    # every channel's share over the line, the smallest near it
+    three = {(0, 1): (0.99, 0.0), (0, 2): (0.5, 0.0), (1, 2): (0.5, 180.0)}
+    assert entries_refusal(names, three, [20.0, 2000.0]).startswith(
+        'the cross terms of 1Z+, 2Z+ and 3Z+ cannot hold')
+    # a fourth channel with a small part in the conflict is not named
+    small = {(0, 1): (1.0, 0.0), (1, 2): (1.0, 0.0), (0, 2): (1.0, 180.0),
+             (0, 3): (0.1, 0.0), (1, 3): (0.0, 0.0), (2, 3): (0.0, 0.0)}
+    assert entries_refusal(names + ['4Z+'], small, [20.0, 2000.0]).startswith(
+        'the cross terms of 1Z+, 2Z+ and 3Z+ cannot hold')
+    # phases to a hundredth of a degree
+    odd = {(0, 1): (1.0, 0.0), (1, 2): (0.64, 47.0), (0, 2): (0.81, 203.0)}
+    assert ('1Z+–2Z+ coherence 0.348 at 4.71°; '
+            in entries_refusal(names, odd, [20.0, 2000.0]))

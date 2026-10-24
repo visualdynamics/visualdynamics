@@ -178,8 +178,8 @@ that is not an alpha.
   read off its record
 - [Report features](report-features.md): optional additions to a
   report, turned on in a panel or by preset: the skeleton sections,
-  calibration in date, responses against prediction, record captions
-  and the plot conventions
+  the data index, calibration in date, responses against prediction,
+  record captions and the plot conventions
 
 For signatures, see the API reference in the site navigation. For the
 layers of the package and the conventions behind them, see

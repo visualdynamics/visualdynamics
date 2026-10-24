@@ -2898,9 +2898,26 @@ span.owed { color: #c0392b; font-weight: 700; }
   letter-spacing: .06em; }
 """
 
+#: the data index's table and lines (feature `data_index`). Its blocks
+#: are a table and text the renderer has already drawn
+#: (`report.data_index`), so it needs style and no script. A checksum
+#: is set in a fixed-width face and may break anywhere, so 64 digits
+#: fit a narrow column; a file that did not match its checksum is in
+#: the owed card's color, its words already in capitals.
+_INDEX_CSS = """
+td.mark-hash { font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: .78rem; word-break: break-all; min-width: 12rem; }
+td.mark-changed { color: #c0392b; font-weight: 700; }
+td.mark-unchecked { color: var(--faint); font-style: italic; }
+p.index-empty { font-weight: 600; }
+pre.attachment { white-space: pre-wrap; font-size: .8rem;
+  border: 1px solid var(--line); padding: .5rem .7rem; }
+"""
+
 #: page code by feature: (splices into `_JS`, functions added, CSS added)
 FEATURE_PAGE = {
     'skeleton_sections': ((), '', _SKELETON_CSS),
+    'data_index': ((), '', _INDEX_CSS),
     'plot_conventions': (_STYLE_SPLICES, _STYLE_JS, _STYLE_CSS),
     'shared_decades': (_WINDOW_SPLICES, _WINDOW_JS, ''),
 }

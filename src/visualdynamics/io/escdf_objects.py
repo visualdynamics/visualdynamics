@@ -469,7 +469,10 @@ def to_file(project: Project, created_by: str | None = None,
         elif isinstance(obj, Report):
             from ..report import render_html
 
-            html = render_html(obj, dict(project.items()), unit_system or SI,
+            # the project itself, not a copy of its mapping: a report
+            # feature may read what the project holds beside its objects
+            # (the data index)
+            html = render_html(obj, project, unit_system or SI,
                                object_groups=project.object_groups)
             dataset = escdf.Dataset(key, 'parameter_set', name)
             _attach(dataset, [(f'{key}.html', np.frombuffer(html.encode('utf-8'),

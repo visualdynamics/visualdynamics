@@ -462,6 +462,24 @@ def arrange(built: Sequence[dict[str, Any]],
     return out
 
 
+def under(blocks: Sequence[dict[str, Any]], key: str,
+          extra: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`arrange`'s blocks with `extra` added at the end of section
+    `key`: after the author's words and whatever already falls under
+    it, before the next section's head (or the end mark). For blocks a
+    feature generates into a section, such as the data index under the
+    record. Raises `ValueError` for a key that is not a section."""
+    section(key)
+    out = list(blocks)
+    start = next((at for at, block in enumerate(out)
+                  if block.get('skeleton', {}).get('key') == key), None)
+    if start is None:
+        raise ValueError(f'{BY_KEY[key].heading} is not on this page')
+    stop = next((at for at in range(start + 1, len(out))
+                 if 'skeleton' in out[at]), len(out))
+    return out[:stop] + list(extra) + out[stop:]
+
+
 def finish(blocks: Sequence[dict[str, Any]]) -> None:
     """Draw each head `arrange` made, in place, once its words are HTML:
     the heading, then the author's words, the owed card or nothing;

@@ -71,7 +71,7 @@ pages knows whether all of them are there.
 | 9. Deviations, Anomalies and Nonconformances | each one in full, or None | the author |
 | 10. Discussion and Interpretation | what the results mean, and by whom, or None | the author |
 | 11. Conclusion | the statement of conformity and the rule it was decided by | the author, with the generated reading guide under it |
-| 12. Record and Data Package | what is attached, referenced and kept | the author |
+| 12. Record and Data Package | what is attached, referenced and kept | the author, with the data index under it when Data index is on |
 
 A generated report's own sections fall under the skeleton by what they
 hold: a section with the pass/fail box, or one of text only before the
@@ -130,6 +130,81 @@ project.report_check('Report')
 always has something to say, and an attribution outside the
 discussion. `report_check` refuses a report without the skeleton,
 since there is then nothing to check it against.
+
+## Data index
+
+**Data index** (group Records) puts in the report every file it rests
+on: each file's name, what it holds, its format, its size in bytes and
+its SHA-256 checksum, the fingerprint that changes if one byte of the
+file changes, so a copy can be shown identical to the original years
+later. A reader can then ask for the file that holds a channel by its
+name and know that what arrives is the file the report was written
+from.
+
+| File | Holds | Format | Bytes | SHA-256 | Role | Check |
+|---|---|---|---|---|---|---|
+| run11.nc4 | Channel Table: 12 channels; Time History: 12 records, 114688 samples, channels 101Z+ to 1313Z+, 4096 Hz | Rattlesnake controller output (.nc4) | 17,735,629 | d1c7ab5b…59adc0 | referenced | matches |
+| settings.csv | settings list | comma-separated text (.csv) | 412 | 6f0e21a4…b7c913 | attached | matches |
+
+**Where the entries come from.** Every file imported into the project
+is indexed as it is read, with what was read out of it, and the index
+is saved in the project file. Importing a project file brings its
+index with it. Removing the last object read from a file takes the
+file out of the index, unless something still in the project was
+derived from one of those objects. Documents that go with the report
+(the settings list, the log, the as-run procedure, the flash report)
+are added with **Insert, Attached File…** in the report editor, which
+asks what the file is and whether it is *attached* (sent with the
+report) or *referenced* (named in the report and kept in the archive).
+An attached text file of up to 64 KiB is printed whole under the
+index: a CSV or TSV as a table when every row has the header's width,
+anything else as it was written. **Insert, Remove from Index** takes out
+a file added by hand. A file over 32 MiB is hashed off the window's
+event loop, with the progress bar and Cancel; a canceled import keeps
+the file's objects and the status line says the file is not in the
+index.
+
+**The check at export.** Export hashes every indexed file again before
+it writes the report. A file is looked for where it was indexed, then
+by its name beside the project file. Each row's Check column says
+*matches*, *CHANGED* or *NOT FOUND*, and a line under the table says
+when the files were checked and how many matched. When any file does
+not match, Export lists them and asks whether to export anyway, and the
+status line after the export repeats what the check found, or that the
+index is empty.
+
+**Provenance.** Under the index, a line names the version of Visual
+Dynamics and the project file with its size and checksum, as the check
+found it. The analysis recipe follows: each derived object in the
+project, the verb that computed it and what it was computed from, read
+off the project's provenance, so every figure traces to an object and
+every object to a file.
+
+**What stays the author's.** Where the archive is, who keeps it, and
+which records travel with the report are the author's words. With
+Skeleton sections on, the index goes under section 12, Record and Data
+Package, after what the author writes there, and the section stays
+owed until the author writes it. Without the skeleton, the index
+closes the report under the heading Record and Data Package.
+
+From a script:
+
+```python
+project.index_file('settings.csv', 'settings list', role='attached')
+project.index_file('Y_run11_full.csv', 'Y axis, run 11, all channels')
+project.report_features('Report', enable=['data_index'])
+project.verify_data_index(search=['/archive/test-0037'])
+# ['random.nc4: matches', 'settings.csv: matches', 'Y_run11_full.csv: not found']
+project.unindex_file('Y_run11_full.csv')
+```
+
+`index_file` refuses a file it cannot find, a folder, an unknown role,
+and an entry that does not say what the file holds. The same file with
+the same checksum indexed twice is one entry; the same path with
+different contents is a second entry, since it is a different file.
+Any other source of files adds its entries the same way, naming itself
+in `source`, so a project keeps a single index. `project.export_report` checks the index before it
+writes, as Export does.
 
 ## Calibration in date
 
@@ -340,7 +415,6 @@ and are grayed out until each is built:
 | Check blocks | Results | a table for each check the project holds, a row per channel against its criterion |
 | Cross-axis and limit channels | Results | cross-axis against its limit, and where limit channels held the control down |
 | Control-channel uncertainty | Results | each control channel's uncertainty against one third of the tolerance |
-| Data index | Records | every file the report rests on, with its size and SHA-256, checked again at export |
 | Identity and issue | Issue control | number, revision, status and page n of N on every page, a paginated PDF, and amendments |
 | Flash report | Issue control | a one-page preliminary report from the day's analysis |
 

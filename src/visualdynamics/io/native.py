@@ -983,7 +983,8 @@ def save_test(path: str | os.PathLike, name: str,
               active_geometry: str | None = None,
               project_type: str | None = None,
               object_groups: Sequence[Mapping[str, Any]] | None = None,
-              provenance: Mapping[str, Any] | None = None) -> None:
+              provenance: Mapping[str, Any] | None = None,
+              data_index: Sequence[Mapping[str, Any]] | None = None) -> None:
     """Save a whole test, every named object, to one .vdyn file.
 
     Objects go in numbered groups with the name as an attribute, so a
@@ -991,20 +992,25 @@ def save_test(path: str | os.PathLike, name: str,
     each name to its object, in order. `object_groups` is the object
     groups, each a mapping with its `members` (object names);
     `provenance` records how each derived object was computed. Both are
-    stored as JSON. `.vdyn` is added to `path` when it is not there.
+    stored as JSON. `data_index` is the project's data index, its
+    entries as plain values (`DataIndex.records`), stored as JSON in a
+    `data_index` dataset at the root when there are any. `.vdyn` is
+    added to `path` when it is not there.
     """
     import h5py
 
     with h5py.File(_visualdynamics_path(path), 'w') as f:
         save_test_into(f, name, objects, active_geometry, project_type,
-                       object_groups, provenance)
+                       object_groups, provenance, data_index)
 
 
 def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
                    active_geometry: str | None = None,
                    project_type: str | None = None,
                    object_groups: Sequence[Mapping[str, Any]] | None = None,
-                   provenance: Mapping[str, Any] | None = None) -> None:
+                   provenance: Mapping[str, Any] | None = None,
+                   data_index: Sequence[Mapping[str, Any]] | None = None
+                   ) -> None:
     """`save_test` into an open, empty HDF5 file (see `save_into`)."""
     f.attrs['visualdynamics_schema'] = schema_for(objects)
     f.attrs['test_name'] = name
@@ -1015,6 +1021,17 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
     # how each derived object was computed, for the staleness
     # badges — settings fingerprints, so they survive the file
     f.attrs['provenance'] = json.dumps(provenance or {})
+    if data_index:
+        # the files the project rests on, by name, size and SHA-256. A
+        # dataset, not an attribute: an attached settings list rides in
+        # it, and an HDF5 attribute holds 64 KiB at most. Written only
+        # when there is one, so a project with none is stored as it
+        # always was; a reader that predates it opens the file and
+        # leaves the dataset alone
+        import h5py
+
+        f.create_dataset('data_index', data=json.dumps(list(data_index)),
+                         dtype=h5py.string_dtype('utf-8'))
     container = f.create_group('objects')
     for i, (obj_name, obj) in enumerate(objects.items()):
         kind, saver = _saver_for(obj)
@@ -1089,11 +1106,17 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
             if progress is not None:
                 progress(done, len(keys))
         import json
+        indexed = []
+        if 'data_index' in f:
+            raw = f['data_index'][()]
+            indexed = json.loads(raw.decode('utf-8') if isinstance(raw, bytes)
+                                 else raw)
         return Project(f.attrs['test_name'], objects,
                        f.attrs['active_geometry'] or None,
                        f.attrs['project_type'] or None,
                        json.loads(f.attrs['links']),
-                       provenance=json.loads(f.attrs['provenance']))
+                       provenance=json.loads(f.attrs['provenance']),
+                       data_index=indexed)
     for group_name, loader in _LOADERS.items():
         if group_name in f:
             return loader(f[group_name])

@@ -126,6 +126,50 @@ def project_type_of(path: str | os.PathLike) -> str | None:
     return None
 
 
+#: what a file no importer reads is called in a data index, by suffix:
+#: the documents a test's record carries beside its data
+_DOCUMENT_FORMATS = {
+    '.csv': 'comma-separated text (.csv)',
+    '.tsv': 'tab-separated text (.tsv)',
+    '.txt': 'text (.txt)',
+    '.md': 'Markdown text (.md)',
+    '.json': 'JSON (.json)',
+    '.jsonl': 'JSON Lines (.jsonl)',
+    '.pdf': 'PDF document (.pdf)',
+    '.docx': 'Word document (.docx)',
+    '.png': 'PNG image (.png)',
+    '.jpg': 'JPEG image (.jpg)',
+    '.jpeg': 'JPEG image (.jpeg)',
+    '.html': 'HTML document (.html)',
+}
+
+
+def format_of(path: str | os.PathLike) -> str:
+    """The name of a file's format, as a data index prints it.
+
+    A Visual Dynamics file is named as one. A document the record carries
+    beside its data (a settings list, a log, a scanned procedure) is
+    named by its kind, from its suffix. Any other file an importer
+    recognizes is named by that importer's description ('Rattlesnake
+    controller output (.nc4)'), and an unknown file by its suffix. A
+    sniffer that trips over the file is not its format, so this does
+    not raise for a readable path.
+    """
+    path = str(path)
+    suffix = os.path.splitext(path)[1].lower()
+    if suffix == '.vdyn':
+        return 'Visual Dynamics file (.vdyn)'
+    if suffix in _DOCUMENT_FORMATS:
+        return _DOCUMENT_FORMATS[suffix]
+    for imp in _IMPORTERS:
+        try:
+            if imp.sniff(path):
+                return imp.description
+        except Exception:  # noqa: BLE001, S112 — a sniffer that trips says no
+            continue
+    return f'{suffix[1:].upper()} file ({suffix})' if suffix else 'file'
+
+
 def import_file(path: str | os.PathLike, format: str | None = None,
                 progress: Any | None = None, **kwargs: Any) -> Any:
     """Import a file, returning the Visual Dynamics object it contains.
@@ -326,6 +370,20 @@ register_exporter('escdf', 'Engineering Sciences Common Data Format (.h5)',
 register_exporter('delimited', 'Delimited text time history (.csv)', '.csv',
                   delimited.handles, delimited.save)
 
-__all__ = ['ImportNote', 'TestContents', 'export_file', 'exporters', 'from_sep005',
-           'import_file', 'importers', 'load', 'native', 'project_type_of',
-           'register_exporter', 'register_importer', 'save', 'save_test']
+__all__ = [
+    'ImportNote',
+    'TestContents',
+    'export_file',
+    'exporters',
+    'format_of',
+    'from_sep005',
+    'import_file',
+    'importers',
+    'load',
+    'native',
+    'project_type_of',
+    'register_exporter',
+    'register_importer',
+    'save',
+    'save_test',
+]

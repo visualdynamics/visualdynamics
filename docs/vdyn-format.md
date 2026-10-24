@@ -69,6 +69,22 @@ identity is in root attributes:
                       computed, with the settings fingerprint the
                       staleness badges compare against
 
+A project whose data index holds anything also has one dataset at the
+root (absent otherwise):
+
+    data_index        JSON, one string: [{"name", "path", "size",
+                      "sha256", "holds", ...}, ...], every file the
+                      project rests on, in the order indexed. Optional
+                      keys: "format", "role" ("referenced" or
+                      "attached"), "source" (what added the entry),
+                      "objects" (the names read from the file),
+                      "indexed", "status" ("matches", "changed" or
+                      "not found"), "checked" and "found" (the last
+                      check), and "text" (an attached text file's
+                      contents). A dataset rather than an attribute
+                      because an attached file's text can pass the
+                      64 KiB an HDF5 attribute holds
+
 ## Conventions
 
 - Strings are UTF-8 (`h5py.string_dtype('utf-8')`), one dataset

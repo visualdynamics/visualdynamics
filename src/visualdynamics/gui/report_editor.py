@@ -181,6 +181,11 @@ class ReportEditor(QWidget):
     export_requested = Signal()
     #: the report on its own, as a template another project can load
     template_requested = Signal()
+    #: a file to add to the project's data index, asked for by the
+    #: window (Insert, Attached File, with the data index on)
+    attach_requested = Signal()
+    #: a file to take out of the data index, by its name
+    unindex_requested = Signal(str)
     edited = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -370,6 +375,27 @@ class ReportEditor(QWidget):
                 continue        # drawn only while its feature is on
             self.insert_menu.addAction(
                 label, lambda _checked=False, k=kind: self.insert(k))
+        self._fill_index_actions(objects)
+
+    def _fill_index_actions(self, objects) -> None:
+        """With the data index on, Insert also adds a file to the index
+        and takes out one added by hand; otherwise neither is shown."""
+        from ..report.data_index import FEATURE
+        from ..report.features import enabled
+
+        if self.report is None or FEATURE not in enabled(self.report):
+            return
+        self.insert_menu.addSeparator()
+        self.insert_menu.addAction('Attached File…',
+                                   self.attach_requested.emit)
+        index = getattr(objects, 'data_index', None)
+        mine = [entry.name for entry in (index or ())
+                if entry.source != 'import']
+        if mine:
+            remove = self.insert_menu.addMenu('Remove from Index')
+            for name in mine:
+                remove.addAction(name, lambda _checked=False, n=name:
+                                 self.unindex_requested.emit(n))
 
     def _fill_reference_menu(self) -> None:
         self.reference_menu.clear()

@@ -38,7 +38,8 @@ from typing import Any
 # framework; P23 (plot conventions) was the first feature built with
 # it, and P18 (skeleton sections, `report/skeleton.py`) the second.
 # P25 (responses against prediction, `report/prediction.py`) draws its
-# figures and table under the skeleton's Results.
+# figures and table under the skeleton's Results, and the data index
+# (`report/data_index.py`) prints under its Record and Data Package.
 
 #: the groups the selection tool lays the features out in, in order
 GROUPS = ('Structure', 'Results', 'Records', 'Issue control', 'Figures')
@@ -111,9 +112,9 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 
 
 #: every report feature, in the order the selection tool shows them
-#: within their groups. `skeleton_sections`, `prediction`,
-#: `calibration_in_date`, `plot_conventions` and its option
-#: `shared_decades` are built; the rest are the road map.
+#: within their groups. `skeleton_sections`, `prediction`, `data_index`,
+#: `calibration_in_date`, `record_captions`, `plot_conventions` and its
+#: option `shared_decades` are built; the rest are the road map.
 FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'skeleton_sections', 'Skeleton sections', 'Structure',
@@ -167,10 +168,10 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         requires=('test_requirement',), available=False),
     ReportFeature(
         'data_index', 'Data index', 'Records',
-        'Every file the report rests on, with its size, SHA-256 and what '
-        'it holds, checked again at export; attached documents with '
-        'their checksums.',
-        available=False),
+        'Every file the report rests on, with what it holds, its format, '
+        'size and SHA-256, checked again at export; attached documents '
+        'with their checksums, a small text or CSV attachment printed '
+        'whole; and the analysis recipe.'),
     ReportFeature(
         'calibration_in_date', 'Calibration in date', 'Records',
         "Whether each channel's sensor was in calibration on the test "

@@ -37,6 +37,9 @@ from .core.data import (
     TransientSpecification,
     _CoherenceBase,
 )
+from .core.data_index import DataIndex, IndexEntry
+from .core.data_index import digest as digest_file
+from .core.data_index import now as _index_now
 from .core.geometry import Geometry, View
 from .core.matches import MatchedModes
 from .core.photos import Photos
@@ -128,6 +131,43 @@ def describe(obj: Any) -> str:
         return ''
     return ', '.join(f'{n} {word}{"s" * (n != 1)}'
                      for n, word in counts if n)
+
+
+def holds(objects: Mapping[str, Any]) -> str:
+    """What a file held, in words, from the objects read out of it: for
+    each, its kind and size (`describe`), and for records the channels
+    they span and a time history's sample rate. The data index prints
+    this as the file's holdings, so a reader can ask for the file that
+    holds a channel.
+    """
+    parts = []
+    for obj in objects.values():
+        words = [describe(obj)] if describe(obj) else []
+        if isinstance(obj, DataArray) and obj.num_records:
+            # the DOF each record measures, which is what a reader asks
+            # for a file by (the quantity at a DOF is in the kind)
+            dofs = list(dict.fromkeys(str(dof) for dof in obj.response_dof))
+            words.append(f'channel {dofs[0]}' if len(dofs) == 1
+                         else f'channels {dofs[0]} to {dofs[-1]}')
+            if isinstance(obj, TimeHistory) and len(obj.abscissa) > 1:
+                try:
+                    words.append(f'{obj.sample_rate:.6g} Hz')
+                except ValueError:
+                    # no one rate to state; the file is indexed all the
+                    # same, since what is in it is not the index's to judge
+                    words.append('samples not evenly spaced')
+        kind = display_name(type(obj).__name__)
+        parts.append(f'{kind}: {", ".join(words)}' if words else kind)
+    return '; '.join(parts)
+
+
+def holds_of_names(project: Mapping[str, Any], names: Sequence[str]) -> str:
+    """`holds` for the objects of `project` called `names`; refuses an
+    empty selection, since an index entry has to say what it holds."""
+    if not names:
+        raise ValueError('say what the file holds: give holds, or the '
+                         'objects read from it')
+    return holds({name: project[name] for name in names})
 
 
 def remap_links(object_groups: Iterable[ObjectGroup],
@@ -457,7 +497,9 @@ class Project(dict):
                  active_geometry: str | None = None,
                  project_type: str | None = None,
                  object_groups: Iterable[ObjectGroup] | None = None,
-                 provenance: dict[str, dict[str, Any]] | None = None
+                 provenance: dict[str, dict[str, Any]] | None = None,
+                 data_index: DataIndex | Iterable[Mapping[str, Any]]
+                 | None = None
                  ) -> None:
         super().__init__(objects or {})
         self.name: str = str(name)
@@ -488,6 +530,17 @@ class Project(dict):
         #: offers (Brandon, 2026-08-23: explicit, never automatic —
         #: a report must not rewrite itself).
         self.provenance: dict[str, dict[str, Any]] = dict(provenance or {})
+        #: every file the project rests on, by name, size and SHA-256:
+        #: each file imported, and each document attached (`index_file`).
+        #: One index, whatever adds to it; saved in the `.vdyn`, and
+        #: printed by the report feature `data_index`
+        self.data_index: DataIndex = (
+            data_index if isinstance(data_index, DataIndex)
+            else DataIndex.from_records(data_index))
+        #: the file this project was last opened from or saved to, or
+        #: None: where a check of the data index looks for moved files,
+        #: and the file whose checksum the report states
+        self.file: str | None = None
         #: this sitting's acts, each a runnable line of Python — what
         #: the console shows and `session_script` exports (Brandon,
         #: 2026-08-30). In memory only, and deliberately so: the
@@ -658,10 +711,22 @@ class Project(dict):
 
         was_empty = not self
         result = read(str(path), **options)
+        # the file's checksum before anything is added: a file that
+        # cannot be hashed (gone since it was read) refuses the import
+        # whole rather than leave objects the index cannot trace.
+        # Opening a project into an empty one is opening it, not
+        # importing a file it rests on; its own index comes with it
+        indexed = not (isinstance(result, Project) and was_empty)
+        local = os.path.expanduser(str(path))
+        checksum = digest_file(local) if indexed else None
         self.project_type = project_type_of(str(path)) or self.project_type
         if isinstance(result, Project):
             mapping = {name: self.add(name, obj)
                        for name, obj in result.items()}
+            self.data_index.adopt(result.data_index, mapping)
+            if indexed:
+                self._index_import(local, result, list(mapping.values()),
+                                   checksum)
             if any(old != new for old, new in mapping.items()):
                 # a clash renamed something: the references the
                 # imported objects carry follow it
@@ -689,8 +754,28 @@ class Project(dict):
             if len(added) > 1 and any(isinstance(obj, ChannelTable)
                                       for obj in result.values()):
                 self.link(*added)
-            return added
-        return [self.add(display_name(type(result).__name__), result)]
+        else:
+            added = [self.add(display_name(type(result).__name__), result)]
+        self._index_import(local, result, added, checksum)
+        return added
+
+    def _index_import(self, path: str, result: Any, added: Sequence[str],
+                      checksum: tuple[int, str]) -> IndexEntry:
+        """Record an imported file in the data index: `result` is what
+        the reader returned, `added` the names its objects took, and
+        `checksum` the file's (size, SHA-256), taken before the objects
+        were added. The import's one implementation of the entry, for
+        `import_file` and for the app's own import alike."""
+        from .io import format_of
+
+        if isinstance(result, Project):
+            said = f'Visual Dynamics project: {len(result)} objects'
+        else:
+            said = holds(result if isinstance(result, dict)
+                         else {'': result})
+        return self.data_index.add(
+            path, said or 'nothing Visual Dynamics reads',
+            format=format_of(path), objects=added, checksum=checksum)
 
     def remove(self, *names: str) -> None:
         """Delete objects and take them out of every object group.
@@ -707,6 +792,15 @@ class Project(dict):
         -------
         None
         """
+        # a file's entry goes with the last object read from it, unless
+        # an object still here was derived from one of them: a PSD
+        # kept after its time history was removed still rests on the
+        # file. Asked before the removal, while the names still resolve
+        gone = [name for name in names if name in self]
+        staying = [name for name in self if name not in gone]
+        self.data_index.forget_objects(gone, keep=lambda entry: any(
+            self._descends_from(name, source) for name in staying
+            for source in entry.objects))
         for name in names:
             self.pop(name, None)
             if self.active_geometry == name:
@@ -759,6 +853,7 @@ class Project(dict):
         for record in self.provenance.values():
             if record.get('source') == old:
                 record['source'] = new
+        self.data_index.rename_object(old, new)
         return new
 
     def rename_dof(self, source: Any, old: str, new: str,
@@ -4969,8 +5064,12 @@ class Project(dict):
         names = tuple(self.name_of(n) for n in names)
         merged = merge_objects([self[n] for n in names])
         group = self.object_group_of(names[0]) or []
+        # the merged object rests on every file its parts were read from
+        held = DataIndex([entry for entry in self.data_index
+                          if set(entry.objects) & set(names)])
         self.remove(*names)
         added = self.add(name or names[0], merged)
+        self.data_index.adopt(held, dict.fromkeys(names, added))
         rest = [member for member in group if member in self]
         if rest:
             self.link(added, *rest)
@@ -5456,6 +5555,136 @@ class Project(dict):
                     'caption': str(caption)})
         return report.num_blocks - 1
 
+    def index_file(self, path: str | os.PathLike, holds: str | None = None,
+                   *, role: str = 'referenced', objects: Sequence[str] = (),
+                   source: str = 'author',
+                   progress: Any | None = None) -> IndexEntry:
+        """Add a file to the project's data index (the report editor's
+        Insert, Attached File).
+
+        The data index lists every file the project rests on, by name,
+        what it holds, format, size and SHA-256, and the report feature
+        `data_index` prints it in the report's record. A file imported
+        into the project is indexed by the import; this adds any other
+        file: a document that goes with the report (the settings list,
+        the log, the as-run procedure, the flash report), or a data
+        file kept in the archive that was not imported. Another source
+        of files adds its entries through this verb as well, naming
+        itself in `source`, so the project keeps one index.
+
+        Parameters
+        ----------
+        path : str or os.PathLike
+            The file. It is hashed now.
+        holds : str, optional
+            What the file is or holds, in words ("settings list", "log,
+            Day 1 and Day 2"). Taken from `objects` when omitted.
+        role : str, default 'referenced'
+            'attached' for a document sent with the report, or
+            'referenced' for a file named in it and kept in the archive.
+            An attached text file of up to 64 KiB is kept whole, so the
+            report can print it; a CSV prints as a table.
+        objects : sequence of str, optional
+            The project objects read from the file, by name.
+        source : str, default 'author'
+            What added the entry, as the index records it.
+        progress : callable, optional
+            Called as ``progress(bytes read, bytes in the file)`` while
+            the file is hashed.
+
+        Returns
+        -------
+        IndexEntry
+            The file's entry. The same file indexed again with the same
+            checksum is the same entry.
+
+        Raises
+        ------
+        ValueError
+            When neither `holds` nor `objects` says what the file holds,
+            for an unknown role, or for an object not in the project.
+            Nothing is changed.
+        FileNotFoundError, IsADirectoryError
+            When `path` is not a file.
+        """
+        from .io import format_of
+
+        names = [self.name_of(name) for name in objects]
+        if holds is None:
+            holds = holds_of_names(self, names)
+        local = os.path.expanduser(str(path))
+        return self.data_index.add(local, holds, format=format_of(local),
+                                   role=role, source=source, objects=names,
+                                   progress=progress)
+
+    def unindex_file(self, name: str) -> IndexEntry:
+        """Take a file out of the data index (the report editor's
+        Insert, Remove from Index).
+
+        For a document added by mistake, or one that no longer goes
+        with the report. A file imported into the project leaves the
+        index on its own when the last object read from it is removed.
+
+        Parameters
+        ----------
+        name : str
+            The file's name as the index prints it, or its path when
+            two entries share a name.
+
+        Returns
+        -------
+        IndexEntry
+            The entry taken out.
+
+        Raises
+        ------
+        ValueError
+            When no entry, or more than one, has that name. Nothing is
+            changed.
+        """
+        return self.data_index.remove(name)
+
+    def verify_data_index(self, search: Sequence[str | os.PathLike] = (),
+                          progress: Any | None = None) -> list[str]:
+        """Hash every file in the data index again and record whether
+        it matches (what Export does when the report prints the index).
+
+        A file is looked for where it was indexed, then by its name in
+        each folder of `search`, then beside the project's own file. It
+        matches when its size and SHA-256 are the ones indexed; it has
+        changed when they are not; it is not found when it is nowhere.
+        The result is kept with each entry and printed in the report.
+        The project's own file, when it has one, is hashed too, and the
+        report states it.
+
+        Parameters
+        ----------
+        search : sequence of str, optional
+            Folders to look in for files that are not where they were
+            indexed, for example the archive copy.
+        progress : callable, optional
+            Called as ``progress(bytes read, bytes to read)`` across the
+            whole index.
+
+        Returns
+        -------
+        list of str
+            One line per file, in the index's order: its name and what
+            the check found, such as 'run11.nc4: matches'. Empty when the
+            index is empty.
+        """
+        folders = [os.path.expanduser(str(folder)) for folder in search]
+        if self.file:
+            folders.append(os.path.dirname(self.file))
+        entries = self.data_index.verify(folders, progress)
+        self.data_index.project_file = None
+        if self.file and os.path.isfile(self.file):
+            size, sha = digest_file(self.file)
+            self.data_index.project_file = (
+                os.path.basename(self.file), size, sha, entries[0].checked
+                if entries else _index_now())
+        return [f'{entry.name}: {entry.status}' for entry in entries]
+
     def _report(self, name: str) -> Report:
         """The report called `name`; `TypeError` for anything else."""
         name = self.name_of(name)
@@ -5686,8 +5915,13 @@ class Project(dict):
             The path written.
         """
         from .report import render_html
+        from .report.features import enabled
 
         name = self.name_of(name)
+        if 'data_index' in enabled(self[name]):
+            # the export states what the check found today, not at the
+            # last check: every indexed file is hashed again first
+            self.verify_data_index()
         html = render_html(self[name], self, unit_system, object_groups=self.object_groups)
         path = os.path.expanduser(str(path))
         with open(path, 'w', encoding='utf-8') as out:
@@ -6306,7 +6540,10 @@ class Project(dict):
         save_test(str(path), self.name, dict(self),
                   active_geometry=self.active_geometry,
                   project_type=self.project_type, object_groups=self.object_groups,
-                  provenance=self.provenance)
+                  provenance=self.provenance,
+                  data_index=self.data_index.records())
+        written = str(path) if str(path).endswith('.vdyn') else f'{path}.vdyn'
+        self.file = os.path.abspath(os.path.expanduser(written))
         return str(path)
 
     @classmethod
@@ -6330,6 +6567,7 @@ class Project(dict):
             # reproduces this state exactly
             loaded.journal = [
                 f'project = visualdynamics.Project.open({str(path)!r})']
+            loaded.file = os.path.abspath(os.path.expanduser(str(path)))
             return loaded
         raise ValueError(f'{path} holds a single object, not a project')
 
@@ -6946,6 +7184,7 @@ _JOURNALED_VERBS = (
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',
     'generate_report', 'report_features', 'report_section',
     'report_test_date', 'predict', 'report_prediction', 'export_report',
+    'index_file', 'unindex_file', 'verify_data_index',
     'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:

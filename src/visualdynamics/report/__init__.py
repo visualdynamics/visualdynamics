@@ -203,6 +203,9 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     # skeleton sections: the page laid out on the sections a test
     # report needs, the author's own blocks held back to head them
     skeleton = 'skeleton_sections' in active
+    # the data index: every file the report rests on, generated into
+    # the record section (or at the end, without the skeleton)
+    indexed = 'data_index' in active
     #: the report block each page block was built from, and each
     #: section's own blocks, for the skeleton
     origins: list[Mapping[str, Any]] = []
@@ -281,6 +284,12 @@ def _report_payload(report, objects, unit_system=None, edit=False,
 
         payload['blocks'] = arrange(payload['blocks'], origins, held,
                                     objects, object_groups, edit=edit)
+        if indexed:
+            from .data_index import page_blocks
+            from .skeleton import under
+
+            payload['blocks'] = under(payload['blocks'], 'record',
+                                      page_blocks(objects))
         # numbered again in the order the page now shows them
         figures = tables = 0
         for built in payload['blocks']:
@@ -290,6 +299,14 @@ def _report_payload(report, objects, unit_system=None, edit=False,
             elif built['kind'] == 'table':
                 tables += 1
                 built['label'] = f'Table {tables}'
+    elif indexed:
+        from .data_index import page_blocks
+
+        for built in page_blocks(objects, heading=True):
+            if built['kind'] == 'table':
+                tables += 1
+                built['label'] = f'Table {tables}'
+            payload['blocks'].append(built)
     if conventions:
         apply_conventions(payload, kinded,
                           shared='shared_decades' in active)
@@ -303,7 +320,9 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     if labels is not None:
         labels[:] = labeled
     for built in payload['blocks']:
-        if built['kind'] == 'text':
+        # a text block that arrives drawn (the data index's lines) keeps
+        # its HTML
+        if built['kind'] == 'text' and 'html' not in built:
             built['html'] = to_html(
                 _resolve_figures(built.pop('text'), labeled, edit),
                 tables=skeleton)

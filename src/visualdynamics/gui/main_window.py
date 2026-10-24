@@ -9012,10 +9012,14 @@ class MainWindow(QMainWindow):
                 # a lone project spends most of a big import *after* the
                 # read, building each object's rows — measured at 4 s of
                 # tree against 0.5 s of file — so the bar walks that too
+                opening = (isinstance(result, io.TestContents)
+                           and not self.objects)
                 added = self._add_result(
                     path, result, tick=None if many else tick,
                     options=options)
                 imported.append(added)
+                if not opening:
+                    self._index_import(path, result, added)
                 announced = self._adopt_project_type(
                     path, added if isinstance(added, list) else [added]) \
                     or announced
@@ -9192,7 +9196,42 @@ class MainWindow(QMainWindow):
         except (ValueError, OSError) as e:
             QMessageBox.critical(self, 'Import failed', str(e))
             return None
-        return self._add_result(path, result)
+        opening = isinstance(result, io.TestContents) and not self.objects
+        added = self._add_result(path, result)
+        if not opening:
+            self._index_import(path, result, added)
+        return added
+
+    #: a file larger than this is hashed on the worker, with the strip's
+    #: bar and Cancel; a smaller one is hashed where it is, which at the
+    #: speed SHA-256 runs is a few tens of milliseconds at most
+    INLINE_HASH_BYTES = 32 * 1024 * 1024
+
+    def _checksum(self, path: str):
+        """(size, SHA-256) of a file: on the worker when it is large."""
+        from ..core.data_index import digest
+
+        if os.path.getsize(path) > self.INLINE_HASH_BYTES:
+            return self._run_long(
+                f'Checksumming {os.path.basename(path)}…', digest, path)
+        return digest(path)
+
+    def _index_import(self, path, result, added) -> None:
+        """The file just imported, into the project's data index, as
+        `Project.import_file` records it in a script. A file that cannot
+        be hashed stays imported and the status line says it is not
+        indexed."""
+        from ..core.progress import Cancelled
+
+        names = [name for name in (added if isinstance(added, list)
+                                   else [added]) if name]
+        local = os.path.expanduser(str(path))
+        try:
+            checksum = self._checksum(local)
+            self.project._index_import(local, result, names, checksum)
+        except (OSError, ValueError, Cancelled) as failure:
+            self._show_status(f'{os.path.basename(local)} is imported but '
+                              f'not in the data index: {failure}')
 
     def _absorb_run_kin(self, names):
         """One controller file is one measurement: whatever a run
@@ -9306,7 +9345,11 @@ class MainWindow(QMainWindow):
                     if name in mapping and record.get('source') in mapping:
                         self.project.provenance[mapping[name]] = {
                             **record, 'source': mapping[record['source']]}
+                # and so does the data index: the files those objects
+                # were read from
+                self.project.data_index.adopt(result.data_index, mapping)
                 if fresh:
+                    self.project.file = os.path.abspath(str(path))
                     if result.name:
                         self.test_item.setText(0, result.name)
                         self.test_item.setData(0, ROLE_ORIGINAL_NAME, result.name)
@@ -18593,6 +18636,9 @@ class MainWindow(QMainWindow):
         if self.report_editor is None:
             self.report_editor = ReportEditor()
             self.report_editor.export_requested.connect(self.export_report)
+            self.report_editor.attach_requested.connect(self.attach_to_report)
+            self.report_editor.unindex_requested.connect(
+                self.unindex_from_report)
             self.report_editor.template_requested.connect(
                 self.export_report_template)
             self.report_editor.edited.connect(self._journal_report_edit)
@@ -18736,6 +18782,8 @@ class MainWindow(QMainWindow):
         name = self.object_item().text(0)
         if not self._export_owed(obj, name):
             return
+        if not self._export_index(obj, name):
+            return
         path, _ = QFileDialog.getSaveFileName(
             self, 'Export Report', f'{name}.html', 'Report (*.html)')
         if not path:
@@ -18750,7 +18798,20 @@ class MainWindow(QMainWindow):
                 f'{"s" * (skipped != 1)} left out)') if skipped else ''
         self._show_status(
             f'Exported {os.path.basename(path)}{note} — opens in any '
-            'browser, nothing to install')
+            f'browser, nothing to install{self._index_said(obj)}')
+
+    def _index_said(self, report: Report) -> str:
+        """What the export's status line adds about the data index: the
+        check's own sentence, or that the index is empty, so a check of
+        nothing is never read as files that match; '' with the feature
+        off."""
+        from ..report.data_index import EMPTY, FEATURE, checked
+        from ..report.features import enabled
+
+        if FEATURE not in enabled(report):
+            return ''
+        index = self.project.data_index
+        return f'. {checked(index) if len(index) else EMPTY}'
 
     def _export_owed(self, report: Report, name: str) -> bool:
         """With skeleton sections on, list the sections the report
@@ -18775,6 +18836,108 @@ class MainWindow(QMainWindow):
                 | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No)
         return answer == QMessageBox.StandardButton.Yes
+
+    def _export_index(self, report: Report, name: str) -> bool:
+        """With the data index on, hash every indexed file again on the
+        worker, so the export states what the check found today, and
+        ask before exporting a report whose files do not all match;
+        True to go on. Without the feature nothing is read or asked."""
+        from ..core.data_index import MATCHES
+        from ..core.progress import Cancelled
+        from ..report.data_index import CHECK_WORDS, FEATURE
+        from ..report.features import enabled
+
+        if FEATURE not in enabled(report):
+            return True
+        try:
+            self._run_long('Checking the data index…',
+                           self.project.verify_data_index)
+        except Cancelled:
+            self._show_status('Export canceled: the data index was not '
+                              'checked')
+            return False
+        except OSError as failure:
+            QMessageBox.warning(self, 'Export Report',
+                                f'The data index could not be checked: '
+                                f'{failure}')
+            return False
+        astray = [entry for entry in self.project.data_index
+                  if entry.status != MATCHES]
+        if not astray:
+            return True
+        lines = '\n'.join(f'{entry.name}: {CHECK_WORDS[entry.status]}'
+                          for entry in astray)
+        one = len(astray) == 1
+        with self._asking():
+            answer = QMessageBox.question(
+                self, 'Export Report',
+                f'{len(astray)} file{"" if one else "s"} in the data index '
+                f'of {name} do{"es" if one else ""} not match the checksum '
+                f'indexed:\n\n{lines}\n\nExport anyway?',
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+        return answer == QMessageBox.StandardButton.Yes
+
+    def attach_to_report(self) -> None:
+        """Add a file to the data index from the report editor: the
+        file, what it is, and whether it goes with the report or is
+        kept in the archive; journaled as `index_file`."""
+        from PySide6.QtWidgets import QInputDialog
+
+        from ..core.progress import Cancelled
+
+        with self._asking():
+            path, _ = QFileDialog.getOpenFileName(
+                self, 'Attach a File to the Report', '', 'Any file (*)')
+        if not path:
+            return
+        base = os.path.basename(path)
+        with self._asking():
+            holds, ok = QInputDialog.getText(
+                self, 'Attach a File',
+                f'What {base} is or holds (a settings list, the log, the '
+                'as-run procedure):')
+        if not ok or not holds.strip():
+            return
+        roles = ['Attached: sent with the report',
+                 'Referenced: named in the report, kept in the archive']
+        with self._asking():
+            choice, ok = QInputDialog.getItem(
+                self, 'Attach a File', f'{base} goes with the report as:',
+                roles, 0, False)
+        if not ok:
+            return
+        role = 'attached' if choice == roles[0] else 'referenced'
+        try:
+            if os.path.getsize(path) > self.INLINE_HASH_BYTES:
+                entry = self._run_long(f'Checksumming {base}…',
+                                       self.project.index_file, path, holds,
+                                       role=role)
+            else:
+                entry = self.project.index_file(path, holds, role=role)
+        except Cancelled:
+            self._show_status(f'{base} was not added to the data index')
+            return
+        except (OSError, ValueError) as failure:
+            QMessageBox.warning(self, 'Attach a File', str(failure))
+            return
+        self._show_status(f'{entry.name} added to the data index, '
+                          f'{entry.role}')
+        if self.report_editor is not None:
+            self.report_editor.rebuild()
+
+    def unindex_from_report(self, name: str) -> None:
+        """Take a file out of the data index from the report editor;
+        journaled as `unindex_file`."""
+        try:
+            self.project.unindex_file(name)
+        except ValueError as failure:
+            QMessageBox.warning(self, 'Remove from Index', str(failure))
+            return
+        self._show_status(f'{name} taken out of the data index')
+        if self.report_editor is not None:
+            self.report_editor.rebuild()
 
     def _merge_candidates(self):
         """[(name, object)] when the selection is a legitimate merge —

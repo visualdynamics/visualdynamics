@@ -20,6 +20,7 @@ from typing import Any
 
 from . import (
     adf,
+    delimited,
     escdf_objects,
     excel,
     exodus,
@@ -250,6 +251,11 @@ register_importer('matlab', 'MATLAB file, the project layout (.mat)',
                   matlab.sniff, matlab.load)
 register_importer('escdf', 'Engineering Sciences Common Data Format (.h5)',
                   escdf_objects.sniff, escdf_objects.load)
+# last on purpose: a text file another importer recognizes by its
+# content is that importer's, and only numbers in columns are left here
+register_importer('delimited',
+                  'Delimited text time history (.csv/.tsv/.txt)',
+                  delimited.sniff, delimited.load)
 
 register_exporter('sdynpy_geometry', 'sdynpy native geometry (.npz)', '.npz',
                   sdynpy_npz.handles, sdynpy_npz.save)
@@ -315,6 +321,10 @@ register_exporter('matlab', 'MATLAB file (.mat)', matlab.SUFFIX,
                   matlab.handles, matlab.save)
 register_exporter('escdf', 'Engineering Sciences Common Data Format (.h5)',
                   escdf_objects.SUFFIX, escdf_objects.handles, escdf_objects.save)
+# a time history back out as the text it most often arrives as, read
+# back by the delimited importer with its units from the header
+register_exporter('delimited', 'Delimited text time history (.csv)', '.csv',
+                  delimited.handles, delimited.save)
 
 __all__ = ['ImportNote', 'TestContents', 'export_file', 'exporters', 'from_sep005',
            'import_file', 'importers', 'load', 'native', 'project_type_of',

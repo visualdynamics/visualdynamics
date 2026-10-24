@@ -3492,6 +3492,72 @@ def plot_time_statistics(history: Any, record: int = 0, *,
 
 
 
+def plot_import_preview(source: Any, *, unit_system: UnitSystem | None = None,
+                        theme: Any = None, path: str | os.PathLike | None = None,
+                        show: bool = True, title: str | None = None,
+                        size: tuple[int, int] | None = None,
+                        **options: Any) -> Any:
+    """Draw each channel of an import as read, one row apiece, with its
+    missing samples and a dead channel marked.
+
+        visualdynamics.plot.plot_import_preview('run.csv', sample_rate=5120,
+                                                path='preview.png')
+
+    `source` is a time history, or a delimited text file read by
+    `io.delimited.read_delimited` with `options`. Each channel is drawn
+    against time in its own row (`plot.text_import`), titled with its
+    label and what `core.channel_health` finds in it in words; a missing
+    sample is a cross on the row's zero line at its time. This is the
+    preview the window's delimited-text import dialog draws while the
+    layout is set.
+
+    Parameters
+    ----------
+    source : TimeHistory, str or os.PathLike
+        The channels, or the file to read them from.
+    unit_system, theme, path, show, title
+        As for every standalone plot.
+    size : tuple of int, optional
+        The picture's size; 220 pixels a row when omitted.
+    **options
+        Passed to `read_delimited` when `source` is a file.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        As `read_delimited` refuses the file.
+    """
+    import warnings
+
+    from ..io.delimited import read_delimited
+    from .text_import import MAX_ROWS, build_import_preview
+
+    name = None
+    history = source
+    if isinstance(source, (str, os.PathLike)):
+        name = os.path.basename(str(source))
+        # what the import notes, the picture shows; a script that wants
+        # the notes reads the file itself
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            history = read_delimited(source, **options)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_import_preview(widget, history, unit_system=unit_system,
+                             theme=theme)
+
+    rows = min(history.num_records, MAX_ROWS)
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{name or "Import"}: the channels as read'),
+                        size=size or (1000, 120 + 220 * rows))
+
+
 def plot_pulse_check(history: Any, shape: str, peak: float,
                      duration: float, edge: float | None = None, *,
                      channel: int | str | None = None,

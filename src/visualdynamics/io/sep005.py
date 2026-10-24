@@ -23,6 +23,8 @@ from typing import Any
 
 import numpy as np
 
+from .stated_units import declare_stated_units
+
 # Staying free of imports keeps the license boundary simple.
 
 #: SEP 005 quantity letters -> the dimension recorded as the claim in
@@ -131,15 +133,10 @@ def _one(series: dict[str, Any]) -> Any:
     units = series.get('unit_str')
     if isinstance(units, str) or units is None:
         units = [units] * channels
-    for i, unit in enumerate(units[:channels]):
-        if not unit:
-            continue
-        try:
-            out.define_units({i: str(unit)})
-        except Exception:  # noqa: BLE001 — pint's parse failures span
-            # UndefinedUnitError (an AttributeError), DefinitionSyntaxError
-            # and ValueError; whichever it is, the answer is the same:
-            # the claim is kept as a hint and the values stay raw
-            if out.dimension_hint[i] is None:
-                out.dimension_hint[i] = str(unit)
+    # a unit that cannot be declared keeps the claim as a hint and the
+    # values raw; which units can be is the one rule every reader of
+    # stated units follows (stated_units)
+    for i, unit, _reason in declare_stated_units(out, units[:channels]):
+        if out.dimension_hint[i] is None:
+            out.dimension_hint[i] = unit
     return out

@@ -7950,7 +7950,8 @@ class MainWindow(QMainWindow):
         filters = ('Importable files (*.vdyn *.vdreport *.npz *.exo *.e *.exo2 *.g *.gen '
                    '*.unv *.uff *.uf *.nc4 *.nc *.afu *.ati *.ash '
                    '*.bdf *.dat *.nas *.pch *.neu *.3mf *.stl '
-                   '*.step *.stp *.iges *.igs *.h5 *.hdf5 *.escdf'
+                   '*.step *.stp *.iges *.igs *.h5 *.hdf5 *.escdf '
+                   '*.csv *.tsv *.txt *.tab *.asc *.prn'
                    ');;All files (*)')
         paths, _ = QFileDialog.getOpenFileNames(self, 'Import', '', filters)
         self.import_paths(paths)
@@ -8323,6 +8324,24 @@ class MainWindow(QMainWindow):
                                     importing=False)
         dialog.exec()
 
+    def _text_import_choices(self, path):
+        """How a delimited text file should be read, asked every time.
+
+        {} for anything that is not delimited text — no dialog. A text
+        export says nothing about itself that can be trusted unseen
+        (which column is time, at what rate, in which units), so its
+        layout is shown on a preview of the channels and set where it
+        is wrong: the dialog's answer in the reader's own keywords, or
+        None to skip the file.
+        """
+        from ..io import delimited
+
+        if not delimited.sniff(path):
+            return {}
+        from .text_import import ask_text_import
+
+        return ask_text_import(self, path, resolve_theme(self.theme_name))
+
     def _exodus_import_choices(self, path):
         """How an exodus file's results should be read, asked as needed.
 
@@ -8440,6 +8459,12 @@ class MainWindow(QMainWindow):
                         options = self._exodus_import_choices(path)
                         if options is None:
                             continue
+                        # a text export is read the way its layout was
+                        # found, shown on a preview and set where wrong
+                        text = self._text_import_choices(path)
+                        if text is None:
+                            continue
+                        options = {**options, **text}
                         # a stream that would take a large share of
                         # the machine is imported through a window the
                         # user chooses on a preview — or not at all

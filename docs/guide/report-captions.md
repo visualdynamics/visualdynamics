@@ -26,28 +26,38 @@ The block has eight rows, always in this order:
 
 | Row | Read from |
 |---|---|
-| Channel | The record's DOF and quantity, with the channel number from the channel table row of that DOF and quantity |
+| Channel | The record's DOF and quantity, with the channel number from the channel table row of that DOF and quantity; a cross term names its reference channel after it |
 | Location and axis | The node and direction in the DOF, the channel table's comment, and the global axis the direction is nearest on the geometry |
 | Run | The time history the spectrum was computed from, and the stretch of it averaged, in seconds on its clock |
-| Estimate | ASD or CPSD, one channel or several, a linear average of how many frames, and the bands for a banded spectrum |
+| Estimate | ASD or CPSD, one channel or several, a linear average of how many frames, how many records each channel pooled when any pooled more than one, and the bands for a banded spectrum |
 | Resolution | The line spacing, or the bands and the lines they were banded from |
-| Window | The window, the overlap and the frame length the spectrum was averaged with |
+| Window | The averaging's own description (`Averaging.describe`): the window and its parameter, the overlap, the frame length, and the detrend when there is one |
 | DOF | The equivalent degrees of freedom, discounted for overlap, beside the nominal count |
-| Requirement | The specification drawn, which of its limits are drawn, and the overall rms measured beside the rms it asks for, over the band the comparison judged |
+| Requirement | The specification drawn, which of its limits are drawn, and the overall rms measured (and as drawn, where the comparison scales it) beside the rms it specifies, over the band the comparison judged |
 
 A fact nothing records is written as "not recorded" rather than left
 out, so a reader sees the gap instead of assuming the row was never
-needed. A spectrum imported from a file carries no averaging, so its
-window, frames and degrees of freedom read "not recorded", and it
-names itself as the run. A banded spectrum carries no degrees of
+needed. A spectrum imported from a file carries no averaging and no
+run the project knows of, so its run, window, frames and degrees of
+freedom read "not recorded": the name an import gave the object is
+not a run. A banded spectrum carries no degrees of
 freedom of its own, because banding sums lines and raises the count;
 its caption gives the count of each narrowband line before banding,
 and says so.
 
-The two rms values in the Requirement row are the comparison's own
-(the ones the verdict table states): both over the band it judged,
-with the measurement scaled as it is drawn, and the scale named in the
-row when there is one.
+The rms values in the Requirement row are the comparison's own (the
+ones the verdict table states), over the band it judged. Where the
+comparison scales the measurement to the specification, the row gives
+the measured rms both as measured, the number a reader holding the raw
+data would compute, and as drawn and judged; the scale itself is in
+the figure's legend and caption.
+
+Where the channels of one figure pooled different numbers of records
+(two captures of one channel and one of another), the Estimate row
+says how many each pooled, since that sets each channel's degrees of
+freedom. The overlap is written the same way in a caption, a label and
+a `{{Object.overlap}}` reference: two-thirds overlap is 66.7% in all
+three.
 
 ## In a script
 

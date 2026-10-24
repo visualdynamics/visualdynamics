@@ -133,6 +133,11 @@ two transmissibilities](transmissibility.md)).
 distortion against frequency with the limit across it, the reading the
 sine view's Distortion readout shows ([Checking a sine record for
 distortion](sine-distortion.md)).
+`plot_matrix_comparison(specification, cpsd)` draws a run's
+cross-spectral matrix against its specification as a grid, the levels
+on the diagonal, the coherence above and the phase below, each cell
+with its verdict, the reading the Matrix toggle shows ([Judging a
+cross-spectral matrix](matrix-comparison.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

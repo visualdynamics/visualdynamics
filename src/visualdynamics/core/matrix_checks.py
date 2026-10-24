@@ -114,6 +114,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any
 
 import numpy as np
@@ -848,6 +849,13 @@ class Realizability:
     def worst(self) -> tuple[int, int, int] | None:
         """(i, j, line) of the cross term the repair moved most, as a
         complex coherence entry, or None when nothing moved."""
+        return self._worst
+
+    # worked out once and kept: the reading is read again at every move
+    # of the window's cursor, and on a large target these are a tenth
+    # of a second of the window's time each
+    @cached_property
+    def _worst(self) -> tuple[int, int, int] | None:
         n = len(self.channels)
         if n < 2 or not self.failing.any():
             return None
@@ -865,6 +873,10 @@ class Realizability:
         made to any pair's coherence and to any phase, over lines where
         the pair's coherence is not zero after (a phase is undefined
         without it)."""
+        return self._changes
+
+    @cached_property
+    def _changes(self) -> tuple[float, float]:
         n = len(self.channels)
         largest_coherence = largest_phase = 0.0
         for i in range(n):

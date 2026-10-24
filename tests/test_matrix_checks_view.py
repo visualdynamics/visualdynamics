@@ -206,3 +206,72 @@ def test_the_sheet_refuses_entries_that_cannot_hold(window, pump):
     pump()
     assert panel.problem.text() == ''
     assert window.project['Channels Specification'].num_records == 9
+
+
+def test_the_reading_and_the_repair_run_off_the_window_thread(window, pump,
+                                                              monkeypatch):
+    """A repair of a large target is seconds: the reading and Make
+    Realizable run on the worker, and a cursor moved or a drawing made
+    again reads the reading held rather than making it again."""
+    import threading
+
+    from visualdynamics.core import matrix_checks
+
+    threads = []
+    original = matrix_checks.check_spectral_matrix
+
+    def recorded(*args, **kwargs):
+        threads.append(threading.current_thread())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(matrix_checks, 'check_spectral_matrix', recorded)
+    pane = _show(window, pump, 'Spec', _specification())
+    pane.realizability_action.trigger()
+    pump()
+    assert len(threads) == 1
+    assert threads[0] is not threading.main_thread()
+    state = window._matrix_check
+    state['cursor'].setValue(np.log10(400.0))
+    pump()
+    window.render_current()
+    pump()
+    assert len(threads) == 1, 'the reading held is read again'
+    pane.realizability_panel.apply_button.click()
+    pump()
+    assert 'Spec Realizable' in window.project
+    assert all(thread is not threading.main_thread() for thread in threads)
+    assert len(threads) == 3, 'the repair, then the repaired reading'
+
+
+def test_the_reading_follows_its_object(window, pump):
+    """A reading held is let go when the object it was made of changes or
+    another is shown: the pane reads what is selected now."""
+    pane = _show(window, pump, 'Spec', _specification())
+    pane.realizability_action.trigger()
+    pump()
+    panel = pane.realizability_panel
+    assert 'not realizable' in panel.verdict.text()
+    spec = window.project['Spec']
+    spec.ordinate = _specification(phase_13=0.0).ordinate
+    window.render_current()
+    pump()
+    assert 'realizable at all 100 lines' in panel.verdict.text()
+    _show(window, pump, 'Other', _specification())
+    assert 'not realizable at 100 of 100 lines' in panel.verdict.text()
+    assert window._matrix_check['name'] == 'Other'
+
+
+def test_a_cancelled_reading_says_so(window, pump, monkeypatch):
+    from visualdynamics.core.progress import Cancelled
+
+    def cancelled(self, *args, **kwargs):
+        raise Cancelled('Reading the realizability')
+
+    pane = _show(window, pump, 'Spec', _specification())
+    monkeypatch.setattr(Specification, 'realizability', cancelled)
+    pane.realizability_action.trigger()
+    pump()
+    panel = pane.realizability_panel
+    assert panel.verdict.text() == 'No realizability read: cancelled'
+    assert window._matrix_check is None
+    assert window.statusBar().currentMessage() == 'Spec: realizability cancelled'

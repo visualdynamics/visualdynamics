@@ -1219,6 +1219,15 @@ class MainWindow(QMainWindow):
         #: where each object's cursor was left, by (check, name)
         self._matrix_check: dict[str, Any] | None = None
         self._matrix_check_frequencies: dict[tuple[str, str], float] = {}
+        #: the reading last made, as (check, object, its ordinate, the
+        #: reading): it is read on the worker (a repair of a large
+        #: target is seconds), so a cursor moved, a theme changed or a
+        #: drawing made again reads the one held. Let go when neither
+        #: check is up. And the (check, object) being read while the
+        #: worker runs, with whether a drawing came in meanwhile
+        self._held_matrix_check: tuple | None = None
+        self._matrix_check_reading_for: tuple | None = None
+        self._matrix_check_redraw: bool = False
         #: and the shock windows, the same way
         self.shock_overlays: list[Any] = []
         #: which comparison the plot is drawing, so the compliance table
@@ -13149,6 +13158,7 @@ class MainWindow(QMainWindow):
         import pyqtgraph as pg
         from PySide6.QtCore import Qt
 
+        from ..core.progress import Cancelled
         from ..plot.matrix_checks import (
             build_conditioning,
             build_realizability,
@@ -13162,10 +13172,19 @@ class MainWindow(QMainWindow):
         pane.graphics.clear()
         panel.show()
         try:
-            reading = getattr(data, check)()
+            reading = self._matrix_check_reading(check, name, data)
+        except Cancelled:
+            panel.show_reading(None, refusal=f'No {check} read: cancelled')
+            return f'{name}: {check} cancelled'
         except (ValueError, TypeError) as refusal:
             panel.show_reading(None, refusal=f'No {check} read: {refusal}')
             return f'{name}: no {check} read: {refusal}'
+        if reading is None:
+            # asked for again while the worker reads it: the drawing
+            # under way comes back here once the reading is held
+            panel.show_reading(None, refusal=f'Reading the {check}…')
+            return f'{name}: reading the {check}…'
+        pane.graphics.clear()
         scale, unit = 1.0, ''
         if check == 'conditioning':
             if reading.dimension != UNKNOWN:
@@ -13211,6 +13230,44 @@ class MainWindow(QMainWindow):
         self._matrix_check_moved()
         return f'{name}: {reading.describe()}'
 
+    def _matrix_check_reading(self, check, name, data):
+        """The check's reading of `data`: the one held when it was made
+        of this object as it stands, otherwise made on the worker with
+        the strip's bar and Cancel (`_run_long`), since a repair of a
+        large target holds the window for seconds. None when the same
+        reading is already being made, which the drawing that asked
+        for it first finishes, drawing again after if one came in."""
+        from PySide6.QtCore import QTimer
+
+        held = self._held_matrix_check
+        if (held is not None and held[0] == check and held[1] is data
+                and held[2] is data.ordinate):
+            return held[3]
+        if self._matrix_check_reading_for is not None:
+            self._matrix_check_redraw = True
+            return None
+        def read(progress=None):
+            # the verdict worked out here too, on the worker: on a large
+            # target the pair the repair moved most is its own tenth of
+            # a second, and the reading keeps it
+            made = getattr(data, check)(progress=progress)
+            made.describe()
+            if check == 'realizability':
+                made.changes()
+            return made
+
+        self._held_matrix_check = None
+        self._matrix_check_reading_for = (check, data)
+        try:
+            reading = self._run_long(f'Reading the {check} of {name}…', read)
+        finally:
+            self._matrix_check_reading_for = None
+        self._held_matrix_check = (check, data, data.ordinate, reading)
+        if self._matrix_check_redraw:
+            self._matrix_check_redraw = False
+            QTimer.singleShot(0, self.render_current)
+        return reading
+
     def _matrix_check_moved(self, _line=None):
         """Read the line under the cursor into the pane and the status
         line. Returns the status line."""
@@ -13252,10 +13309,14 @@ class MainWindow(QMainWindow):
         """Repair the selected CSD or specification to the nearest
         realizable matrix and add the result beside it: the
         Realizability reading's apply button, the verb a script calls."""
+        # on the worker with the bar and Cancel, as the reading was: the
+        # repair of a large target is seconds of projections
         acted = self._act_on(
             lambda o: isinstance(o, Psd) and o.reference_dof is not None,
             'Select a CSD or a specification with cross terms to repair',
-            self.project.make_realizable)
+            lambda name: self._run_long(
+                f'Repairing {name} to the nearest realizable matrix…',
+                self.project.make_realizable, name))
         if acted is None:
             return
         name, _obj, added = acted
@@ -13846,6 +13907,7 @@ class MainWindow(QMainWindow):
             source = self._matrix_check_source(check, series)
             if source is not None and self.data_pane.showing(check):
                 return self._render_matrix_check(check, *source)
+        self._held_matrix_check = None
         if all_frf and self.data_pane.showing_cmif:
             drawn = build_cmif(self.data_pane.graphics, series,
                                unit_system=self.unit_system,

@@ -54,7 +54,12 @@ def singular_name(k: int) -> str:
 def hatch_bands(plot: Any, frequency: Any, flags: Any, color: Any) -> list:
     """Hatch the runs of flagged lines on `plot`, each from halfway to
     the line before to halfway to the line after, and return the items.
-    On a log frequency axis the edges are placed in decades."""
+    On a log frequency axis the edges are placed in decades.
+
+    Every run is one filled outline in a single item, reaching far past
+    any range the plot shows: an item per run cost a couple of
+    milliseconds each, and a reading flagged in a few hundred places
+    held the window for a fifth of a second."""
     import pyqtgraph as pg
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QBrush
@@ -62,11 +67,13 @@ def hatch_bands(plot: Any, frequency: Any, flags: Any, color: Any) -> list:
     from ..core.matrix_checks import flagged_runs
 
     f = np.asarray(frequency, dtype=float)
-    log_x = plot.getViewBox().state['logMode'][0]
+    log_x, log_y = plot.getViewBox().state['logMode'][:2]
     hatch = pg.mkColor(color)
     hatch.setAlpha(HATCH_ALPHA)
     brush = QBrush(hatch, Qt.BrushStyle.BDiagPattern)
-    items = []
+    # in decades on a log axis, in values on a linear one
+    low_y, high_y = (-300.0, 300.0) if log_y else (-1e9, 1e9)
+    xs: list[float] = []
     for low, high in flagged_runs(f, np.asarray(flags, dtype=bool)):
         i, j = int(np.searchsorted(f, low)), int(np.searchsorted(f, high))
         left = 0.5 * (f[i] + f[i - 1]) if i > 0 else f[i]
@@ -78,12 +85,17 @@ def hatch_bands(plot: Any, frequency: Any, flags: Any, color: Any) -> list:
             edges = (float(np.log10(left)), float(np.log10(right)))
         else:
             edges = (float(left), float(right))
-        region = pg.LinearRegionItem(values=edges, movable=False,
-                                     brush=brush, pen=pg.mkPen(None))
-        region.setZValue(-10)
-        plot.addItem(region, ignoreBounds=True)
-        items.append(region)
-    return items
+        xs += [edges[0], edges[0], edges[1], edges[1]]
+    if not xs:
+        return []
+    # up at each run's left edge, along, and down at its right: between
+    # runs the outline lies on the fill level and encloses nothing
+    ys = np.tile([low_y, high_y, high_y, low_y], len(xs) // 4)
+    region = pg.PlotCurveItem(np.asarray(xs), ys, pen=pg.mkPen(None),
+                              brush=brush, fillLevel=low_y)
+    region.setZValue(-10)
+    plot.addItem(region, ignoreBounds=True)
+    return [region]
 
 
 def _title(reading: Any) -> str:

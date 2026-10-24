@@ -78,10 +78,11 @@ def _spec(tones=TONES, floor=None, **options):
 
 @pytest.fixture(scope='module')
 def composite():
-    """The three-tone composite read against its own specification."""
+    """The three-tone composite read against its own specification, its
+    tones running from the record's first sample."""
     history = _record()
     spec = _spec()
-    return history, spec, judge_mixed(history, spec)
+    return history, spec, judge_mixed(history, spec, onset=0.0)
 
 
 # ---- the parts, by hand ---------------------------------------------------
@@ -170,7 +171,15 @@ def test_the_three_figures_come_from_the_parts():
         np.sqrt(1.0 + 6.1489 + 0.4), abs=5e-4)
 
 
-def test_the_lines_left_out_follow_each_tone_and_its_sweep():
+def test_the_lines_left_out_are_those_a_tone_held():
+    """A fixed tone holds every line within the width for its whole
+    run. A sweep from 100 to 120 Hz at 1 Hz/s holds a line inside it
+    within 1.5 Hz for 3 of its 20 s, 0.15 of the run, and is left out
+    there; a line 0.5 Hz from either end holds it 2 s, 0.1; a line at
+    either end 1.5 s, which is not enough. A sweep across a thousand
+    hertz holds no line long enough to leave it out."""
+    from visualdynamics.core.mixed_mode import LEFT_OUT_SHARE, held_share
+
     spec = MixedSpecification(_floor(), [Tone(20.0, G),
                                          Tone(100.0, G, sweep_to=120.0,
                                               rate=1.0)],
@@ -179,7 +188,15 @@ def test_the_lines_left_out_follow_each_tone_and_its_sweep():
     out = spec.left_out(f)
     assert f[out & (f < 50)].tolist() == [18.5, 19.0, 19.5, 20.0, 20.5,
                                           21.0, 21.5]
-    assert f[out & (f > 50)][[0, -1]].tolist() == [98.5, 121.5]
+    swept = spec.tones.tones[1]
+    share = held_share(swept, [100.0, 101.0, 110.0, 119.0, 120.0], 1.5)
+    assert share == pytest.approx([0.075, 0.125, 0.15, 0.125, 0.075],
+                                  abs=2e-3)
+    kept = f[out & (f > 50)]
+    assert kept[0] in (100.5, 101.0) and kept[-1] in (119.0, 119.5)
+    assert not out[(f >= 99.0) & (f <= 100.0)].any()
+    wide = Tone(20.0, G, sweep_to=1020.0, rate=10.0).sine_tone()
+    assert held_share(wide, f, 2.0).max() < LEFT_OUT_SHARE
     assert MixedSpecification(_floor()).left_out(f).sum() == 0
 
 
@@ -241,6 +258,7 @@ def test_the_tones_taken_out_leave_the_floor(composite):
     assert reading.composite[reading.left_out].max() > 100 * \
         reading.residual[reading.left_out].max()
     assert reading.start == 2.0 and reading.passed
+    assert floor.allowed >= floor.outside and floor.expected < 1.0
 
 
 def test_the_total_is_every_line_and_carries_no_verdict(composite):
@@ -393,7 +411,114 @@ def test_a_swept_tone_is_tracked_along_its_sweep():
     row, = reading.tones
     assert not row.fixed and (row.low, row.high) == (20.0, 40.0)
     assert row.measured / G == pytest.approx(1.0, rel=0.02) and row.passed
-    assert reading.floor.left_out == pytest.approx(25.0 / 396.0)
+    assert reading.onset == pytest.approx(0.0, abs=2.0 / FS)
+    # held for 4 of its 20 s by the lines 22 to 38 Hz, and for 2 s, a
+    # tenth of the run, by those at 20 and 40 Hz
+    assert 17 <= round(reading.floor.left_out * 396) <= 21
+    assert reading.floor.passed
+
+
+def test_a_tone_that_starts_late_is_found_where_it_starts():
+    """Brandon's review: a sweep starting 3 s into the record, read
+    from the record's start, reads 0.044 g against 1 g. Found by matched
+    filter, as the extraction finds it, it reads 1 g. A steady tone that
+    starts late is placed somewhere it plays, never before it."""
+    tone = Tone(20.0, G, sweep_to=40.0, rate=1.0)
+    law = tone.sine_tone()
+
+    def late(t, _rng):
+        after = t - 3.0
+        return np.where((after >= 0.0) & (after <= law.duration()),
+                        np.cos(law.phase_at(np.maximum(after, 0.0))), 0.0)
+
+    history = _record(tones=(), extra=late, seconds=26.0)
+    spec = MixedSpecification(_floor(), [tone])
+    found = judge_mixed(history, spec)
+    assert found.onset == pytest.approx(3.0, abs=2.0 / FS)
+    assert found.tones[0].measured / G == pytest.approx(1.0, rel=0.02)
+    assert found.tones[0].passed
+    wrong = judge_mixed(history, spec, onset=0.0)
+    assert wrong.tones[0].measured / G == pytest.approx(0.044, abs=0.01)
+    assert not wrong.tones[0].passed
+
+    def steady(t, _rng):
+        return np.where(t >= 3.0, np.sin(2.0 * np.pi * 19.44 * t), 0.0)
+
+    fixed = judge_mixed(_record(tones=(), extra=steady),
+                        MixedSpecification(_floor(), [Tone(19.44, G)],
+                                           seconds=SECONDS))
+    assert fixed.onset >= 3.0 - 2.0 / FS and fixed.tones[0].passed
+
+
+def test_a_record_whose_clock_does_not_start_at_zero_reads_the_same(composite):
+    history, spec, reading = composite
+    later = TimeHistory(np.asarray(history.abscissa) + 100.0,
+                        history.ordinate, response_dof=[CHANNEL],
+                        ordinate_dim=['acceleration'], ordinate_unit=['g'])
+    moved = judge_mixed(later, spec, onset=reading.onset)
+    assert moved.start == pytest.approx(reading.start)
+    assert moved.floor.measured == pytest.approx(reading.floor.measured)
+    assert moved.tones_measured == pytest.approx(reading.tones_measured)
+
+
+def test_a_correctly_controlled_floor_passes_on_short_records():
+    """Brandon's review: every judged line within 3 dB and none outside
+    failed ten 10 s records of ten. An averaged line scatters: read from
+    2 s, after the band settled, a line has about 28.5 degrees of freedom
+    and is outside plus or minus 3 dB 1.4 percent of the time, five lines
+    of each record's 384. The lines are held to what chance puts
+    outside, and all ten pass."""
+    outside = 0
+    for seed in range(10):
+        reading = judge_mixed(_record(seconds=10.0, seed=100 + seed),
+                              _spec(), onset=0.0)
+        floor = reading.floor
+        assert floor.passed, (seed, floor.outside, floor.allowed)
+        assert floor.dof == pytest.approx(28.5, rel=0.02)
+        assert floor.expected == pytest.approx(384 * 0.01357, rel=0.02)
+        outside += floor.outside
+    assert outside > 0, 'the rule that failed them would fail some'
+
+
+def test_the_floor_s_rms_fails_alone_where_its_lines_do_not():
+    """A floor written 1 dB low reads 12 percent high in rms, past the
+    10 percent tolerance, while its lines, 1 dB over the reference, are
+    within 3 dB as chance allows."""
+    reading = judge_mixed(_record(), _spec(floor=_floor(1.0 / 395.0
+                                                        / 10 ** 0.1)))
+    floor = reading.floor
+    assert floor.error == pytest.approx(12.2, abs=2.0)
+    assert floor.outside <= floor.allowed
+    assert not floor.passed and not reading.passed
+
+
+def test_a_floor_with_no_line_left_is_not_judged_rather_than_failed():
+    """A sweep across the whole floor leaves it judged; a width left
+    out wider than the band leaves nothing, and the floor is then not
+    judged, said in a note, rather than failed."""
+    tone = Tone(10.0, G, sweep_to=390.0, rate=19.0)
+    law = tone.sine_tone()
+
+    def sweep(t, _rng):
+        return np.cos(law.phase_at(t))
+
+    history = _record(tones=(), extra=sweep)
+    across = judge_mixed(history, MixedSpecification(_floor(), [tone]),
+                         onset=0.0)
+    assert across.floor.left_out < 0.05 and across.floor.passed
+    nothing = judge_mixed(_record(), _spec(exclusion=500.0), onset=0.0)
+    assert nothing.floor.judged == 0 and nothing.floor.passed is None
+    assert nothing.passed and 'floor not judged' in nothing.describe()
+    assert any('not judged' in note for note in nothing.notes)
+
+
+def test_a_record_of_another_quantity_is_refused():
+    history = _record()
+    velocity = TimeHistory(history.abscissa, history.ordinate,
+                           response_dof=[CHANNEL], ordinate_dim=['velocity'],
+                           ordinate_unit=['m/s'])
+    with pytest.raises(ValueError, match='cannot be compared|not'):
+        judge_mixed(velocity, _spec(), onset=0.0)
 
 
 def test_a_channel_neither_holds_is_refused():
@@ -429,6 +554,32 @@ def test_the_narrowbands_and_the_width_travel_with_the_floor(tmp_path):
     native.save(_floor(), tmp_path / 'plain.vdyn')
     plain = native.load(tmp_path / 'plain.vdyn')
     assert plain.narrowbands == () and plain.tone_exclusion is None
+
+
+def test_a_band_written_by_a_later_version_still_reads():
+    fields = {**Narrowband.between(380.0, 420.0, 0.2).to_dict(),
+              'shape': 'raised cosine'}
+    assert Narrowband.from_dict(fields) == Narrowband.between(380.0, 420.0, 0.2)
+
+
+def test_the_narrowbands_survive_banding_and_the_sheet():
+    """Banded onto octaves and rewritten as a sheet, the floor keeps the
+    narrowbands and the width left out."""
+    import visualdynamics
+    from visualdynamics.core.author import SpecificationDraft
+
+    bands = (Narrowband.plus_minus(300.0, 5.0, 0.2),)
+    floor = MixedSpecification(_floor(), None, bands, 2.5).floor
+    banded = floor.to_octave(3)
+    assert banded.narrowbands == bands and banded.tone_exclusion == 2.5
+    project = visualdynamics.Project('Mixed')
+    project.add('Floor', floor)
+    draft = SpecificationDraft.from_specification(floor)
+    project.author_specification('Floor', draft, replace=True)
+    assert project['Floor'] is not floor
+    assert project['Floor'].narrowbands == bands
+    assert project['Floor'].tone_exclusion == 2.5
+    assert draft.written_into(floor).narrowbands == bands
 
 
 # ---- the view ----------------------------------------------------------------

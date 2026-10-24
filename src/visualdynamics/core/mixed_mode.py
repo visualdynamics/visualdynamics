@@ -21,22 +21,37 @@ with it the way its band constraints are.
 
 `judge_mixed` reads a record against it, one channel at a time:
 
-1. Each tone is read through a tracking band locked to its frequency
+1. Where the tones begin in the record is found by matched filter
+   (`core.sine.find_environment`), unless an onset is given. Each tone
+   is read through a tracking band locked to its frequency
    (`core.sine_tracking.track_sine`), the way a controller reads it.
    The band settles in about one over its width, so the readings before
    that are not used; the tone's level is the median of the rest, in
    amplitude, compared with the tone table, by default at plus or minus
-   10 percent (an example of what test documents ask for).
+   10 percent (an example of what test documents ask for). The median,
+   not the rms of the readings' deviation in dB that a sweep comparison
+   scores (`core.compliance.sine_errors`): a small tone near the floor
+   scatters through its band from reading to reading, and that scatter
+   is the floor's, not an error in the tone's level.
 2. What each band passed (`track_waveform`) is taken out of the record.
    What is left, the residual, is the floor and the narrowbands, and its
    averaged autospectrum is read for them.
-3. The floor is judged on the residual's lines with the lines within the
-   left-out width of every tone, and the lines of every narrowband, left
-   out: its rms against the reference's rms over the same lines (by
-   default plus or minus 10 percent), and every line against the
-   reference (by default plus or minus 3 dB). A swept tone's left-out
-   lines are every line within the width of any frequency it passes,
-   since every one of them held it for part of the run.
+3. The floor is judged on the residual's lines with the lines that held
+   a tone, and the lines of every narrowband, left out. A line held a
+   tone when the tone spent at least `LEFT_OUT_SHARE` of its run within
+   the left-out width of it: every line beside a fixed tone, and few or
+   none of the lines a long sweep passes, which it holds only briefly.
+   The floor is judged as a comparison is (`core.compliance.judge`,
+   line by line against the reference and the reference moved by the
+   line tolerance, by default plus or minus 3 dB): its rms against the
+   reference's over the same lines (by default plus or minus 10
+   percent), and its lines outside against the number chance puts
+   outside at their degrees of freedom. An averaged line scatters, so a
+   correctly controlled floor of a few hundred lines has some outside a
+   3 dB band on a short record; the lines fail only when more are
+   outside than chance would put there one time in a thousand
+   (`FLOOR_CHANCE`). A floor with no line left to judge is not judged,
+   and the reading says so.
 4. Each narrowband is judged at the degrees of freedom a narrow band
    has, which are fewer than the floor's. A fixed band's level is the
    mean of the residual's lines between its edges, worth the per-line
@@ -113,6 +128,18 @@ TRACKING_BAND = 0.5
 #: the confidence the chi-square scatter of a narrowband's estimate is
 #: read at
 CONFIDENCE = 0.90
+
+#: the share of a tone's run a line has to hold it, within the width
+#: left out, to be left out of the floor. A fixed tone holds its lines
+#: for the whole run; a sweep many times the width passes each line for
+#: a sliver of it, and the tracking band takes out with the tone at
+#: most this share of such a line's power, under half a decibel
+LEFT_OUT_SHARE = 0.1
+
+#: how seldom a correctly controlled floor fails on its lines by
+#: chance: the lines fail only when more of them are outside the line
+#: tolerance than chance puts there at this quantile of the binomial
+FLOOR_CHANCE = 0.999
 
 def _db(ratio: float) -> float:
     """Ten times the log of a power ratio; NaN for one that is not
@@ -353,8 +380,13 @@ class Narrowband:
         -------
         Narrowband
             The band.
+
+        A field this version does not know, written by a later one, is
+        passed over, so a file stays readable as the band gains fields.
         """
-        return cls(**fields)
+        known = {name for name in cls.__dataclass_fields__}
+        return cls(**{name: value for name, value in fields.items()
+                      if name in known})
 
 
 def narrowbands_json(bands: Sequence[Narrowband]) -> str:
@@ -501,6 +533,42 @@ class Tone:
 def tone_span(tone: SineTone) -> tuple[float, float]:
     """(low, high), the frequencies a tone passes, in Hz."""
     return float(np.min(tone.frequency)), float(np.max(tone.frequency))
+
+
+def held_share(tone: SineTone, frequencies: Any, width: float) -> np.ndarray:
+    """The share of a tone's run it spends within `width` Hz of each of
+    `frequencies`: 1 beside a fixed tone, and about twice the width over
+    the range for a line a linear sweep passes.
+
+    Parameters
+    ----------
+    tone : SineTone
+        The tone.
+    frequencies : array-like
+        Hz.
+    width : float
+        Hz either side.
+
+    Returns
+    -------
+    ndarray
+        A share from 0 to 1 for each frequency.
+    """
+    f = np.asarray(frequencies, dtype=np.float64)
+    seconds = tone.duration()
+    if seconds <= 0.0 or len(tone.dwell_segments()) == len(tone.segment_rate):
+        low, high = tone_span(tone)
+        return ((f >= low - width) & (f <= high + width)).astype(float)
+    t, path = tone.trajectory(seconds / 4000.0)
+    # each point of the path weighed by the time it stands for, since a
+    # segment's steps are whole and may differ from the next segment's
+    weight = np.gradient(np.asarray(t, dtype=np.float64))
+    order = np.argsort(path, kind='stable')
+    path, weight = np.asarray(path)[order], weight[order]
+    held = np.concatenate([[0.0], np.cumsum(weight)])
+    low = np.searchsorted(path, f - width, side='left')
+    high = np.searchsorted(path, f + width, side='right')
+    return (held[high] - held[low]) / held[-1]
 
 
 def tone_mean_square(tone: SineTone, column: int = 0) -> float:
@@ -656,15 +724,15 @@ class MixedSpecification:
     def left_out(self, frequencies: Any, channel: str | None = None
                  ) -> np.ndarray:
         """Which of `frequencies` are left out of the floor for a tone:
-        within `exclusion` of any frequency a tone at `channel` passes."""
+        those a tone at `channel` spent at least `LEFT_OUT_SHARE` of its
+        run within `exclusion` of (`held_share`). Every line beside a
+        fixed tone; of a sweep, only the lines it lingers near."""
         f = np.asarray(frequencies, dtype=np.float64)
         out = np.zeros(f.shape, dtype=bool)
         if self.column(channel) is None:
             return out
-        width = self.exclusion
         for tone in self.tones.tones:
-            low, high = tone_span(tone)
-            out |= (f >= low - width) & (f <= high + width)
+            out |= held_share(tone, f, self.exclusion) >= LEFT_OUT_SHARE
         return out
 
     def band_lines(self, frequencies: Any) -> np.ndarray:
@@ -722,10 +790,12 @@ class FloorRow:
     the reference and of the residual. `residual` is the residual's rms
     over every line, tones taken out and nothing left out. `rms_percent`
     and `db` are the two tolerances; `judged` and `outside` count the
-    lines judged and those outside `db`. `left_out` is the share of the
-    floor's lines left out, `exclusion` the width left out either side
-    of a tone, `spacing` the line spacing and `dof` each line's
-    statistical degrees of freedom.
+    lines judged and those outside `db`, `expected` the lines chance
+    puts outside `db` at `dof` and `allowed` the most that may be
+    outside before the lines fail (`FLOOR_CHANCE`). `left_out` is the
+    share of the floor's lines left out, `exclusion` the width left out
+    either side of a tone, `spacing` the line spacing and `dof` each
+    line's statistical degrees of freedom.
     """
 
     reference: float
@@ -739,6 +809,8 @@ class FloorRow:
     exclusion: float
     spacing: float
     dof: float
+    expected: float = 0.0
+    allowed: int = 0
 
     @property
     def error(self) -> float:
@@ -747,11 +819,19 @@ class FloorRow:
             if self.reference > 0.0 else float('nan')
 
     @property
-    def passed(self) -> bool:
-        """Whether the rms is within its tolerance and no line outside
-        its."""
-        return bool(abs(self.error) <= self.rms_percent and self.outside == 0
-                    and self.judged > 0)
+    def assessed(self) -> bool:
+        """Whether any line was left to judge the floor on."""
+        return self.judged > 0
+
+    @property
+    def passed(self) -> bool | None:
+        """Whether the rms is within its tolerance and no more lines are
+        outside theirs than chance allows; None when nothing was left to
+        judge."""
+        if not self.assessed:
+            return None
+        return bool(abs(self.error) <= self.rms_percent
+                    and self.outside <= self.allowed)
 
 
 @dataclass(frozen=True)
@@ -891,9 +971,11 @@ class MixedReading:
 
     @property
     def passed(self) -> bool:
-        """Whether every judged part passes: the floor, each tone and
-        each narrowband. The total is not judged."""
-        return bool(self.floor.passed and all(t.passed for t in self.tones)
+        """Whether every judged part passes: the floor when any line was
+        left to judge it on, each tone and each narrowband. The total is
+        not judged."""
+        return bool(self.floor.passed is not False
+                    and all(t.passed for t in self.tones)
                     and all(b.passed for b in self.narrowbands))
 
     def describe(self, unit: str = '', scale: float = 1.0) -> str:
@@ -902,7 +984,8 @@ class MixedReading:
         ('g' with 1/9.80665)."""
         rms = f'{unit} rms' if unit else 'rms'
         parts = [(f'floor {self.floor.measured * scale:.3g} {rms} '
-                 f'(written {self.floor.reference * scale:.3g})')]
+                 f'(written {self.floor.reference * scale:.3g})')
+                 if self.floor.assessed else 'floor not judged']
         if self.tones:
             parts.append(f'{len(self.tones)} tone'
                          f'{"" if len(self.tones) == 1 else "s"} '
@@ -911,7 +994,7 @@ class MixedReading:
             parts.append(f'{len(self.narrowbands)} narrowband'
                          f'{"" if len(self.narrowbands) == 1 else "s"}')
         parts.append(f'total {self.total.measured * scale:.3g} {rms}')
-        failed = ([] if self.floor.passed else ['the floor']) \
+        failed = ([] if self.floor.passed is not False else ['the floor']) \
             + [t.name for t in self.tones if not t.passed] \
             + [b.name for b in self.narrowbands if not b.passed]
         verdict = ('every part passes' if not failed
@@ -972,6 +1055,49 @@ def _averaging_from(history: Any, averaging: Any, start: float,
         raise ValueError(f'a frame of {used.frame_length} samples does not '
                          f'fit after {begin:g} s of the record')
     return replace(used, frames=most)
+
+
+def _outside_by_chance(dof: float, db: float) -> float:
+    """The chance that a line averaged to `dof` degrees of freedom, its
+    truth on the reference, reads more than `db` dB from it either way:
+    the chi-square's two tails, computed directly so a small share keeps
+    its digits."""
+    from scipy.special import gammainc, gammaincc
+
+    half = 0.5 * max(float(dof), 1e-6)
+    return float(gammainc(half, half * 10.0 ** (-float(db) / 10.0))
+                 + gammaincc(half, half * 10.0 ** (float(db) / 10.0)))
+
+
+def _judge_floor(spec, channel, residual_psd, lines_kept, floor_db):
+    """The floor judged as a comparison is (`compliance.judge`): the
+    reference, and the reference moved `floor_db` either way, against the
+    residual, cell by cell. Returns (measured power, reference power,
+    judged cells, cells out) over the cells whose line is in
+    `lines_kept`."""
+    from .compliance import judge
+
+    record = spec.record(channel)
+    bounded = copy.copy(spec.floor)
+    level = np.real(np.atleast_2d(np.asarray(spec.floor.ordinate)))
+    factor = 10.0 ** (float(floor_db) / 10.0)
+    bounded.limits = {'warning_lower': level / factor,
+                      'warning_upper': level * factor}
+    target = judge(bounded, residual_psd, record, 0, None, True, 0)
+    upper = judge(bounded, residual_psd, record, 0, 'warning_upper', True, 0)
+    lower = judge(bounded, residual_psd, record, 0, 'warning_lower', False, 0)
+    left, _right = residual_psd.bin_bounds()
+    middles = np.array([0.5 * (cell['low'] + cell['high'])
+                        for cell in target['cells']])
+    if not len(middles):
+        empty = np.zeros(0, dtype=bool)
+        return 0.0, 0.0, empty, empty
+    line = np.clip(np.searchsorted(left, middles, side='right') - 1, 0,
+                   len(lines_kept) - 1)
+    judged = target['judged'] & lines_kept[line]
+    out = judged & (upper['out'] | lower['out'])
+    return (float(np.sum(target['held'][judged])),
+            float(np.sum(target['asked'][judged])), judged, out)
 
 
 def _scatter_band(tolerance: float, dof: float, confidence: float
@@ -1070,7 +1196,7 @@ def _swept_band(band, residual_history, spec, channel, rate, onset, start,
                      f'{rate / frame:.3g} Hz lines and may read low')
     hop = max(frame // 2, 1)
     tolerance = band.tolerance_db if band.tolerance_db is not None else db
-    begin = int(np.ceil((start - t[0]) * rate))
+    begin = int(np.ceil(start * rate))
     errors, dofs, inside, levels = [], [], [], []
     got_all, wanted_all = [], []
     bandwidth = noise_bandwidth('hann', frame)
@@ -1083,7 +1209,7 @@ def _swept_band(band, residual_history, spec, channel, rate, onset, start,
         asd = residual_history.compute_psds(averaging)
         f = np.asarray(asd.abscissa, dtype=np.float64)
         g = np.real(np.asarray(asd.ordinate[0], dtype=np.float64))
-        middle = t[first] + 0.5 * step / rate - onset
+        middle = t[first] - t[0] + 0.5 * step / rate - onset
         center = float(band.center_at(middle))
         quarter = 0.25 * band.width_at(center)
         floor = spec.floor_at(f, channel)
@@ -1124,7 +1250,7 @@ def _swept_band(band, residual_history, spec, channel, rate, onset, start,
 
 def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
                 channel: str | None = None, band: Any = None,
-                onset: float = 0.0, settle: float | None = None,
+                onset: float | None = None, settle: float | None = None,
                 averaging: Any = None,
                 tone_tolerance: float = TONE_TOLERANCE,
                 floor_db: float = FLOOR_DB, floor_rms: float = FLOOR_RMS,
@@ -1150,9 +1276,11 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
     band : SineTracking, optional
         The tracking band the tones are read through; a fixed band
         `TRACKING_BAND` Hz wide by default.
-    onset : float, default 0.0
+    onset : float, optional
         Seconds into the record where the tones' environment begins;
-        each tone starts its own `start_time` later.
+        each tone starts its own `start_time` later. Found by matched
+        filter when omitted (`core.sine.find_environment`), as the
+        extraction finds it; zero without tones.
     settle : float, optional
         Seconds from `onset` before which nothing is read, so the band
         has settled; `settling_seconds` of the band by default, and
@@ -1181,9 +1309,14 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
     ------
     ValueError
         For a channel the record or the floor does not hold, a record
-        not evenly sampled, or a span too short for one frame.
+        of another quantity than the floor or the tones, a record not
+        evenly sampled, or a span too short for one frame.
     """
-    from .compliance import rms
+    from scipy.stats import binom
+
+    from ..units import UNKNOWN
+    from .compliance import rms, units_check
+    from .sine import find_environment
     from .sine_tracking import SineTracking
     from .tone_readout import noise_bandwidth
 
@@ -1203,6 +1336,26 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
     notes: list[str] = []
     column = spec.column(channel)
     tone_list = [] if column is None else list(spec.tones.tones)
+    # the record against what it had to meet, by the one rule every
+    # comparison uses: a velocity record says nothing about an
+    # acceleration floor
+    held = str(history.known_dim(row))
+    density = UNKNOWN if held == UNKNOWN else f'{held}**2/frequency'
+    refused, note = units_check(
+        str(spec.floor.known_dim(spec.record(channel))), density,
+        wanted_name='the floor', held_name='the record')
+    if refused is None and tone_list:
+        asked = (UNKNOWN if getattr(spec.tones, 'ordinate_unit', None) is None
+                 else str(spec.tones.ordinate_dim))
+        refused, _said = units_check(asked, held, wanted_name='the tones',
+                                     held_name='the record')
+    if refused is not None:
+        raise ValueError(refused)
+    if note is not None:
+        notes.append(note)
+    if onset is None:
+        onset = (find_environment([x], 1.0 / rate, tone_list) if tone_list
+                 else 0.0)
     if settle is None:
         # nothing to settle when there is no tone to track
         settle = settling_seconds(band, tone_list) if tone_list else 0.0
@@ -1219,7 +1372,7 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
         residual[first:first + len(wave.passed)] -= wave.passed
     one = _channel_history(history, channel)
     left = _channel_history(history, channel, residual)
-    used = _averaging_from(history, averaging, start - t[0], rate, len(t))
+    used = _averaging_from(history, averaging, start, rate, len(t))
     composite_psd = one.compute_psds(used)
     residual_psd = left.compute_psds(used)
     f = np.asarray(residual_psd.abscissa, dtype=np.float64)
@@ -1231,24 +1384,29 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
     floor = spec.floor_at(f, channel)
     written = np.isfinite(floor)
     tone_lines = spec.left_out(f, channel)
-    held = spec.band_lines(f)
-    judged = written & ~tone_lines & ~held
+    band_held = spec.band_lines(f)
     if not written.any():
         raise ValueError('the floor is not written over any line of the '
                          'spectrum')
-    measured = rms(f, np.where(judged, g_res, np.nan))
-    reference_floor = rms(f, np.where(judged, floor, np.nan))
-    with np.errstate(divide='ignore', invalid='ignore'):
-        error_db = 10.0 * np.log10(g_res / floor)
-    outside = judged & ~(np.abs(error_db) <= floor_db)
-    share = float(np.mean((tone_lines | held)[written]))
+    power, asked_power, judged, outside = _judge_floor(
+        spec, channel, residual_psd, ~tone_lines & ~band_held, floor_db)
+    count = int(judged.sum())
+    # what chance puts outside the line tolerance at each line's degrees
+    # of freedom, and the most that may be outside before the lines fail
+    chance = _outside_by_chance(dof_line, floor_db)
+    allowed = int(binom.ppf(FLOOR_CHANCE, count, chance)) if count else 0
+    share = float(np.mean((tone_lines | band_held)[written]))
     floor_row = FloorRow(
-        reference=reference_floor, measured=measured,
+        reference=float(np.sqrt(asked_power)), measured=float(np.sqrt(power)),
         residual=rms(f, g_res), rms_percent=float(floor_rms),
-        db=float(floor_db), judged=int(judged.sum()),
+        db=float(floor_db), judged=count,
         outside=int(outside.sum()), left_out=share,
-        exclusion=spec.exclusion, spacing=float(f[1] - f[0]), dof=dof_line)
-    if share > 0.5:
+        exclusion=spec.exclusion, spacing=float(f[1] - f[0]), dof=dof_line,
+        expected=count * chance, allowed=allowed)
+    if not count:
+        notes.append('no line of the floor is left to judge once the tones '
+                     'and narrowbands are left out; the floor is not judged')
+    elif share > 0.5:
         notes.append(f'{100 * share:.0f} % of the floor\'s lines are left '
                      'out for tones and narrowbands; what is left is judged '
                      'and the rest is not')
@@ -1290,13 +1448,33 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
         tones_reference=tones_reference, tones_measured=tones_measured,
         frequencies=f, composite=g_all, residual=g_res,
         reference=spec.reference(f, channel), left_out=tone_lines,
-        band_lines=held, residual_history=left, averaging=used,
+        band_lines=band_held, residual_history=left, averaging=used,
         start=start, onset=float(onset), notes=tuple(notes))
 
 
-__all__ = ['CONFIDENCE', 'EXCLUSION', 'FLOOR_DB', 'FLOOR_RMS',
-           'TONE_TOLERANCE', 'TRACKING_BAND', 'BandRow', 'FloorRow',
-           'MixedReading', 'MixedSpecification', 'Narrowband', 'Tone',
-           'ToneRow', 'TotalRow', 'judge_mixed', 'mixed',
-           'narrowbands_from_json', 'narrowbands_json', 'settling_seconds',
-           'tone_mean_square', 'tone_span']
+__all__ = [
+    'CONFIDENCE',
+    'EXCLUSION',
+    'FLOOR_CHANCE',
+    'FLOOR_DB',
+    'FLOOR_RMS',
+    'LEFT_OUT_SHARE',
+    'TONE_TOLERANCE',
+    'TRACKING_BAND',
+    'BandRow',
+    'FloorRow',
+    'MixedReading',
+    'MixedSpecification',
+    'Narrowband',
+    'Tone',
+    'ToneRow',
+    'TotalRow',
+    'held_share',
+    'judge_mixed',
+    'mixed',
+    'narrowbands_from_json',
+    'narrowbands_json',
+    'settling_seconds',
+    'tone_mean_square',
+    'tone_span',
+]

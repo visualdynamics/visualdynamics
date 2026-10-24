@@ -1764,6 +1764,10 @@ class SpecificationDraft:
         carried = dict(getattr(spec, 'band_constraints', None) or {})
         carried.update(self.constraints())
         out.band_constraints = carried
+        # what the sheet does not edit rides through it: a mixed-mode
+        # floor's narrowbands and the width left out about its tones
+        out.narrowbands = tuple(getattr(spec, 'narrowbands', ()) or ())
+        out.tone_exclusion = getattr(spec, 'tone_exclusion', None)
         return out
 
     def preview(self) -> Specification:

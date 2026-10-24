@@ -5077,6 +5077,10 @@ class Specification(Bounded, Psd):
         constraints = getattr(self, 'band_constraints', None)
         if constraints:
             out.band_constraints = dict(constraints)
+        # a mixed-mode floor's narrowbands and the width left out are in
+        # hertz, and stay what they were on the bands
+        out.narrowbands = tuple(getattr(self, 'narrowbands', ()) or ())
+        out.tone_exclusion = getattr(self, 'tone_exclusion', None)
         return out
 
 

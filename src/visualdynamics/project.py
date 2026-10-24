@@ -6483,9 +6483,14 @@ def _rewritten(spec, draft, comment):
     references = spec.reference_dof or list(spec.response_dof)
     autos = {spec.response_dof[i] for i in range(spec.num_records)
              if references[i] == spec.response_dof[i]}
-    if set(draft.channels) == autos:
-        return draft.make(comment)
-    return draft.written_into(spec, comment)
+    if set(draft.channels) != autos:
+        return draft.written_into(spec, comment)
+    out = draft.make(comment)
+    # what the sheet does not edit rides through it: a mixed-mode
+    # floor's narrowbands and the width left out about its tones
+    out.narrowbands = tuple(getattr(spec, 'narrowbands', ()) or ())
+    out.tone_exclusion = getattr(spec, 'tone_exclusion', None)
+    return out
 
 
 def _authored(project, source, params):

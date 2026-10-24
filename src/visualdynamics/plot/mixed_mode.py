@@ -89,7 +89,8 @@ def sheet_rows(reading: Any, unit_system: Any = None
              f'{floor.measured * scale:.3g} {rms}',
              _signed(floor.error, '%'),
              (f'±{floor.rms_percent:g} %, lines ±{floor.db:g} dB '
-             f'({floor.outside} of {floor.judged} outside)'),
+             f'({floor.outside} of {floor.judged} outside, '
+             f'{floor.expected:.2g} by chance, {floor.allowed} allowed)'),
              _verdict(floor.passed))]
     if reading.tones:
         rows.append((f'Tones, {len(reading.tones)} together', '—',

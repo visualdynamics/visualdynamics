@@ -112,6 +112,9 @@ that is not an alpha.
 - [Checking the matrices of a multi-input test](mimo-matrix-checks.md):
   the plant's singular values and condition number, and whether a
   cross-spectral specification is realizable, with its repair
+- [Predicting the notch before the test](limit-prediction.md): where
+  each limit channel would exceed its profile at full level, and the
+  notch it would cut in the control
 - [Predicting the drives before the test](drive-prediction.md): the
   drives a specification asks for through an FRF, one drive or several,
   against the amplifier and shaker limits

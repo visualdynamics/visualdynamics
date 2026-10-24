@@ -165,6 +165,11 @@ specification asks for through an FRF, a channel against its target and
 every quantity against its rating, the reading the Drive Prediction
 toggle shows for an FRF and a specification selected together
 ([predicting the drives](drive-prediction.md)).
+`plot_limit_prediction(transmissibility, specification, profiles)`
+draws the control with its predicted notches hatched and each response
+channel against its limit profile, the reading the Notch Prediction
+toggle shows for a transmissibility and a specification selected
+together ([predicting the notch](limit-prediction.md)).
 `plot_sine_distortion(history, specification, levels)` draws a tone's
 distortion against frequency with the limit across it, the reading the
 sine view's Distortion readout shows ([Checking a sine record for

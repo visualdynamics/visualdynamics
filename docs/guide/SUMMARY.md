@@ -30,6 +30,7 @@
     - [A mixed-mode test as one specification](mixed-mode.md)
     - [Judging a cross-spectral matrix against its specification](matrix-comparison.md)
     - [Checking the matrices of a multi-input test](mimo-matrix-checks.md)
+    - [Predicting the notch before the test](limit-prediction.md)
     - [Predicting the drives before the test](drive-prediction.md)
 - Reading a record:
     - [Reading a record's time statistics](time-statistics.md)

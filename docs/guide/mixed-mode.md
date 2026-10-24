@@ -49,9 +49,8 @@ spec.reference_rms()                          # floor, tones, bands, total
 The tone table is entered as `Tone` rows. A fixed tone is a row with a
 frequency and an amplitude; a swept tone adds `sweep_to`, a `rate` and
 a `mode` (`LINEAR` in Hz/s, `LOG` in octaves a minute). A fixed tone
-used to be written by hand as a sweep across a ten-thousandth of a
-hertz; a row says what it is, and is written into the sine
-specification as the dwell a controller's file holds (`SineTone.dwell`).
+is written into the sine specification as the dwell a controller's
+file holds (`SineTone.dwell`).
 `spec.tone_table()` reads any sine specification back as rows, fixed
 where every segment holds one frequency.
 
@@ -93,21 +92,36 @@ opens in an older version as the plain random specification. Given to
 `judge_mixed(history, spec)` reads one channel of a record against it,
 part by part:
 
-1. Each tone is read through a tracking band locked to its frequency
-   (0.5 Hz wide by default), the way a controller reads it
+1. Where the tones begin in the record is found by matched filter, as
+   the extraction finds it, unless `onset` is given. Each tone is read
+   through a tracking band locked to its frequency (0.5 Hz wide by
+   default), the way a controller reads it
    ([How a tracking filter reads a sweep](sine-tracking.md)). The band
    settles in about one over its width, so nothing before that is read;
    the tone's level is the median of the readings after it, compared
    with the table at plus or minus 10 percent, an example of what test
-   documents ask for.
+   documents ask for. A small tone near the floor scatters through its
+   band from reading to reading, and the median reads its level through
+   that scatter.
 2. What each band passed is taken out of the record. What is left, the
    residual, is the floor and the narrowbands.
 3. The floor is judged on the residual's averaged spectrum with the
-   lines within the left-out width of every tone, and every
-   narrowband's lines, left out: its rms against the reference's over
-   the same lines (plus or minus 10 percent) and each line against the
-   reference (plus or minus 3 dB). A swept tone's left-out lines are
-   every line it passes, since each held it for part of the run.
+   lines that held a tone, and every narrowband's lines, left out. A
+   line held a tone when the tone spent a tenth of its run or more
+   within the left-out width of it: every line beside a fixed tone, and
+   few or none of the lines a long sweep passes, since it is near each
+   only briefly and what the band took with it is a small share of that
+   line's power. The floor is judged as a comparison is
+   (`compliance.judge`): its rms against the reference's over the same
+   lines (plus or minus 10 percent), and its lines against the
+   reference moved 3 dB either way. An averaged line scatters, so a
+   correctly controlled floor has a few lines outside 3 dB on a short
+   record: on a 10 s record read from 2 s, about 28 degrees of freedom
+   a line, 1.4 percent of lines, five of 384. The lines fail only when
+   more are outside than chance would put there one time in a thousand;
+   the sheet gives the count beside the number chance expects and the
+   number allowed. A floor with no line left to judge is not judged, and
+   the reading says so.
 4. Each narrowband is judged at the degrees of freedom of a narrow
    band. A fixed band's level is the mean of its lines, worth the
    per-line degrees of freedom times its lines over the window's noise
@@ -124,20 +138,21 @@ part by part:
 ```python
 from visualdynamics.core.mixed_mode import judge_mixed
 
-reading = judge_mixed(history, spec)
+reading = judge_mixed(history, spec, onset=0.0)  # tones from the start
 reading.floor.residual / g        # 1.003, the residual over every line
 reading.tones_measured / g        # 2.477, the tracked tones' rms
 reading.total.measured / g        # 2.671, the whole drive
 print(reading.describe('g', 1 / g))
 
-visualdynamics.plot.plot_mixed_mode(history, spec, path='sheet.png')
+visualdynamics.plot.plot_mixed_mode(history, spec, onset=0.0,
+                                    path='sheet.png')
 ```
 
 The figures are for one minute of the composite above, the guide
 composite of [Reading a tone off an ASD](tone-readout.md). The tracked
 tones read 0.122, 1.945, 2.496 and 1.498 g peak, 2.477 g rms together
 against 2.479 written; the residual 1.003 grms over every line, and
-0.987 against 0.987 written with the tone lines left out (2.8 percent
+0.986 against 0.986 written with the tone lines left out (2.8 percent
 of the floor's lines); and the whole drive 2.671. Every value is
 stored in SI, as every record is; `describe` and the plot take the display unit.
 
@@ -151,17 +166,17 @@ its written and measured figure, its tolerance and its verdict in
 words, and the settings that decide what the numbers mean under them.
 
 ![Sine on random: the residual and the record over the floor, the lines
-left out hatched, and the sheet: 0.987 grms for the floor, 2.48 g rms
+left out hatched, and the sheet: 0.986 grms for the floor, 2.48 g rms
 for the tones, 2.67 for the total](images/mixed-mode-sheet.png)
 
 ![Random on random: a band plus or minus 5 percent about 300 Hz and a
 16 Hz band sweeping 150 to 250 Hz, each judged at its own degrees of
 freedom](images/mixed-mode-bands.png)
 
-In the second figure the swept band is read in 35 slices of about 10
-degrees of freedom each, where a floor line has 104; one slice's
+In the second figure the swept band is read in 37 slices of about 10
+degrees of freedom each, where a floor line has 112; one slice's
 scatter alone is wider than 3 dB either way, and the band's level
-pooled over the slices reads 0.2 dB under its written level. Its edges
+pooled over the slices reads 0.2 dB over its written level. Its edges
 are drawn dash-dotted and its travel cross-hatched, so the plot shows
 where the band went as well as how strong it was. The figures are made
 by `tools/make_concept_figures.py`.
@@ -190,7 +205,14 @@ left-out lines hatched. The narrowbands are the floor's own
   a fixture resonance at a tone, is not judged against the floor's
   tolerance at all. The sheet gives the width and the share of the
   floor's lines it took, and says so in a note when more than half the
-  floor was left out, as a long sweep does.
+  floor was left out.
+- A steady tone has nothing in time for the matched filter to lock onto
+  but where it starts, so with no `onset` given it is placed somewhere
+  it plays, never before it, and the floor is read from there. Give
+  `onset` when the tones' start is known.
+- A record of another quantity than the floor or the tones (velocity
+  against an acceleration floor) is refused, by the rule every
+  comparison uses.
 - A tone at the floor's edge has no floor under it on one side. The
   reading says so in a note.
 - A swept band moving faster than a frame fine enough to resolve it

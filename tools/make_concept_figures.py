@@ -1547,11 +1547,19 @@ def mixed_mode():
     spec = MixedSpecification(floor, [Tone(f, a * g) for f, a in tones],
                               seconds=60.0)
     history = record(x)
-    plot_mixed_mode(history, spec, unit_system=us, show=False,
+    # the tones run from the record's first sample
+    plot_mixed_mode(history, spec, onset=0.0, unit_system=us, show=False,
                     size=(1400, 620), path=str(OUT / 'mixed-mode-sheet.png'))
-    reading = judge_mixed(history, spec)
+    reading = judge_mixed(history, spec, onset=0.0)
     print(f'mixed: residual every line {reading.floor.residual / g:.3f} '
           f'grms, tones {reading.tones_measured / g:.3f} g rms, '
+          f'tones read {[round(t.measured / g, 3) for t in reading.tones]}, '
+          f'floor {reading.floor.measured / g:.3f} against '
+          f'{reading.floor.reference / g:.3f}, left out '
+          f'{100 * reading.floor.left_out:.1f} %, outside '
+          f'{reading.floor.outside} of {reading.floor.judged} '
+          f'({reading.floor.expected:.2g} by chance, {reading.floor.allowed} '
+          f'allowed), total {reading.total.measured / g:.3f}; '
           f'{reading.describe("g", 1 / g)}')
 
     # random on random: a fixed band and a swept one over the floor

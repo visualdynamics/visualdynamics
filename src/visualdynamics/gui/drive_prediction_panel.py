@@ -94,17 +94,17 @@ class DrivePredictionPanel(QWidget):
             'singular value decomposition drops the directions weaker '
             'than the tolerance times the line\'s strongest; Tikhonov '
             'holds the inverse down where the plant barely responds')
-        self.tolerance_box = self._box(
+        self.tolerance_box: DoubleSpinBox = self._box(
             0.0001, 0.5, 4, 'The share of each line\'s largest singular '
             'value under which a direction is dropped: 0.01 drops what '
             'a condition number over 100 makes')
-        self.weight_box = self._box(
+        self.weight_box: DoubleSpinBox = self._box(
             1e-6, 1.0, 6, 'The Tikhonov weight, as a share of the largest '
             'squared singular value in the band')
-        self.duration_box = self._box(
+        self.duration_box: DoubleSpinBox = self._box(
             1.0, 1e6, 1, 'How long the run lasts, for the expected '
             'largest peak of every quantity')
-        self.limit_box = self._box(
+        self.limit_box: DoubleSpinBox = self._box(
             0.0, 1e9, 4, 'The peak each drive may reach: the volts the '
             'amplifier input accepts. Zero is no limit')
         self.rating_boxes: dict[str, DoubleSpinBox] = {}

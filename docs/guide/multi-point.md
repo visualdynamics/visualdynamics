@@ -55,9 +55,12 @@ channel locations, because each one drives the table differently.
 ## The rule
 
 1. The channels. The control channels are the autospectra of one
-   measured PSD: the ones named, by record or by DOF, or by default the
-   ones that pair with the specification's records by DOF and quantity,
-   the same pairing the comparison uses. Two or more are needed; with
+   measured PSD: the ones named, by record or by DOF; by default the
+   ones at the channels the channel table flags as Control (the table
+   in the PSD's object group in the app, `table=` in a script), each
+   matched by its DOF and the quantity its row declares; and without
+   such a table, the ones that pair with the specification's records by
+   DOF and quantity, the same pairing the comparison uses. Two or more are needed; with
    one, the comparison itself is the reading, and naming none is
    refused as such. A channel named twice, a
    cross term, or a DOF that holds two autospectra (a force and an
@@ -115,7 +118,12 @@ outside −6/+6 dB by chance with 5 frames averaged, about three in ten
 thousand with 10, and none with 40, and each such line is listed as a
 line the composite hides. A short run therefore shows a few hidden
 lines on channels that are working; a fault shows as many lines in a
-row. The dead-sensor note never trips on such channels.
+row. The dead-sensor note never trips on such channels. Where the
+PSD says how many degrees of freedom its averages carry and the channel
+band is in dB, the reading says this for the run in hand: the notes
+give the share of a working channel's lines that chance alone puts
+outside the band at that count (`core.chance.chance_outside`), and the
+status line repeats it beside the hidden lines.
 
 ## In the app
 
@@ -132,7 +140,8 @@ composite's lines outside its band, each channel's lines outside its
 own and how many of those the composite was inside at, and the notes.
 Every edit makes the reading again, with the progress bar up while
 every channel is judged (each line of each channel is judged twice, so
-even a short run of a few channels takes a moment), and redraws it.
+even a short run of a few channels takes a moment), and redraws it; a
+redraw with nothing changed shows the reading already made.
 Nothing is made, so there is no
 Apply button; the console records the `plot_multi_point` call that
 draws what is on screen. The table under the plot still holds every

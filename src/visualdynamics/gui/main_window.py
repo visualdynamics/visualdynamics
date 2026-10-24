@@ -1338,6 +1338,9 @@ class MainWindow(QMainWindow):
         #: (`_render_multi_point`): a reading that comes back after a
         #: newer drawing took this is dropped
         self._multi_point_token: object | None = None
+        #: (what it was asked of, the reading) for the last composite
+        #: made, shown again when a redraw asks the same
+        self._multi_point_held: tuple[tuple, Any] | None = None
         #: the time history and threshold chosen in the rms check's
         #: pane, by spectrum name, so a redraw keeps them
         self._rms_check_settings: dict[str, dict[str, Any]] = {}
@@ -20463,7 +20466,8 @@ class MainWindow(QMainWindow):
         name, data, records = measured[0]
         picked = [int(i) for i in records] if records else None
         try:
-            channels = control_channels(spec, data, picked)
+            channels = control_channels(spec, data, picked,
+                                        self.project._channel_table_of(name))
         except ValueError:
             return None
         return spec_name, spec, name, data, channels
@@ -20507,11 +20511,25 @@ class MainWindow(QMainWindow):
             return multi_point(spec, measured, channels, scale_db=scale,
                                **settings)
 
+        # a redraw with nothing changed (a theme, the pane resized, a
+        # click back) shows the reading already made rather than make it
+        # again: slow work runs when its result is new
+        asked = (spec, measured, measured.ordinate, tuple(channels),
+                 repr(sorted(settings.items())), scale)
+        held = self._multi_point_held
         try:
             if isinstance(settings['weights'], str):
                 parse_weights(settings['weights'])     # raises the reason
-            reading = self._run_long(
-                f'Reading the composite of {len(channels)} channels…', read)
+            if held is not None and len(held[0]) == len(asked) and all(
+                    a is b if k < 3 else a == b
+                    for k, (a, b) in enumerate(zip(held[0], asked,
+                                                   strict=True))):
+                reading = held[1]
+            else:
+                reading = self._run_long(
+                    f'Reading the composite of {len(channels)} channels…',
+                    read)
+                self._multi_point_held = (asked, reading)
             if self._multi_point_token is not token:
                 # redrawn while the worker read: that drawing made its
                 # own reading, and this one belongs to nothing
@@ -20536,6 +20554,11 @@ class MainWindow(QMainWindow):
             text += ('; outside their own band where it is inside: '
                      + ', '.join(f'{c.label} ({c.hidden_lines})'
                                  for c in reading.hiding))
+            if reading.chance_share is not None and reading.chance_share >= 0.001:
+                # the reading's limit, said where it is read: a short
+                # average puts working lines outside by chance
+                text += (f' (about {100.0 * reading.chance_share:.2g} % of a '
+                         "working channel's lines are outside by chance)")
         return text
 
     def _journal_multi_point(self, name, spec_name, measured, channels,

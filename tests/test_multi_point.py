@@ -763,6 +763,7 @@ def test_the_window_reads_the_composite_on_the_worker(window, pump,
         return found
 
     monkeypatch.setattr(window, '_run_long', overtaken)
+    window._multi_point_held = None          # read it again, not from hand
     spec = window.project['Reference']
     measured = window.project['Run']
     assert window._render_multi_point('Reference', spec, 'Run', measured,
@@ -795,12 +796,15 @@ def test_a_channel_dropped_out_over_most_of_the_band_is_noted():
                               'reads'),)
 
 
-def test_a_channel_exactly_twenty_db_below_is_not_noted():
-    """The rule is more than 20 dB: a channel at a hundredth of the
-    others, exactly 20 dB down, is not called dead."""
-    reading = multi_point(reference(), run(1.0, 1.0, 0.01),
-                          channels=[0, 1, 2], scale_db=0)
-    assert not any('dead' in note for note in reading.notes)
+def test_twenty_db_below_is_where_a_channel_reads_as_dead():
+    """The rule is more than 20 dB below the others at the median line:
+    19.9 dB down is not called dead, 20.1 dB down is. (Exactly 20 is
+    not tested: a logarithm's last digit there differs between
+    platforms.)"""
+    for db_down, dead in ((19.9, False), (20.1, True)):
+        reading = multi_point(reference(), run(1.0, 1.0, 10 ** (-db_down / 10)),
+                              channels=[0, 1, 2], scale_db=0)
+        assert any('dead' in note for note in reading.notes) == dead
 
 
 def test_a_composite_formed_nowhere_notes_only_that():
@@ -879,3 +883,167 @@ def test_lines_where_the_others_read_nothing_are_not_compared():
     assert reading.notes == ((f'3Z+ reads zero at {zeros} of its {compared} '
                               'lines, as a dead or disconnected sensor does; '
                               'the composite counts it as it reads'),)
+
+
+def test_a_redraw_shows_the_reading_already_made(window, pump, monkeypatch):
+    """Drawn again with nothing changed, the composite is not read
+    again; a setting changed reads it again."""
+    ran = []
+    real = window._run_long
+
+    def runner(status, verb, *args, **kwargs):
+        ran.append(status)
+        return real(status, verb, *args, **kwargs)
+
+    monkeypatch.setattr(window, '_run_long', runner)
+    _composite_pair(window, pump, 1.5, 1.5, 0.0)
+    assert len(ran) == 1
+    window.render_current()
+    pump()
+    assert len(ran) == 1, 'a plain redraw reads nothing again'
+    panel = window.data_pane.multi_point_panel
+    panel.individual_high.setValue(7.0)
+    pump()
+    assert len(ran) == 2
+    assert '3Z+: ' in panel.readout.text()
+
+
+def test_the_channel_tables_control_flags_name_the_channels():
+    """Two of three flagged in the channel table: those are the control
+    channels, though the specification pairs with all three."""
+    from visualdynamics.core.channel_table import ChannelTable
+
+    table = ChannelTable({'channel': [1, 2, 3], 'node': ['1', '2', '3'],
+                          'direction': ['Z+'] * 3, 'unit': ['g'] * 3,
+                          'control': ['yes', '', 'yes']})
+    spec = reference(('1Z+', '2Z+', '3Z+'))
+    measured = run(1.0, 1.0, 1.0)
+    assert control_channels(spec, measured) == [0, 1, 2]
+    assert control_channels(spec, measured, table=table) == [0, 2]
+    assert [c.label for c in multi_point(spec, measured, table=table,
+                                         scale_db=0).channels] == ['1Z+', '3Z+']
+    table = ChannelTable({'channel': [1, 2, 3], 'node': ['7', '8', '9'],
+                          'direction': ['Z+'] * 3, 'unit': ['g'] * 3,
+                          'control': ['yes', '', 'yes']})
+    with pytest.raises(ValueError, match=r'flags control channels at 7Z\+, '
+                                         r'9Z\+, and the measurement holds no '
+                                         'autospectrum at any of them'):
+        control_channels(spec, measured, table=table)
+
+
+def test_a_short_average_says_how_many_lines_chance_puts_outside():
+    """White noise at 5 frames: the reading says, at its degrees of
+    freedom, what share of a working channel's lines fall outside the
+    channel band by chance, and that share is what the run shows; at
+    40 frames the share is too small to say."""
+    from visualdynamics.core.chance import chance_outside
+
+    out = judged = 0
+    for seed in range(10):
+        spec, psd = _white(1.0, 100 + seed)
+        reading = multi_point(spec, psd, channels=[0, 1, 2, 3], scale_db=0)
+        dof = float(np.min(psd.statistical_dof))
+        share = chance_outside(dof, -6.0, 6.0).total
+        assert reading.chance_share == pytest.approx(share)
+        assert (f'at {dof:.4g} degrees of freedom about {100 * share:.2g} % '
+                "of a working channel's lines fall outside −6/+6 dB by "
+                'chance alone') in ' '.join(reading.notes)
+        out += sum(c.outside_lines for c in reading.channels)
+        judged += 4 * reading.judged_lines
+    assert out / judged == pytest.approx(share, rel=0.5)
+    spec, psd = _white(8.0, 0)
+    reading = multi_point(spec, psd, channels=[0, 1, 2, 3], scale_db=0)
+    assert reading.chance_share < 0.001
+    assert not any('by chance' in note for note in reading.notes)
+    limits = multi_point(spec, psd, channels=[0, 1, 2, 3],
+                         individual_band='warning', scale_db=0)
+    assert limits.chance_share is None
+
+
+def test_the_status_line_says_how_many_lines_chance_puts_outside(window, pump):
+    from conftest import select_objects
+
+    single, psd = _white(1.0, 100)
+    rows = np.repeat(np.asarray(single.ordinate), 4, axis=0)
+    spec = Specification([20.0, 2000.0], rows,
+                         response_dof=['1Z+', '2Z+', '3Z+', '4Z+'],
+                         ordinate_dim=[PSD_DIM] * 4,
+                         warning_lower=rows / 10 ** 0.3,
+                         warning_upper=rows * 10 ** 0.3)
+    window.add_object('Reference', spec)
+    window.add_object('Run', psd)
+    select_objects(window, pump, 'Reference', 'Run')
+    window.data_pane.comparison_actions['composite'].trigger()
+    pump()
+    assert 'outside their own band where it is inside' in window._status_text
+    assert window._status_text.endswith("of a working channel's lines are "
+                                        'outside by chance)')
+    assert 'by chance alone' in window.data_pane.multi_point_panel.readout.text()
+
+
+def test_a_control_flag_names_the_quantity_at_a_shared_dof():
+    """A drive point carries a force and an acceleration at 1Z+; the
+    table flags the acceleration row, so the acceleration's density is
+    the control channel."""
+    from visualdynamics.core.channel_table import ChannelTable
+
+    table = ChannelTable({'channel': [1, 2, 3], 'node': ['1', '1', '2'],
+                          'direction': ['Z+'] * 3, 'unit': ['g', 'N', 'g'],
+                          'channel_type': ['acceleration', 'force',
+                                           'acceleration'],
+                          'control': ['yes', '', 'yes']})
+    measured = run(1.0, 1.0, 1.0, dofs=['1Z+', '1Z+', '2Z+'],
+                   dims=[PSD_DIM, 'force**2/frequency', PSD_DIM])
+    assert control_channels(reference(('1Z+', '2Z+')), measured,
+                            table=table) == [0, 2]
+
+
+def test_the_channel_table_edges():
+    """A typed table row keeps its one autospectrum whatever the record
+    declares; an untyped one cannot tell two apart; a count of degrees of
+    freedom that is not a positive number gives no chance share."""
+    from visualdynamics.core.channel_table import ChannelTable
+
+    typed = ChannelTable({'channel': [1, 2], 'node': ['1', '2'],
+                          'direction': ['Z+'] * 2, 'unit': ['g'] * 2,
+                          'channel_type': ['acceleration'] * 2,
+                          'control': ['yes', 'yes']})
+    raw = run(1.0, 1.0, dims=['unknown', 'unknown'])
+    assert control_channels(reference(('1Z+', '2Z+')), raw, table=typed) == [0, 1]
+    untyped = ChannelTable({'channel': [1, 2], 'node': ['1', '2'],
+                            'direction': ['Z+'] * 2, 'unit': ['g'] * 2,
+                            'control': ['yes', 'yes']})
+    two = run(1.0, 1.0, 1.0, dofs=['1Z+', '1Z+', '2Z+'])
+    with pytest.raises(ValueError, match=r'has 2 autospectra at 1Z\+, a control '
+                                         'channel of the channel table'):
+        control_channels(reference(('1Z+', '2Z+')), two, table=untyped)
+    for counts in ([0.0, 10.0], [np.nan, 10.0]):
+        measured = run(1.0, 1.0)
+        measured.statistical_dof = np.array(counts)
+        reading = multi_point(reference(), measured, channels=[0, 1],
+                              scale_db=0)
+        assert reading.chance_share is None
+
+
+def test_the_window_takes_the_control_channels_from_the_channel_table(
+        window, pump):
+    """The run's channel table, in its object group, flags two of the
+    three channels the reference pairs with: the composite is of those
+    two."""
+    from conftest import select_objects
+
+    from visualdynamics.core.channel_table import ChannelTable
+
+    window.add_object('Reference', reference(('1Z+', '2Z+', '3Z+')))
+    window.add_object('Run', run(1.0, 1.0, 1.0))
+    window.add_object('Table', ChannelTable(
+        {'channel': [1, 2, 3], 'node': ['1', '2', '3'],
+         'direction': ['Z+'] * 3, 'unit': ['g'] * 3,
+         'control': ['yes', '', 'yes']}))
+    window.project.link('Run', 'Table')
+    select_objects(window, pump, 'Reference', 'Run')
+    window.data_pane.comparison_actions['composite'].trigger()
+    pump()
+    panel = window.data_pane.multi_point_panel
+    assert panel.derived['channels'].text() == '2'
+    assert "channels=['1Z+', '3Z+']" in window.project.journal[-1]

@@ -154,6 +154,12 @@ class MultiPointReading:
     #: a channel reading as dead, a zero weight, a scale detected,
     #: units undeclared
     notes: tuple[str, ...] = field(default=())
+    #: with the individual band in dB and the measurement's degrees of
+    #: freedom known, the share of a working channel's lines that fall
+    #: outside that band by chance alone (`core.chance.chance_outside`,
+    #: at the fewest degrees of freedom among the channels); None
+    #: otherwise
+    chance_share: float | None = None
 
     @property
     def outside_lines(self) -> int:
@@ -265,7 +271,8 @@ def multi_point(specification: Specification, measured: Psd,
                 composite_band: str | tuple[float, float] = 'warning',
                 individual_band: str | tuple[float, float] = INDIVIDUAL_DB,
                 spec_record: int | None = None,
-                scale_db: float | None = None) -> MultiPointReading:
+                scale_db: float | None = None,
+                table: Any = None) -> MultiPointReading:
     """Read a multi-point control run: the composite of its control
     channels against the composite band, and each channel against its
     own.
@@ -295,8 +302,9 @@ def multi_point(specification: Specification, measured: Psd,
         The run, holding the control channels' autospectra.
     channels : sequence of int or str, optional
         The control channels, by record or by response DOF; by default
-        the autospectra that pair with the specification's records.
-        Two or more.
+        those `control_channels` finds (the channel table's control
+        channels, else the autospectra that pair with the
+        specification's records). Two or more.
     strategy : str, default 'average'
         One of `STRATEGIES`.
     weights : array_like, optional
@@ -309,6 +317,9 @@ def multi_point(specification: Specification, measured: Psd,
     scale_db : float, optional
         The comparison's scale; resolved through
         `compliance.comparison_scale_db` when omitted.
+    table : ChannelTable, optional
+        The channel table whose Control flags name the control channels
+        when `channels` is omitted (`control_channels`).
 
     Returns
     -------
@@ -337,7 +348,7 @@ def multi_point(specification: Specification, measured: Psd,
         raise TypeError('the reference is a random specification')
     if not isinstance(measured, Psd) or isinstance(measured, Specification):
         raise TypeError('the control channels are a measured PSD')
-    records = control_channels(specification, measured, channels)
+    records = control_channels(specification, measured, channels, table)
     labels = [str(measured.response_dof[i]) for i in records]
     _weights(strategy, weights, len(records))       # refused before work
     # one quantity across the channels, by the rule every comparison
@@ -394,6 +405,12 @@ def multi_point(specification: Specification, measured: Psd,
             held_lines=None if held is None else int(held[k])))
 
     notes = _notes(values, labels, share, formed)
+    chance = _chance_share(measured, records, individual_band)
+    if chance is not None and chance[0] >= 0.001:
+        notes.append(f'at {chance[1]:.4g} degrees of freedom about '
+                     f'{100.0 * chance[0]:.2g} % of a working channel\'s '
+                     f'lines fall outside {individual_text} by chance alone, '
+                     'and are counted among the lines the composite hides')
     if detected:
         notes.append(f'the measurement was scaled by {scale_db:+g} dB, '
                      f'detected from the data as a run at {-scale_db:+g} '
@@ -405,15 +422,18 @@ def multi_point(specification: Specification, measured: Psd,
         composite_band=composite_spec, individual_band=individual_spec,
         composite_text=composite_text, individual_text=individual_text,
         result=result, over=over, under=under, channels=tuple(readings),
-        scale_db=scale_db, notes=tuple(notes))
+        scale_db=scale_db, notes=tuple(notes),
+        chance_share=None if chance is None else chance[0])
 
 
 def control_channels(specification: Specification, measured: Psd,
-                     channels: Sequence[int | str] | None = None
-                     ) -> list[int]:
+                     channels: Sequence[int | str] | None = None,
+                     table: Any = None) -> list[int]:
     """The measured records a multi-point reading combines, by the rule
     `multi_point` uses: the records named, by index or by response
-    DOF, or by default the autospectra that pair with the
+    DOF; by default the autospectra at the channels a channel `table`
+    flags as control channels (`ChannelTable.controls()`), where it
+    flags any; and otherwise the autospectra that pair with the
     specification's records (`compliance.matched_records`). The window
     asks this before it offers the reading, so the reading is offered
     exactly where it can be made.
@@ -425,12 +445,16 @@ def control_channels(specification: Specification, measured: Psd,
     measured : Psd
         The run.
     channels : sequence of int or str, optional
-        The channels named; the paired autospectra when omitted.
+        The channels named; found as above when omitted.
+    table : ChannelTable, optional
+        The channel table whose Control flags say which channels the
+        controller held.
 
     Returns
     -------
     list of int
-        Two or more records of `measured`, in the order named.
+        Two or more records of `measured`, in the order named (or the
+        table's order).
 
     Raises
     ------
@@ -443,7 +467,34 @@ def control_channels(specification: Specification, measured: Psd,
     autos = [i for i in range(measured.num_records)
              if measured.reference_dof is None
              or str(measured.reference_dof[i]) == str(measured.response_dof[i])]
-    if channels is None:
+    flagged = (np.asarray(table.controls(), dtype=bool)
+               if table is not None and channels is None
+               else np.zeros(0, dtype=bool))
+    if flagged.any():
+        # the control channels are a fact the channel table keeps
+        found = []
+        dofs, types = table.dof_strings(), table.types()
+        for k in np.flatnonzero(flagged):
+            at = [i for i in autos if str(measured.response_dof[i]) == dofs[k]]
+            if len(at) > 1 and types[k]:
+                # a DOF can carry two quantities (a force and an
+                # acceleration at a drive point): the table's row names
+                # which, and a density of it is that quantity squared
+                at = [i for i in at
+                      if str(measured.ordinate_dim[i]).split('**')[0]
+                      == types[k]]
+            if len(at) > 1:
+                raise ValueError(f'the measurement has {len(at)} autospectra '
+                                 f'at {dofs[k]}, a control channel of the '
+                                 'channel table; name the one meant by its '
+                                 'record')
+            found += [i for i in at if i not in found]
+        if not found:
+            raise ValueError('the channel table flags control channels at '
+                             f'{", ".join(dofs[k] for k in np.flatnonzero(flagged))}'
+                             ', and the measurement holds no autospectrum '
+                             'at any of them')
+    elif channels is None:
         found = []
         for _label, _j, i in matched_records(specification, measured):
             if i in autos and i not in found:
@@ -526,6 +577,28 @@ def _db_text(below: float, above: float) -> str:
     low = 'down' if np.isinf(below) else f'{below:+g}'
     high = 'up' if np.isinf(above) else f'{above:+g}'
     return f'{low}/{high} dB'.replace('-', '−')
+
+
+def _chance_share(measured: Psd, records: list[int],
+                  band: str | tuple[float, float]
+                  ) -> tuple[float, float] | None:
+    """(share, degrees of freedom): how often a working channel's line
+    reads outside a band in dB by chance, at the fewest degrees of
+    freedom the channels' averages carry; None for a band of limits or
+    a measurement that does not say its count."""
+    from .chance import chance_outside
+
+    counts = getattr(measured, 'statistical_dof', None)
+    if isinstance(band, str) or counts is None:
+        return None
+    counts = np.asarray(counts, dtype=float)[records]
+    if not np.isfinite(counts).all() or not (counts > 0.0).all():
+        return None
+    below, above = (float(v) for v in band)
+    dof = float(counts.min())
+    found = chance_outside(dof, None if np.isinf(below) else below,
+                           None if np.isinf(above) else above)
+    return float(found.total), dof
 
 
 def _band(specification: Specification, j: int,

@@ -266,6 +266,8 @@ def test_a_line_that_is_not_a_number_and_two_dead_channels_are_said():
     assert np.isnan(reading.multiple[0, 1])
     assert np.isfinite(reading.partial[0, :, 0]).all()
     assert any(note.startswith('1 line holding') for note in reading.notes)
+    # and the one line the status line shows says it too
+    assert reading.describe(0).endswith(', undefined at 1 of 3 lines')
     dead = np.array(_hand_matrix())
     dead[0, 1, :] = dead[0, :, 1] = 0.0
     dead[0, 2, :] = dead[0, :, 2] = 0.0
@@ -402,3 +404,54 @@ def test_independent_drives_are_never_said_to_be_coupled_by_chance():
 def test_independent_drives_are_not_said_to_be_explained_by_each_other():
     reading = _history().read_partial_coherence()
     assert not any('explained completely' in note for note in reading.notes)
+
+
+# ---- a complex plant and complex cross terms, against what was simulated -------
+
+
+def test_correlated_drives_through_a_complex_plant_read_their_simulated_truth():
+    """Two drives with a complex cross term (the second carries the first
+    three samples late, so their phase turns with frequency) through two
+    short FIR filters with their own delays, plus noise: every quantity
+    complex, and the answer known from what was simulated. With the
+    first drive W1, the second 0.8 e^-j3w W1 + W2, and the noise of
+    standard deviation s, the response with the first drive removed is
+    H2 W2 plus the noise, so its partial coherence with the second is
+    |H2|^2 / (|H2|^2 + s^2); the first drive with the second removed is
+    (W1 - conj(c) W2) / (1 + |c|^2), so its partial coherence is
+    g / (g + s^2) with g = |H1|^2 / (1 + |c|^2). A real-valued case
+    cannot tell a conditioning built with the conjugate transpose from
+    one built with the plain transpose; this one reads the plain one
+    more than 0.15 off on average."""
+    from scipy.signal import lfilter
+
+    rng = np.random.default_rng(3)
+    n, s = 1 << 16, 0.5
+    w = rng.standard_normal((3, n))
+    drives = np.vstack([w[0], 0.8 * np.roll(w[0], 3) + w[1]])
+    h1, h2 = [1.0, 0.0, 0.6], [0.0, 0.7, 0.0, 0.0, -0.3]
+    y = (lfilter(h1, 1.0, drives[0]) + lfilter(h2, 1.0, drives[1])
+         + s * w[2])
+    history = visualdynamics.TimeHistory(
+        np.arange(n) / RATE, np.vstack([drives, y]),
+        response_dof=['1Z+', '2Z+', '101Z+'],
+        ordinate_dim=['force', 'force', 'acceleration'])
+    history.averaging = Averaging(frame_length=512, overlap=0.5).filled(
+        n, RATE)
+    reading = history.read_partial_coherence()
+    z = np.exp(-2j * np.pi * reading.frequency / RATE)
+    one = sum(tap * z ** k for k, tap in enumerate(h1))
+    two = sum(tap * z ** k for k, tap in enumerate(h2))
+    c = 0.8 * z ** 3
+    explained = np.abs(one + c * two) ** 2 + np.abs(two) ** 2
+    g = np.abs(one) ** 2 / (1.0 + np.abs(c) ** 2)
+    truth = {'multiple': explained / (explained + s ** 2),
+             'first': g / (g + s ** 2),
+             'second': np.abs(two) ** 2 / (np.abs(two) ** 2 + s ** 2)}
+    band = slice(2, -2)
+    read = {'multiple': reading.multiple[0], 'first': reading.partial[0, 0],
+            'second': reading.partial[0, 1]}
+    for name, value in read.items():
+        assert np.mean(np.abs(value[band] - truth[name][band])) < 0.04, name
+    np.testing.assert_allclose(np.sum(reading.virtual[0], axis=0)[band],
+                               reading.multiple[0][band], atol=1e-9)

@@ -669,6 +669,106 @@ def test_a_density_with_other_channels_is_split_to_its_inputs():
     np.testing.assert_allclose(out.ordinate, expected.ordinate)
 
 
+def test_a_density_with_complex_cross_terms_transforms_as_its_records_do():
+    """Three Z inputs along a line whose cross terms are complex (each
+    carries the first some samples late, so the phase between them turns
+    with frequency): bounce and pitch applied to their CPSDs are the
+    CPSD of the records the matrix makes, cross terms included, and the
+    residual read from the density is the autospectrum of what the
+    residual projector leaves of the records. The package stores a cross
+    term as conj(X_a) X_b, so a density goes through as conj(T) G T^T,
+    which is T G T^T for a real T; a density read transposed would give
+    the outputs' cross terms conjugated, and a real-valued case could not
+    see it."""
+    rng = np.random.default_rng(5)
+    n = 1 << 14
+    w = rng.standard_normal((3, n))
+    u = np.vstack([w[0], 0.7 * np.roll(w[0], 5) + 0.4 * w[1],
+                   0.5 * np.roll(w[0], 11) + 0.6 * w[2]])
+    t = np.arange(n) / 1024.0
+    dofs = ['1Z+', '2Z+', '3Z+']
+    averaging = Averaging(frame_length=256, overlap=0.5).filled(n, 1024.0)
+
+    def history(values, names):
+        made = visualdynamics.TimeHistory(t, values, response_dof=names,
+                                          ordinate_dim='acceleration')
+        made.averaging = averaging
+        return made
+
+    inputs = history(u, dofs)
+    density = inputs.compute_cpsds()
+    middle = density.ordinate[1][1:-1]
+    assert np.abs(np.imag(middle)).max() > 0.5 * np.abs(middle).max()
+    phi = np.array([[1.0, -0.2], [1.0, 0.0], [1.0, 0.2]])
+    matrix = Transformation.typed(np.linalg.pinv(phi), dofs,
+                                  ['9Z+', '9RY+'])
+    out, _report = matrix.apply(density)
+    records, _report = matrix.apply(inputs)
+    records.averaging = averaging
+    truth = records.compute_cpsds()
+    where = {pair: i for i, pair in enumerate(zip(truth.response_dof,
+                                                  truth.reference_dof))}
+    for i, pair in enumerate(zip(out.response_dof, out.reference_dof)):
+        np.testing.assert_allclose(out.ordinate[i],
+                                   truth.ordinate[where[pair]],
+                                   rtol=1e-9, atol=1e-12)
+    left = history(matrix.residual_projector @ u, dofs).compute_cpsds()
+    expected = np.real(left.ordinate[[0, 4, 8]])
+    reading = read_residual(matrix, density)
+    assert expected.max() > 0.01 * np.real(density.ordinate[0]).max()
+    np.testing.assert_allclose(reading.residual, expected,
+                               rtol=1e-6, atol=1e-9 * expected.max())
+
+
+def test_each_channels_residual_is_its_own_and_can_pass_its_power():
+    """The mean of three Z channels as the one output, and a density
+    where only the third moves much (0.01, 0.01 and 1, uncorrelated).
+    With P = I - J/3, the first channel's residual is
+    (4/9)(0.01) + (1/9)(0.01) + (1/9)(1) = 1.05/9: the mean moves it by a
+    third of the third channel's motion, which it did not make. Read by
+    difference from its own autospectrum it would be 0.01 - 1.02/9,
+    under zero, and read as nothing."""
+    dofs = ['1Z+', '2Z+', '3Z+']
+    levels = np.diag([0.01, 0.01, 1.0])
+    f = np.array([10.0, 20.0])
+    psd = visualdynamics.Psd(
+        f, np.array([np.full(2, levels[i, j], dtype=complex)
+                     for i in range(3) for j in range(3)]),
+        response_dof=[d for d in dofs for _ in dofs],
+        reference_dof=[d for _ in dofs for d in dofs],
+        ordinate_dim='acceleration**2/frequency')
+    mean = Transformation.typed(np.full((1, 3), 1.0 / 3.0), dofs, ['9Z+'])
+    reading = read_residual(mean, psd)
+    assert reading.residual[0] == pytest.approx(np.full(2, 1.05 / 9.0))
+    assert reading.residual[2] == pytest.approx(np.full(2, 4.0 / 9.0
+                                                        + 0.02 / 9.0))
+    assert reading.channel_fractions[0] == pytest.approx(10.5 / 9.0 * 10.0)
+    assert ('1Z+, 2Z+ have a residual larger than their own measured '
+            'power') in reading.notes[-1]
+    # the summed residual is still the trace's: tr(PGP) = tr(G) - tr(QGQ)
+    assert reading.fraction == pytest.approx(
+        np.full(2, (1.02 - 1.02 / 3.0) / 1.02))
+
+    def density(levels):
+        return visualdynamics.Psd(
+            f, np.array([np.full(2, level if i == j else 0.0, dtype=complex)
+                         for i, level in enumerate(levels) for j in range(3)]),
+            response_dof=[d for d in dofs for _ in dofs],
+            reference_dof=[d for _ in dofs for d in dofs],
+            ordinate_dim='acceleration**2/frequency')
+
+    # one channel over: (4/9)(0.01) + (1/9)(0.5) + (1/9)(1) against 0.01,
+    # where the second's (4/9)(0.5) + (1/9)(1.01) stays under its 0.5
+    one = read_residual(mean, density([0.01, 0.5, 1.0]))
+    assert one.notes[-1].startswith(
+        '1Z+ has a residual larger than its own measured power: the fit '
+        'the outputs make moves it against its own motion')
+    # a channel that measured nothing is said to, and not to be over
+    dead = read_residual(mean, density([0.0, 0.5, 1.0]))
+    assert any(note.startswith('1Z+ measured nothing') for note in dead.notes)
+    assert not any('larger than' in note for note in dead.notes)
+
+
 def test_three_inputs_are_all_named_and_no_more_implied():
     three = Transformation.typed(np.ones((1, 3)), ['1Z+', '2Z+', '3Z+'],
                                  ['9Z+'])

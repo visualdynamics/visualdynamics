@@ -309,6 +309,12 @@ class PartialCoherence:
             best = int(np.nanargmax(medians))
             parts.append(f'most explained by {self.references[best]} '
                          f'(median partial coherence {medians[best]:.2f})')
+            # the median is over the lines where it is defined; where it
+            # is not is part of the answer, so it is said beside it
+            undefined = int(np.sum(np.isnan(self.partial[k]).any(axis=0)))
+            if undefined:
+                parts.append(f'undefined at {undefined} of '
+                             f'{self.partial.shape[-1]} lines')
         else:
             parts.append('no partial coherence defined')
         coupled = self.coupled()

@@ -21,7 +21,9 @@ applied the same way, to a time history or spectrum row by row,
 `y = T u`, and to a cross-spectral density or a specification as the
 quadratic form `G_yy = T G_uu Tᵀ`, which needs every cross term between
 the inputs: the phase between two channels is what tells a translation
-from a rotation.
+from a rotation. The package stores a cross term as conj(X_a)·X_b
+(`compute_cpsds`), which makes the form `conj(T) G_uu Tᵀ`; a
+transformation is real, so the two are one.
 
 Every input and output is a translation or a rotation. An entry's unit
 follows from the two it joins: `[T_ij] = length^(r_j − r_i)`, with `r`
@@ -930,9 +932,14 @@ class TransformationResidual:
     quantity : str
         The motion the density is of.
     measured, explained, residual : numpy.ndarray
-        `(channels, lines)`: each input's autospectrum, the part of it
-        the outputs explain, `Q G Q`, and the rest, `P G P`, in SI.
-        `measured = explained + residual` channel by channel.
+        `(channels, lines)`: each input's autospectrum, the diagonal
+        of `Q G Q` (what the outputs explain) and the diagonal of
+        `P G P` (the rest), in SI. Summed over the channels,
+        `measured = explained + residual` exactly, since `P Q = 0`; a
+        single channel's two parts also share the cross terms
+        `Q G P + P G Q`, so they need not add up to its autospectrum,
+        and a quiet channel's residual can pass its own power where the
+        projector carries a louder channel's motion into it.
     threshold : float
         The share of the measured power the residual may reach and the
         transformation still be said to hold (`holds_to`).
@@ -981,8 +988,10 @@ class TransformationResidual:
 
     @property
     def channel_fractions(self) -> np.ndarray:
-        """Each input's residual share of its own power over the band,
-        not a number for a channel that measured nothing."""
+        """Each input's residual over its own power across the band,
+        not a number for a channel that measured nothing. It can pass
+        one on a quiet channel, where the projector carries a louder
+        channel's motion into it (`residual`)."""
         power = np.sum(self.measured, axis=1)
         with np.errstate(divide='ignore', invalid='ignore'):
             share = np.sum(self.residual, axis=1) / power
@@ -1045,8 +1054,10 @@ def read_residual(transformation: Transformation, density: DataArray,
 
     With `Q = T⁺T` and `P = I − Q`, the explained part of the
     cross-spectral matrix at the inputs is `Q G Q` and the residual
-    `P G P`; on the diagonal they sum to the measured autospectra
-    because `P Q = 0`. For a rigid-body transformation the residual is
+    `P G P`; their traces sum to the measured power because `P Q = 0`,
+    and each is read on its own diagonal, since channel by channel the
+    cross terms `Q G P + P G Q` need not vanish. For a rigid-body
+    transformation the residual is
     the motion that is not rigid, and `holds_to` says up to what
     frequency it stays under `threshold` of the measured power.
 
@@ -1106,6 +1117,14 @@ def read_residual(transformation: Transformation, density: DataArray,
                               transformation.input_kinds,
                               transformation.input_kinds)
     measured, _same = identity.apply(density, records, quantity=quantity)
+    # and `P G P` read on its own: by difference, each channel's
+    # residual would carry the cross terms `Q G P + P G Q`, which sum to
+    # nothing over the channels but not channel by channel
+    projector = Transformation(transformation.residual_projector,
+                               transformation.inputs, transformation.inputs,
+                               transformation.input_kinds,
+                               transformation.input_kinds)
+    left, _left = projector.apply(density, records, quantity=quantity)
     base = next(iter(_report.shared))
 
     def diagonal(psd):
@@ -1116,15 +1135,28 @@ def read_residual(transformation: Transformation, density: DataArray,
 
     g = diagonal(measured)
     q = diagonal(explained)
-    # the residual by difference, which is `P G P` on the diagonal; a
-    # few parts in 1e15 under zero is the subtraction
-    r = np.maximum(g - q, 0.0)
+    # each is a power, so a few parts in 1e15 under zero is round-off
+    r = np.maximum(diagonal(left), 0.0)
     dead = [name for name, row in zip(transformation.inputs, g)
             if not np.any(row > 0.0)]
     if dead:
         notes.append(f'{", ".join(dead)} measured nothing, so '
                      f'{"they say" if len(dead) > 1 else "it says"} nothing '
                      'about the residual')
+    with np.errstate(divide='ignore', invalid='ignore'):
+        over = [name for name, mine, power in zip(
+            transformation.inputs, np.sum(r, axis=1), np.sum(g, axis=1))
+            if power > 0.0 and mine > power]
+    if over:
+        # a residual larger than the motion measured reads as an error
+        # unless the reading says how it arises
+        many = len(over) > 1
+        notes.append(f'{", ".join(over)} {"have" if many else "has"} a '
+                     f'residual larger than {"their" if many else "its"} '
+                     'own measured power: the fit the outputs make moves '
+                     f'{"them" if many else "it"} against '
+                     f'{"their" if many else "its"} own motion, so more is '
+                     'left than was measured')
     total = np.sum(g, axis=0)
     empty = int(np.sum(~(total > 0.0)))
     if empty and empty < len(total):
@@ -1132,5 +1164,5 @@ def read_residual(transformation: Transformation, density: DataArray,
                      'power, where the residual is not read')
     return TransformationResidual(
         transformation, np.asarray(density.abscissa, dtype=np.float64),
-        list(transformation.inputs), base, g, np.minimum(q, g), r,
+        list(transformation.inputs), base, g, np.maximum(q, 0.0), r,
         float(threshold), notes)

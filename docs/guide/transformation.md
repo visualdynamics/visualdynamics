@@ -134,11 +134,15 @@ middle, moving as a rigid body under white noise, with a flexible mode
 at 400 Hz (Q 10) that lifts the corners and drops the middle, and a
 small noise floor on every channel (`tools/make_concept_figures.py`).
 The measured power is solid, the part the six motions explain dotted
-and the residual dashed. At 100 Hz the residual is 0.3 % of the power;
+and the residual dashed. At 100 Hz the residual is 0.2 % of the power;
 it reaches the 10 % threshold at 236 Hz, 35 % at 300 Hz and 88 % at the
 mode. The middle point's Z channel has the largest residual of its own,
-92 % over the band, because the mode moves it most and no rigid motion
-moves it that way.
+1.39 times its measured power over the band: the mode moves it down
+while the corners go up, and the rigid fit lifts it with the corners,
+so what is left at that channel is more than was measured there. The
+reading says so in its notes. Channel by channel, the explained part
+and the residual are each read on their own diagonal and need not add
+up to the channel's autospectrum; summed over the channels, they do.
 
 ## In the app
 

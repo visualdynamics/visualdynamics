@@ -105,6 +105,10 @@ specification)`, `plot_comparison(...)`, `plot_ratio(...)`,
 app shows, and each takes `path=`. `plot_srs_tolerance(...)` draws a
 shock response spectrum against its tolerance band, point by point
 ([Judging an SRS against its tolerance](srs-tolerance.md)).
+`plot_multi_point(psd, specification)` draws a multi-point control
+run, the composite heavy over its channels with both bands, the
+Composite reading ([Judging a multi-point control
+run](multi-point.md)).
 `plot_shock_check(history)` draws a shock record's raw velocity beside
 its positive and negative spectra, a figure the app does not show: the
 Shocks view states the same check in words

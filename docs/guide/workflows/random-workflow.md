@@ -20,6 +20,7 @@ so every step can be followed exactly.
 | The octave-band view | Octave Bands on the PSD's bar | `project.compute_octave('Time History PSDs')` |
 | Multiple coherence | Multiple Coherence in the Averaging view | `project.compute_multiple_coherence('Time History')` |
 | Compare against the spec | select PSD and specification together | `plot_comparison(psds, spec)` |
+| Several control channels | Composite on the bar | `multi_point(spec, psds)` from `visualdynamics.core.multi_point`, `plot_multi_point(psds, spec)` |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
 | Report | Generate Report on the bar, with the project row selected | `project.generate_report('random')` |
 | Or all of it at once | Automatic on the tree bar, once the project has its type | `project.work_up()` |
@@ -170,6 +171,15 @@ control channel against the specification: zones shaded,
 exceedances striped, the Scaling field reading 0 dB, and the
 compliance table accounting for all eight
 channels](../images/random-comparison.png)
+
+A run controlled at several points has a second result beside the
+comparison of each channel: the composite the controller held, against
+the composite band. **Composite** on the bar draws it heavy over the
+control channels, with each channel against its own band and the lines
+where a channel is outside its band while the composite is inside
+counted. The composite can be in tolerance at every line with a
+channel far out, which is why the report carries both; see [Judging a
+multi-point control run](../multi-point.md).
 
 ### 6. Geometry, photos, report
 

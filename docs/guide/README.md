@@ -30,6 +30,9 @@ that is not an alpha.
   how it differs from the classical batch methods
 - [The random vibration workflow](workflows/random-workflow.md): from
   a controller run to a compliance report
+- [Judging a multi-point control run](multi-point.md): the composite
+  of several control channels against its band, and each channel
+  against its own
 - [Reading a record's time statistics](time-statistics.md): the
   moments, the rail, the tails against the Gaussian, the expected
   largest peak and the kurtosis frame by frame

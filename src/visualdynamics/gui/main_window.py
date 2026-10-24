@@ -1149,6 +1149,11 @@ class MainWindow(QMainWindow):
             lambda _wanted: self.render_current())
         # a channel's row clicked in the overload pane draws its trace
         self.data_pane.overload_panel.picked.connect(self._overload_picked)
+        # and the notch prediction of a transmissibility beside its
+        # specification: the toggle redraws (a choice in its pane does
+        # too, through the pane's reread)
+        self.data_pane.notch_toggled.connect(
+            lambda _wanted: self.render_current())
         # the acts, asked for where their settings are set (Brandon,
         # 2026-08-28): each button is a second entrance to the same
         # verb the bar's act offers, so provenance, badges and the
@@ -13658,6 +13663,103 @@ class MainWindow(QMainWindow):
             # the plot went with the drawing it belonged to
             pass
 
+    def _notch_source(self, series):
+        """(FRF name, FRF, specification name, specification, profiles
+        name, profiles) when the selection is a transmissibility from a
+        control channel, the specification written at that channel and,
+        optionally, one more spectrum holding the limit profiles: what a
+        notch prediction reads (`core.limit_prediction.predict_limits`).
+        The profiles are None when the specification carries them.
+
+        Offered only where the FRF's records are all against one DOF, a
+        specification selected with it holds an autospectrum there, and
+        that autospectrum is of the quantity the FRF is against: a
+        transmissibility from the control channel, not an FRF from the
+        drives. None otherwise, which is also what hides the button."""
+        from ..core.data import channel_quantities
+        from ..units import UNKNOWN
+
+        if len(series) not in (2, 3):
+            return None
+        frfs = [entry for entry in series if isinstance(entry[1], Frf)]
+        spectra = [entry for entry in series if not isinstance(entry[1], Frf)]
+        if len(frfs) != 1 or not all(isinstance(data, Psd)
+                                     for _n, data, _r in spectra):
+            return None
+        frf_name, frf, _records = frfs[0]
+        if not frf.num_records or frf.reference_dof is None:
+            return None
+        against = {(str(frf.reference_dof[i]),
+                    channel_quantities(str(frf.ordinate_dim[i]))[1])
+                   for i in range(frf.num_records)}
+        if len(against) != 1:
+            return None
+        (dof, quantity), = against
+
+        def holds(data):
+            for i in range(data.num_records):
+                reference = (None if data.reference_dof is None
+                             else str(data.reference_dof[i]))
+                if str(data.response_dof[i]) != dof or reference not in (
+                        None, '', dof):
+                    continue
+                held = channel_quantities(str(data.ordinate_dim[i]))[0]
+                if UNKNOWN in (held, quantity) or held == quantity:
+                    return True
+            return False
+
+        controls = [entry for entry in spectra
+                    if isinstance(entry[1], Specification) and holds(entry[1])]
+        if not controls:
+            return None
+        spec_name, spec, _picked = controls[0]
+        others = [entry for entry in spectra if entry[0] != spec_name]
+        if others:
+            profiles_name, profiles, _picked = others[0]
+        else:
+            profiles_name, profiles = None, None
+        return frf_name, frf, spec_name, spec, profiles_name, profiles
+
+    def _render_notch(self, frf_name, frf, spec_name, spec, profiles_name,
+                      profiles):
+        """The notch the limit channels would cut at full level, and
+        each response channel against its limit profile.
+
+        Made with the tolerance chosen in the panel beside it, by the
+        call a script makes (`core.limit_prediction.predict_limits`), and
+        drawn as `plot.limit_prediction` draws it. A prediction refused
+        says why, in the panel and the status line, and draws nothing.
+        """
+        from ..core.limit_prediction import predict_limits
+        from ..plot.limit_prediction import build_limit_prediction, summary
+
+        panel = self.data_pane.notch_panel
+        panel.set_settings(self.data_pane.notch_settings)
+        panel.show()
+        self.data_pane.offer_waterfall(False)
+        self.data_pane.show_waterfall(False)
+        self.data_pane.graphics.clear()
+        tolerance = panel.settings()['tolerance']
+        try:
+            prediction = predict_limits(frf, spec, profiles,
+                                        tolerance=tolerance)
+        except ValueError as refusal:
+            panel.show_prediction(None, f'Not predicted: {refusal}.')
+            return f'No notch prediction: {refusal}'
+        build_limit_prediction(self.data_pane.graphics, prediction,
+                               unit_system=self.unit_system,
+                               theme=self.theme_name)
+        panel.show_prediction(prediction, unit_system=self.unit_system)
+        prefix = ('visualdynamics.plot.plot_limit_prediction('
+                  f'project[{frf_name!r}], project[{spec_name!r}]')
+        given = ('' if profiles_name is None
+                 else f', project[{profiles_name!r}]')
+        if tolerance != 'abort':
+            given += f', tolerance={tolerance!r}'
+        self._journal_view(prefix, f"{prefix}{given}, "
+                                   "path='limit_prediction.png', show=False)")
+        return summary(prediction)
+
     def _confidence_source(self, series):
         """(name, spectrum, records) when the selection is one spectrum
         the band can be drawn on, or None, which is also what hides the
@@ -14634,6 +14736,8 @@ class MainWindow(QMainWindow):
                                      prediction=self.
                                      _prediction_source(series)
                                      is not None,
+                                     notch=self._notch_source(series)
+                                     is not None,
                                      # a declared unit, as the readings
                                      # require (`core.shaker`)
                                      fit=history is not None and any(
@@ -14655,6 +14759,10 @@ class MainWindow(QMainWindow):
         if predicted:
             return self._render_prediction(*predicted)
         self._held_prediction = None
+        notched = (self.data_pane.showing('notch')
+                   and self._notch_source(series))
+        if notched:
+            return self._render_notch(*notched)
         if history is not None and self.data_pane.showing('kurtosis'):
             return self._render_kurtosis(history, series)
         if history is not None:

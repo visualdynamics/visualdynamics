@@ -56,6 +56,7 @@ from .mesh_panel import MeshPanel
 from .mesh_solids_panel import MeshSolidsPanel
 from .modal_response_panel import ModalResponsePanel
 from .modes_panel import ModesPanel
+from .notch_panel import NotchPanel
 from .octave_panel import OctavePanel
 from .overload_panel import OverloadPanel
 from .pattern_panel import PatternPanel
@@ -242,6 +243,8 @@ class DataPane(QWidget):
     realizability_toggled = Signal(bool)
     #: the drive prediction was asked for (True) or put away
     prediction_toggled = Signal(bool)
+    #: the notch prediction was asked for (True) or put away (False)
+    notch_toggled = Signal(bool)
     #: a sine specification's sweep-rate reading was asked for (True)
     #: or put away (False)
     sweep_rate_toggled = Signal(bool)
@@ -310,6 +313,11 @@ class DataPane(QWidget):
         #: ratings survive clicking away and back
         self.prediction_wanted: bool = False
         self.prediction_settings: dict[str, Any] | None = None
+        #: the notch prediction of a transmissibility and a
+        #: specification selected together, and its settings, kept
+        #: across redraws so the choice survives clicking away and back
+        self.notch_wanted: bool = False
+        self.notch_settings: dict[str, Any] | None = None
         self.sweep_rate_wanted: bool = False
         self.sine_profile_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
@@ -469,6 +477,12 @@ class DataPane(QWidget):
         self.prediction_panel.hide()
         self.prediction_panel.changed.connect(
             lambda settings: self._settings_edited('prediction', settings))
+        # the tolerance a predicted notch is read against, and what it
+        # came to
+        self.notch_panel: NotchPanel = NotchPanel()
+        self.notch_panel.hide()
+        self.notch_panel.changed.connect(
+            lambda settings: self._settings_edited('notch', settings))
         # the modes a sine sweep is checked against, beside the sweep
         # drawn through their bands; the Sweep Rate reading shows it
         self.sweep_rate_panel: SweepRatePanel = SweepRatePanel()
@@ -556,6 +570,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.conditioning_panel)
         plot_row.addWidget(self.realizability_panel)
         plot_row.addWidget(self.prediction_panel)
+        plot_row.addWidget(self.notch_panel)
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.sine_profile_panel)
@@ -1226,6 +1241,25 @@ class DataPane(QWidget):
         # and by nothing else, so it starts put away
         self.prediction_action.setVisible(False)
         toolbar.addAction(self.prediction_action)
+        # a transmissibility from the control channel selected with the
+        # specification there: the notch the limit channels would cut at
+        # full level. A reading of objects that exist, so a toggle with
+        # no act
+        self.notch_action: QAction = QAction(
+            control_icon('notch'), 'Notch Prediction', self)
+        self.notch_action.setCheckable(True)
+        self.notch_action.setToolTip(
+            'Predict, from the transmissibilities from the control '
+            'channel, where each limit channel would exceed its limit '
+            'profile at full level, and the notch the controller would '
+            'cut in the control spectrum to hold it: its band, its depth '
+            'and whether it leaves the tolerance')
+        self.notch_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('notch', checked))
+        # offered by the render of a transmissibility and a
+        # specification together, and by nothing else
+        self.notch_action.setVisible(False)
+        toolbar.addAction(self.notch_action)
         # a sine specification read against the modes it sweeps
         # through: the time and cycles in each half-power band, and
         # whether the rate lets the mode build. A reading of the
@@ -1314,6 +1348,7 @@ class DataPane(QWidget):
             [self.transmissibility_action],
             [self.conditioning_action, self.realizability_action],
             [self.prediction_action],
+            [self.notch_action],
             self.comparison_group.actions(),
             self.spectra_group.actions(),
             self.replication_group.actions(),
@@ -1458,9 +1493,9 @@ class DataPane(QWidget):
 
     def _choose_toggle(self, key: str, checked: bool) -> None:
         """The octave, tones, transmissibility, confidence, rms check,
-        drive prediction or sweep-rate button, each a toggle of its own:
-        remember it, put its panel away when it is unchecked, then say
-        so."""
+        drive prediction, notch prediction or sweep-rate button, each a
+        toggle of its own: remember it, put its panel away when it is
+        unchecked, then say so."""
         setattr(self, f'{key}_wanted', bool(checked))
         if not checked:
             getattr(self, f'{key}_panel').hide()
@@ -2162,7 +2197,8 @@ class DataPane(QWidget):
                       conditioning: bool = False,
                       realizability: bool = False,
                       prediction: bool = False,
-                      table: bool = False) -> None:
+                      table: bool = False,
+                      notch: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -2186,7 +2222,9 @@ class DataPane(QWidget):
         singular values of an FRF from several references or of a CSD,
         `realizability` the eigenvalues of a CSD's coherence matrix,
         `prediction` the drive prediction of an FRF and a specification
-        selected together, and `residual` the fit's residual CMIF. The pair,
+        selected together, `notch` the notch prediction of a
+        transmissibility and a specification selected together, and
+        `residual` the fit's residual CMIF. The pair,
         3-D, frequency-axis, quantity and page controls are hidden here;
         the code that draws offers them afterwards.
         """
@@ -2250,6 +2288,9 @@ class DataPane(QWidget):
         self._offer('conditioning', 'conditioning_panel', conditioning)
         self._offer('realizability', 'realizability_panel', realizability)
         self._offer('prediction', 'prediction_panel', prediction)
+        # and the notch prediction, to a transmissibility from the
+        # channel a specification selected with it is written at
+        self._offer('notch', 'notch_panel', notch)
         self.residual_action.setVisible(residual)
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
@@ -2327,6 +2368,8 @@ class DataPane(QWidget):
                        self.conditioning_action, self.realizability_action,
                        self.prediction_action,
                        self.sweep_rate_action, self.sine_profile_action,
+                       self.confidence_action, self.notch_action,
+                       self.sweep_rate_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,
                        self.quantity_action, self.page_action):

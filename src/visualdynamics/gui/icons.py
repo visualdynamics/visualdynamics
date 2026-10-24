@@ -921,6 +921,22 @@ def _draw_curves(painter, color):
         for i in range(45)]))
 
 
+def _draw_composite(painter, color):
+    """Three faint spectra apart and one heavy spectrum through them.
+
+    What the Composite reading draws, in miniature: the control
+    channels light, each at its own level, and the composite the
+    controller held drawn heavy across the middle.
+    """
+    faint = QColor(color)
+    faint.setAlpha(110)
+    painter.setPen(QPen(faint, 3))
+    for dy in (-9.0, 0.0, 9.0):
+        painter.drawPath(_spectrum(dy))
+    painter.setPen(_pen(color, 7))
+    painter.drawPath(_spectrum(1.0))
+
+
 def _spectrum(dy=0.0):
     """A PSD's shape across the glyph: a rise to a plateau and a fall."""
     return _curve([(8 + i, 40 + dy - 14 * math.sin(min(i, 40) / 40 * math.pi))
@@ -2228,6 +2244,7 @@ def control_icon(name: str) -> QIcon:
      'edit': _draw_edit, 'edit_on': _draw_edit_on, 'trash': _draw_trash,
      'colormap': _draw_colormap,
      'curves': _draw_curves, 'map': _draw_map,
+     'composite': _draw_composite,
      'waterfall': _draw_waterfall,
      'drive_point': _draw_drive_point, 'cmif': _draw_cmif,
      'averaging': _draw_averaging, 'shocks': _draw_shocks,

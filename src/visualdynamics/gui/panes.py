@@ -48,6 +48,7 @@ from .merge_panel import MergePanel
 from .mesh_panel import MeshPanel
 from .mesh_solids_panel import MeshSolidsPanel
 from .modes_panel import ModesPanel
+from .multi_point_panel import MultiPointPanel
 from .octave_panel import OctavePanel
 from .pattern_panel import PatternPanel
 from .pulse_panel import PulsePanel
@@ -295,8 +296,9 @@ class DataPane(QWidget):
         self.stroke_settings: dict[str, Any] | None = None
         #: where its band has been dragged to, if it has
         self.kurtosis_bounds: tuple[float, float] | None = None
-        #: 'curves', 'error' or 'lines' — sticky, like the other view
-        #: choices, so it survives a redraw
+        #: 'curves', 'error', 'lines' or 'composite' — sticky, like the
+        #: other view choices, so it survives a redraw ('composite'
+        #: only where two or more control channels can be combined)
         self.comparison_view: str = 'curves'
         #: where the bar charts' thresholds have been dragged to
         self.error_bounds: tuple[float, float] | None = None
@@ -344,6 +346,12 @@ class DataPane(QWidget):
         # shows it. Made before the bar, whose readings put it away
         self.signature_panel: SignaturePanel = SignaturePanel()
         self.signature_panel.hide()
+        # the multi-point reading's strategy and bands, beside a random
+        # run's control channels drawn with their composite; the
+        # Composite reading shows it. Made before the bar, whose
+        # comparison readings put it away
+        self.multi_point_panel: MultiPointPanel = MultiPointPanel()
+        self.multi_point_panel.hide()
         self.toolbar: QToolBar = self._build_toolbar()
         # The comparison, replication and SRS readings are built
         # visible and were only ever put away by `reset_controls` —
@@ -430,6 +438,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.signature_panel)
+        plot_row.addWidget(self.multi_point_panel)
         plot_row.addWidget(self.wavelet_panel)
         plot_row.addWidget(self.statistics_panel)
         plot_row.addWidget(self.pulse_panel)
@@ -557,7 +566,11 @@ class DataPane(QWidget):
                 ('error', 'bars', 'RMS Error',
                  'How far each channel sits from the level asked for'),
                 ('lines', 'percent_bars', 'Lines Out',
-                 'How much of each channel fell outside its abort limits')):
+                 'How much of each channel fell outside its abort limits'),
+                ('composite', 'composite', 'Composite',
+                 ('The control channels combined as the controller held '
+                  'them, the composite against its band and each channel '
+                  'against its own'))):
             action = QAction(control_icon(icon), text, self)
             action.setCheckable(True)
             action.setToolTip(tip)
@@ -1230,19 +1243,33 @@ class DataPane(QWidget):
             self.toolbar.setVisible(True)
             self.spectra_actions[self.spectra_view].setChecked(True)
 
-    def show_comparison_views(self, offered: bool) -> None:
-        """Show or hide the three readings of a comparison (curves,
-        error, lines).
+    def show_comparison_views(self, offered: bool,
+                              composite: bool = False) -> None:
+        """Show or hide the readings of a comparison (curves, error,
+        lines, and composite when `composite` says two or more control
+        channels can be combined).
 
-        Only a specification with a measurement against it has three
+        Only a specification with a measurement against it has these
         readings. Anything else has one, and a choice of one is not
-        offered.
+        offered. The Composite reading's panel is put away whenever
+        that reading is not the one shown.
         """
-        for action in self.comparison_actions.values():
-            action.setVisible(offered)
+        for key, action in self.comparison_actions.items():
+            action.setVisible(offered and (key != 'composite' or composite))
+        reading = self.comparison_reading(composite)
+        if not offered or reading != 'composite':
+            self.multi_point_panel.hide()
         if offered:
             self.toolbar.setVisible(True)
-            self.comparison_actions[self.comparison_view].setChecked(True)
+            self.comparison_actions[reading].setChecked(True)
+
+    def comparison_reading(self, composite: bool = False) -> str:
+        """The reading a comparison shows: the sticky choice, or
+        'curves' when the choice is the Composite and `composite` says
+        this comparison cannot make one (a single control channel)."""
+        if self.comparison_view == 'composite' and not composite:
+            return 'curves'
+        return self.comparison_view
 
     def show_scaling(self, text: str | None) -> None:
         """Show the comparison scaling field with `text`, or hide it

@@ -84,6 +84,12 @@ behind it. With one drive, the FRF view's **Transmissibility** toggle
 puts the random error the coherence and the averages give around H1,
 and the ASD ratio beside it, which parts from H1 wherever the
 coherence is low ([The two transmissibilities](../transmissibility.md)).
+With several drives, the FRF view's **Conditioning** toggle draws the
+singular values of the FRF matrix and its condition number, and hatches
+the lines where the drives reach the responses in nearly the same
+proportions, the lines a controller's inverse will be mostly noise at
+([Checking the matrices of a multi-input
+test](../mimo-matrix-checks.md)).
 
 ![Where to click: with Excitation Time History selected (1), press
 Multiple Coherence in the Averaging view (2)](../images/sysid-coherence-click.png)

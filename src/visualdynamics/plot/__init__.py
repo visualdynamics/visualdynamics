@@ -762,19 +762,15 @@ def cmif_curves(data: Any, records: Sequence[int] | None = None,
     value peaks at every mode. A second singular value peaking at the
     same frequency indicates a repeated root.
     """
+    from ..core.matrix_checks import frf_matrix
+
     us = unit_system or DEFAULT_SYSTEM
     wanted = (list(range(data.num_records)) if records is None
               else [int(i) for i in records])
-    values = data.display_ordinate(us, wanted)
-    responses = list(dict.fromkeys(data.response_dof[i] for i in wanted))
-    references = list(dict.fromkeys(data.reference_dof[i] for i in wanted))
-    row = {dof: k for k, dof in enumerate(responses)}
-    column = {dof: k for k, dof in enumerate(references)}
-    matrix = np.zeros((len(data.abscissa), len(responses), len(references)),
-                      dtype=np.complex128)
-    for position, i in enumerate(wanted):
-        matrix[:, row[data.response_dof[i]],
-               column[data.reference_dof[i]]] = values[position]
+    # assembled where the conditioning reading assembles its matrix; a
+    # missing pair stays zero here, where the reading refuses it
+    _rows, _columns, matrix, _filled = frf_matrix(
+        data, wanted, data.display_ordinate(us, wanted))
     singular = np.linalg.svd(matrix, compute_uv=False)
     return singular.T, data.display_abscissa(us)
 
@@ -3643,6 +3639,108 @@ def plot_rms_check(data: Any, history: Any, record: int = 0, *,
     return _plot_window(build, theme=theme, path=path, show=show,
                         title=title or (f'{data.response_dof[record]}: '
                                         f'rms check, {said}'),
+                        size=size)
+
+
+def plot_conditioning(reading: Any, *,
+                      band: tuple[float, float] | None = None,
+                      unit_system: UnitSystem | None = None,
+                      theme: Any = None,
+                      path: str | os.PathLike | None = None,
+                      show: bool = True, title: str | None = None,
+                      size: tuple[int, int] = (1000, 760)) -> Any:
+    """Draw the singular values of an FRF or CSD matrix against
+    frequency, with its condition number beneath and the lines over the
+    limit hatched.
+
+        reading = project['Run H1 FRFs'].conditioning()
+        visualdynamics.plot.plot_conditioning(reading, path='c.png')
+
+    Drawn by `plot.matrix_checks.build_conditioning`: above, on log
+    axes, the singular values, each in its own line style and named,
+    with the rank threshold dotted; beneath, the condition number with
+    the limit dashed. The window's Conditioning toggle draws the same
+    reading for a selected FRF or CSD.
+
+    Parameters
+    ----------
+    reading : Conditioning
+        From `Frf.conditioning`, `Psd.conditioning` or
+        `core.matrix_checks.read_conditioning`.
+    band : tuple of float, optional
+        The (low, high) frequencies the view shows, in Hz; the whole
+        reading when omitted.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from .matrix_checks import build_conditioning
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_conditioning(widget, reading, band=band,
+                                  unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'Conditioning: {reading.title}',
+                        size=size)
+
+
+def plot_realizability(reading: Any, *,
+                       band: tuple[float, float] | None = None,
+                       pair: tuple[int, int] | None = None,
+                       theme: Any = None,
+                       path: str | os.PathLike | None = None,
+                       show: bool = True, title: str | None = None,
+                       size: tuple[int, int] = (1000, 860)) -> Any:
+    """Draw the eigenvalues of a cross-spectral matrix's coherence matrix
+    against frequency, the lines that are not realizable hatched, and
+    what the repair does to the pair it moves most.
+
+        reading = project['Specification'].realizability()
+        visualdynamics.plot.plot_realizability(reading, path='r.png')
+
+    Drawn by `plot.matrix_checks.build_realizability`: above, the
+    eigenvalues on a linear axis with the zero line dashed, so a
+    negative one stands below it; beneath, when the repair moved
+    anything, the coherence and phase of that pair as written (solid)
+    and repaired (dashed). The window's Realizability toggle draws the
+    same reading for a selected CSD or specification.
+
+    Parameters
+    ----------
+    reading : Realizability
+        From `Psd.realizability` or
+        `core.matrix_checks.read_realizability`.
+    band : tuple of float, optional
+        The (low, high) frequencies the view shows, in Hz; the whole
+        reading when omitted.
+    pair : tuple of int, optional
+        The two channels, by index, whose coherence and phase are drawn
+        before and after the repair; the pair it moves most when
+        omitted.
+    theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from .matrix_checks import build_realizability
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_realizability(widget, reading, band=band, pair=pair,
+                                   theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or 'Realizability of '
+                                       f'{len(reading.channels)} channels',
                         size=size)
 
 

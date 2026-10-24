@@ -1815,6 +1815,73 @@ class Project(dict):
             f'{source} 1/{per_octave} Octave',
             recipe=('compute_octave', {'per_octave': per_octave}))
 
+    def make_realizable(self, source: Any, *, name: str | None = None,
+                        tolerance: float | None = None,
+                        keep_diagonal: bool = True,
+                        progress: Any = None) -> str:
+        """Repair a cross-spectral matrix to the nearest realizable one
+        (Make Realizable in the Realizability reading), and add the
+        result beside it.
+
+        At every line where the matrix is not Hermitian and positive
+        semi-definite, so that no set of signals has it, the nearest
+        matrix that is replaces it (`Psd.made_realizable`); the lines
+        that pass are unchanged. Holding the diagonal, the default, the
+        autospectra stay exactly as written and only the cross terms
+        move. `Psd.realizability` on the source says what moved and by
+        how much.
+
+        Parameters
+        ----------
+        source : str or object
+            The CSD or specification, by name or as the object itself.
+        name : str, optional
+            What to call the result. Defaults to the source's name
+            followed by 'Realizable'.
+        tolerance : float, optional
+            How far below zero the smallest eigenvalue of the coherence
+            matrix may lie, as a fraction of the largest;
+            `core.matrix_checks.REALIZABLE_TOLERANCE` when omitted.
+        keep_diagonal : bool, default True
+            Hold the autospectra where they are.
+        progress : callable, optional
+            Called with ``(done, total)`` as the repair goes on. The
+            app's progress bar uses it; a script can print it.
+
+        Returns
+        -------
+        str
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
+
+        Raises
+        ------
+        ValueError
+            If the object has no cross terms or its matrix is
+            incomplete, if no line could be judged, or if it is
+            realizable already, in which case there is nothing to
+            repair.
+        """
+        from .core.matrix_checks import REALIZABLE_TOLERANCE, made_realizable
+
+        tolerance = (REALIZABLE_TOLERANCE if tolerance is None
+                     else float(tolerance))
+        source = self.name_of(source)
+        repaired, reading = made_realizable(
+            self[source], tolerance=tolerance, keep_diagonal=keep_diagonal,
+            progress=progress)
+        if not reading.judged.any():
+            raise ValueError(f'{source!r}: no line could be judged, so there '
+                             'is nothing to repair; '
+                             + '; '.join(reading.notes))
+        if reading.realizable:
+            raise ValueError(f'{source!r} is realizable at every line; '
+                             'there is nothing to repair')
+        return self._derive(
+            source, repaired, name or f'{source} Realizable',
+            recipe=('make_realizable', {'tolerance': tolerance,
+                                        'keep_diagonal': bool(keep_diagonal)}))
+
     def compute_frfs(self, source: Any, method: str = 'Hv') -> str:
         """Compute frequency response functions from a time history
         (Compute FRFs), one for each response and drive, over the
@@ -5063,6 +5130,7 @@ class Project(dict):
         'compute_frfs': 'averaging+roles',
         'compute_multiple_coherence': 'averaging+roles',
         'compute_srs': 'shocks', 'compute_octave': 'content',
+        'make_realizable': 'content',
         # the filter reads the settings riding the source; integration
         # and differentiation read the record's bytes, so refreshing a
         # re-filtered source cascades down the whole motion chain
@@ -5657,6 +5725,10 @@ _VERB_APPLIES: tuple = (
         for other in p.values()))),
     # a specification bands too, limits and all (Brandon, 2026-09-18)
     ('compute_octave', lambda p, o: isinstance(o, Psd)),
+    # a cross-spectral matrix repaired where no signals could have it;
+    # the Realizability reading's apply button
+    ('make_realizable', lambda p, o: (isinstance(o, Psd)
+                                      and o.reference_dof is not None)),
     # what a file could not say: a PSD that is a requirement, and back
     # — but not a specification with limits, which a PSD cannot hold
     ('read_as_specification', lambda p, o: (
@@ -5832,6 +5904,7 @@ _JOURNALED_VERBS = (
     'relink', 'name_object_group',
     'place', 'set_role', 'set_basis', 'merge', 'set_channel_role',
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
+    'make_realizable',
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
@@ -5882,6 +5955,9 @@ _RECOMPUTE = {
     'compute_srs': lambda p, s, k: p[s].compute_srs(
         per_octave=k.get('per_octave'), q=k.get('q'),
         kind=k.get('kind', 'maximax')),
+    'make_realizable': lambda p, s, k: p[s].made_realizable(
+        tolerance=k.get('tolerance'),
+        keep_diagonal=k.get('keep_diagonal', True)),
     'compute_octave': lambda p, s, k: p[s].to_octave(
         k.get('per_octave', 6)),
     'filter_data': lambda p, s, k: p[s].filter(),

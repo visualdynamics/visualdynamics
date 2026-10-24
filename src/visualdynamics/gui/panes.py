@@ -47,6 +47,7 @@ from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
 from .instrumentation_panel import InstrumentationPanel
 from .mate_panel import MatePanel
+from .matrix_check_panel import ConditioningPanel, RealizabilityPanel
 from .merge_panel import MergePanel
 from .mesh_panel import MeshPanel
 from .mesh_solids_panel import MeshSolidsPanel
@@ -222,6 +223,12 @@ class DataPane(QWidget):
     confidence_toggled = Signal(bool)
     #: the rms check was asked for (True) or put away (False)
     rms_check_toggled = Signal(bool)
+    #: the conditioning reading of an FRF or CSD matrix was asked for
+    #: (True) or put away
+    conditioning_toggled = Signal(bool)
+    #: the realizability reading of a CSD was asked for (True) or put
+    #: away
+    realizability_toggled = Signal(bool)
     #: a sine specification's sweep-rate reading was asked for (True)
     #: or put away (False)
     sweep_rate_toggled = Signal(bool)
@@ -283,6 +290,8 @@ class DataPane(QWidget):
         self.transmissibility_wanted: bool = False
         self.confidence_wanted: bool = False
         self.rms_check_wanted: bool = False
+        self.conditioning_wanted: bool = False
+        self.realizability_wanted: bool = False
         self.sweep_rate_wanted: bool = False
         self.sine_profile_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
@@ -421,6 +430,12 @@ class DataPane(QWidget):
         # read beside the spectrum; nothing to apply
         self.rms_check_panel: RmsCheckPanel = RmsCheckPanel()
         self.rms_check_panel.hide()
+        # the two checks on a multi-input test's matrices, each read at
+        # a cursor on its own figure
+        self.conditioning_panel: ConditioningPanel = ConditioningPanel()
+        self.conditioning_panel.hide()
+        self.realizability_panel: RealizabilityPanel = RealizabilityPanel()
+        self.realizability_panel.hide()
         # the modes a sine sweep is checked against, beside the sweep
         # drawn through their bands; the Sweep Rate reading shows it
         self.sweep_rate_panel: SweepRatePanel = SweepRatePanel()
@@ -491,6 +506,8 @@ class DataPane(QWidget):
         plot_row.addWidget(self.transmissibility_panel)
         plot_row.addWidget(self.confidence_panel)
         plot_row.addWidget(self.rms_check_panel)
+        plot_row.addWidget(self.conditioning_panel)
+        plot_row.addWidget(self.realizability_panel)
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.sine_profile_panel)
@@ -1082,6 +1099,37 @@ class DataPane(QWidget):
         self.rms_check_action.triggered.connect(
             lambda checked=False: self._choose_toggle('rms_check', checked))
         toolbar.addAction(self.rms_check_action)
+        # a multi-input test's two matrices, each checked line by line:
+        # the plant (an FRF from several references, or the drives' CSD)
+        # for how near singular it is, and a CSD for whether any signals
+        # could have it. Readings of objects that exist, so toggles, one
+        # up at a time; each draws a figure of its own
+        self.conditioning_action: QAction = QAction(
+            control_icon('conditioning'), 'Conditioning', self)
+        self.conditioning_action.setCheckable(True)
+        self.conditioning_action.setToolTip(
+            'Draw the singular values of the matrix and its condition '
+            'number at every line, the lines over the limit hatched: '
+            'there the references reach the responses in nearly the same '
+            'proportions, and an inverse of the matrix is mostly noise')
+        self.conditioning_action.triggered.connect(
+            lambda checked=False: self._choose_matrix_check('conditioning',
+                                                            checked))
+        self.conditioning_action.setVisible(False)
+        toolbar.addAction(self.conditioning_action)
+        self.realizability_action: QAction = QAction(
+            control_icon('realizability'), 'Realizability', self)
+        self.realizability_action.setCheckable(True)
+        self.realizability_action.setToolTip(
+            'Draw the eigenvalues of the coherence matrix at every line, '
+            'the lines where one is negative hatched: there no set of '
+            'signals has these coherences and phases together, and no '
+            'controller can play them')
+        self.realizability_action.triggered.connect(
+            lambda checked=False: self._choose_matrix_check('realizability',
+                                                            checked))
+        self.realizability_action.setVisible(False)
+        toolbar.addAction(self.realizability_action)
         # a sine specification read against the modes it sweeps
         # through: the time and cycles in each half-power band, and
         # whether the rate lets the mode build. A reading of the
@@ -1168,6 +1216,7 @@ class DataPane(QWidget):
              self.rms_check_action],
             [self.sweep_rate_action, self.sine_profile_action],
             [self.transmissibility_action],
+            [self.conditioning_action, self.realizability_action],
             self.comparison_group.actions(),
             self.spectra_group.actions(),
             self.replication_group.actions(),
@@ -1318,6 +1367,18 @@ class DataPane(QWidget):
         `<key>_action`) is offered and checked."""
         action = getattr(self, f'{key}_action')
         return action.isVisible() and action.isChecked()
+
+    def _choose_matrix_check(self, key: str, checked: bool) -> None:
+        """The Conditioning or Realizability button: a toggle like the
+        tones', and one of the two at a time, since each draws a figure
+        of its own in place of the plot."""
+        if checked:
+            other = ('realizability' if key == 'conditioning'
+                     else 'conditioning')
+            setattr(self, f'{other}_wanted', False)
+            getattr(self, f'{other}_action').setChecked(False)
+            getattr(self, f'{other}_panel').hide()
+        self._choose_toggle(key, checked)
 
     def _offer(self, key: str, panel: str | None, offered: bool) -> None:
         """Put `<key>_action` on the bar or take it off, checked as it
@@ -1976,7 +2037,9 @@ class DataPane(QWidget):
                       tone: bool = False, fit: bool = False,
                       transmissibility: bool = False,
                       confidence: bool = False,
-                      rms_check: bool = False) -> None:
+                      rms_check: bool = False,
+                      conditioning: bool = False,
+                      realizability: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -1995,8 +2058,10 @@ class DataPane(QWidget):
         autospectrum, `transmissibility` the ASD ratio and H1's band
         behind an FRF computed from a time history, `confidence` the
         chi-square band of an autospectrum, `rms_check` the rms check
-        of one with a time history to check against, and `residual`
-        the fit's residual CMIF. The pair,
+        of one with a time history to check against, `conditioning` the
+        singular values of an FRF from several references or of a CSD,
+        `realizability` the eigenvalues of a CSD's coherence matrix, and
+        `residual` the fit's residual CMIF. The pair,
         3-D, frequency-axis, quantity and page controls are hidden here;
         the code that draws offers them afterwards.
         """
@@ -2055,6 +2120,9 @@ class DataPane(QWidget):
         # error is chi-square
         self._offer('confidence', 'confidence_panel', confidence)
         self._offer('rms_check', 'rms_check_panel', rms_check)
+        # and the two matrix checks, on the matrices they read
+        self._offer('conditioning', 'conditioning_panel', conditioning)
+        self._offer('realizability', 'realizability_panel', realizability)
         self.residual_action.setVisible(residual)
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
@@ -2128,6 +2196,7 @@ class DataPane(QWidget):
                        self.octave_action, self.tone_action,
                        self.transmissibility_action,
                        self.confidence_action, self.rms_check_action,
+                       self.conditioning_action, self.realizability_action,
                        self.sweep_rate_action, self.sine_profile_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,

@@ -42,7 +42,7 @@ is saved to a file as its own type.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from .amplitude_spectrum import AmplitudeSpectrum
     from .averaging import Averaging, ConfidenceBand
     from .half_power import HalfPower
+    from .matrix_checks import Conditioning, Realizability
     from .rms_check import RmsCheck
     from .time_statistics import TimeStatistics
     from .tone_readout import ToneReading
@@ -3231,6 +3232,50 @@ class Frf(DataArray):
         from ..plot import plot_cmif
         return plot_cmif(self, shapes, **kwargs)
 
+    def conditioning(self, records: Sequence[int] | None = None, *,
+                     limit: float | None = None,
+                     progress: Callable[[int, int], None] | None = None
+                     ) -> Conditioning:
+        """The singular values and condition number of this FRF matrix at
+        every line, and the lines where it is ill-conditioned
+        (`core.matrix_checks.read_conditioning`).
+
+        The records make the matrix of responses by references; two
+        references or more, every response against every reference, one
+        unit. Where the condition number is over `limit`, the drives
+        reach the responses in nearly the same proportions and an
+        inverse of this matrix, which a controller makes to drive them,
+        amplifies the error in it by up to that much.
+
+        Parameters
+        ----------
+        records : sequence of int, optional
+            The records that make the matrix; all of them when omitted.
+        limit : float, optional
+            The condition number lines are flagged over;
+            `core.matrix_checks.CONDITION_LIMIT` when omitted.
+        progress : callable, optional
+            Told ``(0, core.progress.BUSY)`` before the decomposition;
+            the app's progress bar uses it.
+
+        Returns
+        -------
+        Conditioning
+            The singular values at every line, with the condition
+            number, the effective rank and the flagged bands.
+
+        Raises
+        ------
+        ValueError
+            For an empty selection, one reference, records in different
+            units, or an incomplete matrix.
+        """
+        from .matrix_checks import CONDITION_LIMIT, read_conditioning
+
+        return read_conditioning(
+            self, records, limit=CONDITION_LIMIT if limit is None else limit,
+            progress=progress)
+
     def half_power(self, near: float, record: int = 0, *,
                    within: tuple[float, float] | None = None,
                    warn: bool = True) -> HalfPower:
@@ -3779,35 +3824,25 @@ class Psd(_Bands, DataArray):
             fewer than two channels have the quantity, or the matrix is
             incomplete.
         """
+        from .matrix_checks import spectral_matrix
+
         if self.reference_dof is None:
             raise ValueError('no cross records — an autospectrum set '
                              'has no phase')
-        factors = [channel_quantities(self.known_dim(i))
-                   for i in range(self.num_records)]
-        kinds = [response for response, _reference in factors]
         if quantity is None:
-            kinds_present = [k for k in kinds if k != UNKNOWN]
+            kinds_present = [channel_quantities(self.known_dim(i))[0]
+                             for i in range(self.num_records)]
+            kinds_present = [k for k in kinds_present if k != UNKNOWN]
             if not kinds_present:
                 raise ValueError('no record names a quantity')
             quantity = max(set(kinds_present), key=kinds_present.count)
-        channels: list[str] = []
-        for i, dof in enumerate(self.response_dof):
-            if kinds[i] == quantity and dof not in channels:
-                channels.append(dof)
+        # the matrix assembled where the realizability and conditioning
+        # readings assemble theirs, one channel per (DOF, quantity)
+        keys, matrix, filled = spectral_matrix(self, quantity=quantity)
+        channels = [dof for dof, _quantity in keys]
         n = len(channels)
         if n < 2:
             raise ValueError(f'fewer than two {quantity} channels')
-        index = {dof: k for k, dof in enumerate(channels)}
-        matrix = np.zeros((len(self.abscissa), n, n), dtype=np.complex128)
-        filled = np.zeros((n, n), dtype=bool)
-        for i in range(self.num_records):
-            row = index.get(self.response_dof[i])
-            column = index.get(self.reference_dof[i])
-            if (row is None or column is None
-                    or (kinds[i], factors[i][1]) != (quantity, quantity)):
-                continue
-            matrix[:, row, column] = self.ordinate[i]
-            filled[row, column] = True
         if not filled.all():
             raise ValueError(f'the {quantity} cross-spectral block is '
                              'incomplete')
@@ -4358,6 +4393,130 @@ class Psd(_Bands, DataArray):
                          bandwidth=self.bandwidth,
                          comment=(f'coherence of {self.comment}'.strip()
                                   if self.comment else 'coherence'))
+
+    def conditioning(self, records: Sequence[int] | None = None, *,
+                     limit: float | None = None,
+                     progress: Callable[[int, int], None] | None = None
+                     ) -> Conditioning:
+        """The singular values and condition number of this cross-spectral
+        matrix at every line (`core.matrix_checks.read_conditioning`).
+
+        Read of the drives' CSD, `Gff`, it says where the drives are
+        nearly copies of one another, so that an FRF estimated from them
+        inverts a matrix that is nearly singular.
+
+        Parameters
+        ----------
+        records : sequence of int, optional
+            The records that make the matrix; all of them when omitted.
+            The channels must be of one quantity.
+        limit : float, optional
+            The condition number lines are flagged over;
+            `core.matrix_checks.CONDITION_LIMIT` when omitted.
+        progress : callable, optional
+            Told ``(0, core.progress.BUSY)`` before the decomposition;
+            the app's progress bar uses it.
+
+        Returns
+        -------
+        Conditioning
+            The singular values at every line, with the condition
+            number, the effective rank and the flagged bands.
+
+        Raises
+        ------
+        ValueError
+            For an empty selection, no cross terms, channels of
+            different quantities, or an incomplete matrix.
+        """
+        from .matrix_checks import CONDITION_LIMIT, read_conditioning
+
+        return read_conditioning(
+            self, records, limit=CONDITION_LIMIT if limit is None else limit,
+            progress=progress)
+
+    def realizability(self, records: Sequence[int] | None = None, *,
+                      tolerance: float | None = None,
+                      keep_diagonal: bool = True,
+                      progress: Callable[[int, int], None] | None = None
+                      ) -> Realizability:
+        """Whether this cross-spectral matrix is Hermitian and positive
+        semi-definite at every line, so that some set of signals has it,
+        and the nearest matrix that is
+        (`core.matrix_checks.read_realizability`).
+
+        A specification that is not cannot be played: no drive gives
+        the control channels those coherences and phases together.
+
+        Parameters
+        ----------
+        records : sequence of int, optional
+            The records that make the matrix; all of them when omitted.
+        tolerance : float, optional
+            How far below zero the smallest eigenvalue of the coherence
+            matrix may lie, as a fraction of the largest;
+            `core.matrix_checks.REALIZABLE_TOLERANCE` when omitted.
+        keep_diagonal : bool, default True
+            Whether the repair holds the autospectra where they are.
+        progress : callable, optional
+            Told ``(done, total)`` as the repair goes on; what it raises
+            stops it. The app's progress bar uses it.
+
+        Returns
+        -------
+        Realizability
+            The eigenvalues at every line, the verdict, the failing
+            bands, and the repaired matrix.
+
+        Raises
+        ------
+        ValueError
+            For an empty selection, no cross terms, records some declared
+            in units and some not, one channel, or an incomplete matrix.
+        """
+        from .matrix_checks import REALIZABLE_TOLERANCE, read_realizability
+
+        return read_realizability(
+            self, records, keep_diagonal=keep_diagonal,
+            tolerance=REALIZABLE_TOLERANCE if tolerance is None
+            else tolerance, progress=progress)
+
+    def made_realizable(self, records: Sequence[int] | None = None, *,
+                        tolerance: float | None = None,
+                        keep_diagonal: bool = True,
+                        progress: Callable[[int, int], None] | None = None
+                        ) -> Psd:
+        """A copy with the cross-spectral matrix repaired to the nearest
+        realizable one at every line that is not
+        (`core.matrix_checks.made_realizable`); the lines that are, and
+        every record's place and units, are unchanged.
+
+        Parameters
+        ----------
+        records : sequence of int, optional
+            The records that make the matrix; all of them when omitted.
+        tolerance : float, optional
+            As for `realizability`.
+        keep_diagonal : bool, default True
+            Hold the autospectra where they are and move only the cross
+            terms. Without it a specification's limits follow each
+            autospectrum that moved.
+        progress : callable, optional
+            As for `realizability`.
+
+        Returns
+        -------
+        Psd
+            The repaired copy, of this object's class. `realizability`
+            on this object says what moved.
+        """
+        from .matrix_checks import REALIZABLE_TOLERANCE, made_realizable
+
+        repaired, _reading = made_realizable(
+            self, records, keep_diagonal=keep_diagonal,
+            tolerance=REALIZABLE_TOLERANCE if tolerance is None
+            else tolerance, progress=progress)
+        return repaired
 
     @classmethod
     def units_for(cls, dimension, system=SI):

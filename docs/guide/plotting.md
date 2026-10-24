@@ -150,6 +150,12 @@ dwell against time](dwell.md)). `plot_transmissibility(reading)` draws
 H1 solid and the ASD ratio dashed with H1's band and the coherence
 beneath, the reading the FRF view's Transmissibility toggle shows ([The
 two transmissibilities](transmissibility.md)).
+`plot_conditioning(reading)` draws a matrix's singular values with its
+condition number beneath, and `plot_realizability(reading)` the
+eigenvalues of a cross-spectral matrix's coherence matrix with what the
+repair does to one pair, the readings of the Conditioning and
+Realizability toggles ([Checking the matrices of a multi-input
+test](mimo-matrix-checks.md)).
 `plot_sine_distortion(history, specification, levels)` draws a tone's
 distortion against frequency with the limit across it, the reading the
 sine view's Distortion readout shows ([Checking a sine record for

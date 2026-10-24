@@ -447,6 +447,45 @@ def _draw_transmissibility(painter, color):
     painter.drawPath(_curve([(42, 40), (50, 36), (58, 34)]))
 
 
+def _draw_conditioning(painter, color):
+    """Two curves on one axis, the upper solid and the lower dashed,
+    the lower falling away to a deep notch under the upper's peak.
+
+    What the toggle draws, in miniature: the largest and the smallest
+    singular value of a matrix, and the line where they part by the most,
+    where the matrix is nearly singular and its condition number spikes.
+    """
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(color, 4))
+    painter.drawPath(_curve([(6, 34), (20, 28), (30, 10), (40, 28),
+                             (58, 22)]))
+    dashed = _pen(color, 3)
+    dashed.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(dashed)
+    painter.drawPath(_curve([(6, 44), (20, 44), (30, 58), (40, 44),
+                             (58, 40)]))
+
+
+def _draw_realizability(painter, color):
+    """A dashed zero line, and a solid curve that dips below it with the
+    dip hatched.
+
+    The smallest eigenvalue of a cross-spectral matrix's coherence
+    matrix, gone negative over a band: the lines no signals can make.
+    """
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    dashed = _pen(color, 3)
+    dashed.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(dashed)
+    painter.drawLine(QPointF(4, 30), QPointF(60, 30))
+    painter.setPen(_pen(color, 2))
+    for x in (24, 30, 36, 42):
+        painter.drawLine(QPointF(x - 4, 46), QPointF(x + 2, 34))
+    painter.setPen(_pen(color, 4))
+    painter.drawPath(_curve([(6, 18), (16, 22), (24, 40), (33, 50),
+                             (42, 40), (50, 22), (58, 18)]))
+
+
 def _draw_tone(painter, color):
     """A spike standing on a flat floor, a triangle on its top.
 
@@ -2418,6 +2457,8 @@ def control_icon(name: str) -> QIcon:
      'tone': _draw_tone, 'transmissibility': _draw_transmissibility,
      'confidence': _draw_confidence,
      'amplitude': _draw_amplitude, 'rms_check': _draw_rms_check,
+     'conditioning': _draw_conditioning,
+     'realizability': _draw_realizability,
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'sweep_rate': _draw_sweep_rate,

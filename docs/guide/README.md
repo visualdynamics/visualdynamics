@@ -82,6 +82,9 @@ that is not an alpha.
 - [The two transmissibilities, and what H1 is
   worth](transmissibility.md): the ASD ratio beside H1, and the band
   H1's coherence and averages give
+- [Checking the matrices of a multi-input test](mimo-matrix-checks.md):
+  the plant's singular values and condition number, and whether a
+  cross-spectral specification is realizable, with its repair
 - [Checking a sine record for distortion](sine-distortion.md): the
   record less the tracked tones against the tones, along the sweep,
   against a limit

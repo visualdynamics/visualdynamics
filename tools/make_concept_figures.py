@@ -1007,6 +1007,91 @@ def comparison_chance():
         print(f'combine {combine}: {describe_chance(result, "warning")}')
     plot_chance(psd, spec, combine=8, scale_db=0, show=False,
                 path=str(OUT / 'comparison-chance.png'))
+def _two_drive_plant():
+    """Two shakers driving two control accelerometers through two
+    modes at 2 % damping: at 100 Hz both drives move together, at
+    400 Hz against each other. Accelerance, 5 to 1000 Hz at 1.25 Hz."""
+    import numpy as np
+
+    from visualdynamics.core.data import Frf
+
+    f = np.arange(5.0, 1000.0 + 0.625, 1.25)
+    w = 2 * np.pi * f
+    h = np.zeros((len(f), 2, 2), dtype=complex)
+    for fn, phi in ((100.0, np.array([1.0, 1.0])),
+                    (400.0, np.array([1.0, -1.0]))):
+        wn = 2 * np.pi * fn
+        h += np.outer(phi, phi)[None] * -w[:, None, None] ** 2 / (
+            wn ** 2 - w[:, None, None] ** 2
+            + 2j * 0.02 * wn * w[:, None, None])
+    rows, resp, refs = [], [], []
+    for i, r in enumerate(('101Z+', '102Z+')):
+        for j, d in enumerate(('1Z+', '2Z+')):
+            rows.append(h[:, i, j])
+            resp.append(r)
+            refs.append(d)
+    return Frf(f, np.asarray(rows), response_dof=resp, reference_dof=refs,
+               ordinate_dim=['acceleration/force'] * 4)
+
+
+def matrix_checks():
+    """The two matrix checks of a multi-input test. Conditioning: the
+    two-drive plant of `_two_drive_plant`, whose columns are one at the
+    first mode, where the condition number passes 100. Realizability:
+    three control channels at 0.01 g²/Hz with coherence 0.36 between
+    every pair, 1-2 and 2-3 in step, and the 1-3 phase rising from 0 at
+    20 Hz to 180 degrees at 2000 Hz (linear in log frequency); past the
+    phase the other two can carry, no signals have the matrix."""
+    import numpy as np
+
+    from visualdynamics.core.data import Specification
+    from visualdynamics.plot import plot_conditioning, plot_realizability
+
+    reading = _two_drive_plant().conditioning()
+    plot_conditioning(reading, band=(5.0, 1000.0), show=False,
+                      size=(1000, 700),
+                      path=str(OUT / 'mimo-conditioning.png'))
+    print(reading.describe())
+    for frequency in (5.0, 100.0, 250.0, 400.0):
+        print(reading.at(frequency).describe('m/s²/N'))
+
+    f = np.geomspace(20.0, 2000.0, 201)
+    phase = 180.0 * np.log(f / 20.0) / np.log(100.0)
+    g2 = 9.80665 ** 2
+    a = 0.6
+    terms = {(0, 1): np.full(len(f), a + 0j), (1, 2): np.full(len(f), a + 0j),
+             (0, 2): a * np.exp(1j * np.radians(phase))}
+    channels = ['1Z+', '2Z+', '3Z+']
+    rows, resp, refs = [], [], []
+    for i in range(3):
+        for j in range(3):
+            if i == j:
+                value = np.ones(len(f), dtype=complex)
+            elif i < j:
+                value = terms[(i, j)]
+            else:
+                value = np.conj(terms[(j, i)])
+            rows.append(value * 0.01 * g2)
+            resp.append(channels[i])
+            refs.append(channels[j])
+    spec = Specification(f, np.asarray(rows), response_dof=resp,
+                         reference_dof=refs,
+                         ordinate_dim=['acceleration**2/frequency'] * 9)
+    reading = spec.realizability()
+    plot_realizability(reading, band=(20.0, 2000.0), pair=(0, 2), show=False,
+                       size=(1000, 860),
+                       path=str(OUT / 'mimo-realizability.png'))
+    print(reading.describe())
+    print('largest changes', reading.changes())
+    first = reading.bands()[0][0]
+    k = reading.line(first)
+    print(f'first failing line {first:.4g} Hz, 1-3 phase {phase[k]:.4g} deg')
+    for frequency in (100.0, 1000.0, 2000.0):
+        print(reading.at(frequency).describe())
+        before, after, pb, pa = reading.pair(0, 2)
+        k = reading.line(frequency)
+        print(f'  1Z+-3Z+ coherence {before[k]:.3f} -> {after[k]:.3f}, '
+              f'phase {pb[k]:.1f} -> {pa[k]:.1f}')
 
 
 def plot_composition():
@@ -1226,6 +1311,7 @@ def main():
     stroke_readout()
     dwell()
     transmissibility()
+    matrix_checks()
     sine_distortion()
     breakpoint_slopes()
     amplitude_spectrum()

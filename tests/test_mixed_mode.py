@@ -953,3 +953,19 @@ def test_a_floor_mostly_left_out_and_a_tone_off_the_floor_are_said():
     assert any('the floor is not written under all of it' in note
                for note in off.notes)
     assert not any('not written under' in note for note in narrow.notes)
+
+
+def test_a_swept_band_reads_the_same_on_a_clock_that_starts_late():
+    level = 0.05
+    narrow = Narrowband(150.0, level * G ** 2, width=16.0, sweep_to=250.0,
+                        rate=10.0, name='track')
+    history = _record(extra=_swept(level, 16.0, 150.0, 250.0, 10.0))
+    later = TimeHistory(np.asarray(history.abscissa) + 100.0,
+                        history.ordinate, response_dof=[CHANNEL],
+                        ordinate_dim=['acceleration'], ordinate_unit=['g'])
+    first, = judge_mixed(history, _spec(narrowbands=[narrow]),
+                         onset=0.0).narrowbands
+    second, = judge_mixed(later, _spec(narrowbands=[narrow]),
+                          onset=0.0).narrowbands
+    assert second.slices == first.slices
+    assert second.error_db == pytest.approx(first.error_db, abs=1e-9)

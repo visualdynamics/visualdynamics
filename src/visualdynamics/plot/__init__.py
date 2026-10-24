@@ -3877,6 +3877,56 @@ def plot_transformation_residual(reading: Any, *,
                         size=size)
 
 
+def plot_partial_coherence(reading: Any, response: int | str = 0, *,
+                           theme: Any = None,
+                           path: str | os.PathLike | None = None,
+                           show: bool = True, title: str | None = None,
+                           size: tuple[int, int] = (1000, 900)) -> Any:
+    """Draw which reference explains a response, and whether the
+    references were independent.
+
+        reading = history.read_partial_coherence()
+        visualdynamics.plot.plot_partial_coherence(reading, '101Z+',
+                                                   path='partial.png')
+
+    Drawn by `plot.partial_coherence.build_partial_coherence`: above,
+    the multiple coherence heavy and each reference's partial coherence
+    in its own dash and marker; in the middle, the coherence between
+    every pair of references with the coupling level dotted; beneath,
+    the principal references' powers as shares of the first. The
+    window's Partial Coherence toggle on a multiple coherence draws the
+    same.
+
+    Parameters
+    ----------
+    reading : PartialCoherence
+        From `TimeHistory.read_partial_coherence`,
+        `Project.read_partial_coherence` or
+        `core.partial_coherence.read_partial_coherence`.
+    response : int or str, default 0
+        Which response, by position or by name.
+    theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from .partial_coherence import build_partial_coherence
+
+    k = reading.index(response)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_partial_coherence(widget, reading, k, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{reading.responses[k]}: partial '
+                                       'and reference coherence',
+                        size=size)
+
+
 def build_ratio(layout: Any, signal: Any, floor: Any,
                 records: Sequence[int] | None = None,
                 theme: Any = None) -> int:

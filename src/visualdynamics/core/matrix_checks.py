@@ -863,9 +863,13 @@ class Realizability:
         change = np.abs(self.repaired - self.coherence)
         change = np.where(upper[None] & self.failing[:, None, None],
                           change, -1.0)
-        line, i, j = np.unravel_index(int(np.argmax(change)), change.shape)
-        if change[line, i, j] <= 0.0:
+        largest = float(change.max())
+        if largest <= 0.0:
             return None
+        # terms a symmetric target moves equally differ only in rounding,
+        # which varies by platform; the first of them is taken
+        tied = change >= largest * (1.0 - 1e-9)
+        line, i, j = np.unravel_index(int(np.argmax(tied)), change.shape)
         return int(i), int(j), int(line)
 
     def changes(self) -> tuple[float, float]:
@@ -1211,7 +1215,8 @@ def entries_refusal(channels: Any, pairs: Any, frequencies: Any,
         for a in range(m):
             for b in range(a + 1, m):
                 moves.append((abs(repaired[a, b] - c[a, b]), a, b))
-        moves.sort(key=lambda move: -move[0])
+        # sizes equal but for rounding keep the channels' order
+        moves.sort(key=lambda move: -round(float(move[0]), 9))
         shown = []
         for _size, a, b in moves[:3]:
             entry = repaired[a, b]

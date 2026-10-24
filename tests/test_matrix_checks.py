@@ -13,6 +13,8 @@ quarter.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -921,6 +923,26 @@ def test_the_repair_reports_the_term_it_moved_most():
     assert '4Z+' not in shown.split(' and 3 more')[0]
 
 
+def test_terms_moved_equally_report_the_first_whatever_the_rounding():
+    """In the matrix above, 1Z+–3Z+ and 2Z+–3Z+ are moved by the same
+    amount, differing only in the last digit, and which is larger
+    depends on the platform's rounding. The first is reported, so the
+    reading is the same everywhere, even with the second a rounding
+    above."""
+    a = np.sqrt(0.81)
+    m = np.array([[1, 1, -1, a], [1, 1, 1, a], [-1, 1, 1, 0], [a, a, 0, 1]],
+                 dtype=complex)
+    reading = check_spectral_matrix(F, np.repeat(m[None], 4, 0),
+                                    ['1Z+', '2Z+', '3Z+', '4Z+'])
+    change = np.abs(reading.repaired - reading.coherence)[0]
+    assert change[0, 2] == pytest.approx(change[1, 2], rel=1e-12)
+    nudged = reading.repaired.copy()
+    nudged[:, 1, 2] = (reading.coherence[:, 1, 2]
+                       + (reading.repaired[:, 1, 2]
+                          - reading.coherence[:, 1, 2]) * (1.0 + 1e-12))
+    assert dataclasses.replace(reading, repaired=nudged).worst()[:2] == (0, 2)
+
+
 def test_a_phase_where_the_coherence_was_zero_is_not_a_change():
     """A pair written at no coherence has no phase to change: the repair
     gives it a coherence at 120 degrees, and that is not counted as a
@@ -943,10 +965,11 @@ def test_the_refusal_names_the_channels_that_carry_the_conflict():
     words = entries_refusal(names, two, [20.0, 2000.0])
     assert words.startswith('the cross terms of 1Z+ and 2Z+ cannot hold')
     # a phase the repair keeps at zero reads 0, not -0, and the three
-    # terms of three channels have no 'more'
+    # terms of three channels have no 'more'; the two moved equally keep
+    # the channels' order
     assert words.endswith('The nearest entries that hold are 1Z+–2Z+ '
-                          'coherence 0.759 at 0°; 2Z+–3Z+ coherence 0.0643 '
-                          'at 180°; 1Z+–3Z+ coherence 0.0643 at 0°')
+                          'coherence 0.759 at 0°; 1Z+–3Z+ coherence 0.0643 '
+                          'at 0°; 2Z+–3Z+ coherence 0.0643 at 180°')
     # every channel's share over the line, the smallest near it
     three = {(0, 1): (0.99, 0.0), (0, 2): (0.5, 0.0), (1, 2): (0.5, 180.0)}
     assert entries_refusal(names, three, [20.0, 2000.0]).startswith(

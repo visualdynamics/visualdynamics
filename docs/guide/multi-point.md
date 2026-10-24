@@ -9,7 +9,7 @@ is usually wider. This page describes how Visual Dynamics forms the
 composite, how it reads both results, and how to run the reading from
 a script.
 
-## Why there are two judgements
+## Why there are two judgments
 
 The control plot a controller shows is a statement about the
 composite. It says nothing about any one channel. Two cases show what
@@ -58,7 +58,8 @@ channel locations, because each one drives the table differently.
    measured PSD: the ones named, by record or by DOF, or by default the
    ones that pair with the specification's records by DOF and quantity,
    the same pairing the comparison uses. Two or more are needed; with
-   one, the comparison itself is the reading. A channel named twice, a
+   one, the comparison itself is the reading, and naming none is
+   refused as such. A channel named twice, a
    cross term, or a DOF that holds two autospectra (a force and an
    acceleration at a drive point) is refused with the reason.
 2. One quantity. The channels must hold the same quantity, by the rule
@@ -85,7 +86,7 @@ channel locations, because each one drives the table differently.
    specification's warning limits and each channel against −6/+6 dB.
    Those are starting points to edit, not a standard: the test plan
    names both bands.
-6. The judgement. The composite and each channel are compared with
+6. The judgment. The composite and each channel are compared with
    their band by `compare` and `exceedances` in
    `visualdynamics.core.compliance`, the comparison every random reading
    makes: cell by cell, as areas, at the comparison's one scale. A run
@@ -100,19 +101,39 @@ everywhere or more than 20 dB below the others at its median line (as
 a dead or disconnected sensor does), a weight of zero, a scale
 detected from the data, and units undeclared on both sides.
 
+A reading that judged nothing says so. When one channel has no usable
+value at any line, the composite is formed at no line, and the
+composite's line reads "not judged" instead of a count of lines
+outside; a channel with no finite line reads the same way. Neither is
+ever shown as inside its band.
+
+The bands are judged line by line, and a correct channel's spectrum
+scatters about its true level as much as its averaging leaves it to.
+For channels of white noise at the reference under the default frames
+(Hann, end to end), about one line in a hundred of a channel falls
+outside −6/+6 dB by chance with 5 frames averaged, about three in ten
+thousand with 10, and none with 40, and each such line is listed as a
+line the composite hides. A short run therefore shows a few hidden
+lines on channels that are working; a fault shows as many lines in a
+row. The dead-sensor note never trips on such channels.
+
 ## In the app
 
 Select the specification and the control PSD together. Where the
 measurement holds two or more control channels (the records picked, or,
 with the whole PSD selected, the ones that pair with the
 specification), **Composite** is on the bar beside **Spectra**,
-**RMS Error** and **Lines Out**. The plot is the picture below. The
+**RMS Error**, **Lines Out** and **Chance**. The plot is the picture
+below. The
 panel beside it holds the strategy, the weights under a weighted
 average, the composite band and the channel band, each either the
 specification's limits or a band in dB. Under them are the
 composite's lines outside its band, each channel's lines outside its
 own and how many of those the composite was inside at, and the notes.
-Every edit redraws the reading at once. Nothing is made, so there is no
+Every edit makes the reading again, with the progress bar up while
+every channel is judged (each line of each channel is judged twice, so
+even a short run of a few channels takes a moment), and redraws it.
+Nothing is made, so there is no
 Apply button; the console records the `plot_multi_point` call that
 draws what is on screen. The table under the plot still holds every
 channel's comparison against the specification.

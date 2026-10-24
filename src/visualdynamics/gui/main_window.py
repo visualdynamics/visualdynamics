@@ -1334,6 +1334,10 @@ class MainWindow(QMainWindow):
         #: the record, the label in the plot's corner and the time
         #: history it is checked against; None while it is not up
         self._rms_check: dict[str, Any] | None = None
+        #: the composite reading being made on the worker
+        #: (`_render_multi_point`): a reading that comes back after a
+        #: newer drawing took this is dropped
+        self._multi_point_token: object | None = None
         #: the time history and threshold chosen in the rms check's
         #: pane, by spectrum name, so a redraw keeps them
         self._rms_check_settings: dict[str, dict[str, Any]] = {}
@@ -20477,6 +20481,8 @@ class MainWindow(QMainWindow):
         leaves the plot empty and the reason in the panel and on the
         status line, with no numbers that would read as a result.
         """
+        from ..core.multi_point import multi_point
+        from ..core.progress import Cancelled
         from ..plot.multi_point import build_multi_point, describe_composite
         from .multi_point_panel import parse_weights
 
@@ -20490,14 +20496,36 @@ class MainWindow(QMainWindow):
         settings = panel.settings()
         scale = self.project.comparison_scale(spec, name)
         self.data_pane.graphics.clear()
+        # every line of every channel is judged twice by the comparison
+        # every reading uses (`compliance.compare`, `exceedances`), some
+        # 0.1 ms a line, so even two channels of 400 lines take a fifth
+        # of a second: the reading is made on the worker with the bar
+        # up (`_run_long`) and drawn here
+        token = self._multi_point_token = object()
+
+        def read(progress=None):
+            return multi_point(spec, measured, channels, scale_db=scale,
+                               **settings)
+
         try:
             if isinstance(settings['weights'], str):
                 parse_weights(settings['weights'])     # raises the reason
-            reading = build_multi_point(
+            reading = self._run_long(
+                f'Reading the composite of {len(channels)} channels…', read)
+            if self._multi_point_token is not token:
+                # redrawn while the worker read: that drawing made its
+                # own reading, and this one belongs to nothing
+                return None
+            build_multi_point(
                 self.data_pane.graphics, spec, measured, channels=channels,
                 scale_db=scale, unit_system=self.unit_system,
-                theme=self.theme_name, **settings)
+                theme=self.theme_name, reading=reading, **settings)
+        except Cancelled:
+            panel.show_results(None, 'the composite reading was canceled')
+            return 'The composite reading was canceled'
         except ValueError as error:
+            if self._multi_point_token is not token:
+                return None
             panel.show_results(None, str(error))
             return str(error)
         panel.show_results(reading)

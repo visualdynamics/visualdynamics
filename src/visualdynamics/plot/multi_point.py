@@ -16,7 +16,7 @@ channel with its marker filled, and every line the composite is
 outside its band with a filled circle on the composite. The legend
 says, for each, how many lines are outside and, for each channel, how
 many of those the composite was inside at, because that number is the
-reason a multi-point run has two judgements.
+reason a multi-point run has two judgments.
 
 **Each channel wears a marker as well as a color**, for the reason the
 sine tracking view gives: several curves of one quantity are compared
@@ -65,6 +65,10 @@ def describe_composite(reading: MultiPointReading) -> str:
     many lines are outside the composite band with their share, as in
     'composite, average of 4: 0 lines outside −3/+3 dB (0.0 %)'."""
     count = reading.outside_lines
+    if not reading.judged_lines:
+        # nothing judged is said as such, never as no line outside
+        return (f'composite, {reading.strategy} of {len(reading.channels)}: '
+                'not judged, since it was formed at no line')
     return (f'composite, {reading.strategy} of {len(reading.channels)}: '
             f'{count} line{"s" * (count != 1)} outside '
             f'{reading.composite_text} '
@@ -76,6 +80,8 @@ def describe_channel(channel: Any, reading: MultiPointReading) -> str:
     and how many of those the composite was inside at, as in
     '2Z+: 37 lines outside −6/+6 dB, 37 with the composite inside'."""
     count = channel.outside_lines
+    if not channel.judged_lines:
+        return f'{channel.label}: not judged, since it has no finite line'
     text = (f'{channel.label}: {count} line{"s" * (count != 1)} outside '
             f'{reading.individual_text}')
     if count:
@@ -93,9 +99,13 @@ def build_multi_point(layout: Any, specification: Any, measured: Any, *,
                       spec_record: int | None = None,
                       scale_db: float | None = None,
                       unit_system: Any = None,
-                      theme: Any = None) -> MultiPointReading:
+                      theme: Any = None,
+                      reading: MultiPointReading | None = None
+                      ) -> MultiPointReading:
     """Draw a multi-point reading on `layout` and return it
     (`core.multi_point.multi_point`, with every argument passed on).
+    `reading`, when given, is that reading already made (the window
+    makes it on its worker thread) and is drawn as it is.
 
     The reference in gray, the composite band and the individual band
     around it shaded, each channel light in its own color and marker
@@ -123,9 +133,10 @@ def build_multi_point(layout: Any, specification: Any, measured: Any, *,
     )
     from .sine_tracking import MARKER_SIZE, _marker_spots
 
-    reading = multi_point(specification, measured, channels, strategy,
-                          weights, composite_band, individual_band,
-                          spec_record, scale_db)
+    if reading is None:
+        reading = multi_point(specification, measured, channels, strategy,
+                              weights, composite_band, individual_band,
+                              spec_record, scale_db)
     colors = resolve_theme(theme)
     us = DEFAULT_SYSTEM if unit_system is None else unit_system
     dimension = specification.ordinate_dim[reading.spec_record]

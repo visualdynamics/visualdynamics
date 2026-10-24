@@ -1,5 +1,5 @@
 """Multi-point control: several control channels combined into one, and
-the two judgements a test run that way is accepted on.
+the two judgments a test run that way is accepted on.
 
 A random test on one shaker is often controlled at more than one point.
 The controller combines the control channels' spectra, line by line,
@@ -30,7 +30,7 @@ reading here lists, for each channel, the lines where it is outside its
 own band while the composite is inside its band, which is the fact the
 composite hides.
 
-Every judgement is `compliance.compare` and `compliance.exceedances`,
+Every judgment is `compliance.compare` and `compliance.exceedances`,
 the comparison every other random reading makes: the composite and
 each channel are compared cell by cell, as areas, against a band
 around the reference, at the comparison's one scale. Nothing here
@@ -108,6 +108,13 @@ class ChannelReading:
         return int(self.outside.sum())
 
     @property
+    def judged_lines(self) -> int:
+        """How many lines were judged against the individual band: none
+        for a channel with no finite line, which was not judged at all
+        and is never read as inside its band."""
+        return int(self.result.get('lines', 0))
+
+    @property
     def hidden_lines(self) -> int:
         """How many lines are outside the individual band while the
         composite is inside its own."""
@@ -116,7 +123,7 @@ class ChannelReading:
 
 @dataclass(frozen=True)
 class MultiPointReading:
-    """What `multi_point` read: the composite, its judgement, and each
+    """What `multi_point` read: the composite, its judgment, and each
     channel's."""
 
     #: one of `STRATEGIES`
@@ -152,6 +159,13 @@ class MultiPointReading:
     def outside_lines(self) -> int:
         """How many lines of the composite are outside its band."""
         return int((self.over | self.under).sum())
+
+    @property
+    def judged_lines(self) -> int:
+        """How many lines of the composite were judged: none when it was
+        formed at no line (a channel with no finite line), in which case
+        nothing was judged and the reading is never a pass."""
+        return int(self.result.get('lines', 0))
 
     @property
     def hiding(self) -> tuple[ChannelReading, ...]:
@@ -299,7 +313,7 @@ def multi_point(specification: Specification, measured: Psd,
     Returns
     -------
     MultiPointReading
-        The composite and its judgement, each channel's, and the notes.
+        The composite and its judgment, each channel's, and the notes.
 
     Raises
     ------
@@ -434,6 +448,9 @@ def control_channels(specification: Specification, measured: Psd,
         for _label, _j, i in matched_records(specification, measured):
             if i in autos and i not in found:
                 found.append(i)
+    elif not len(channels):
+        raise ValueError('channels names none; a composite needs two or more '
+                         'control channels')
     else:
         found = []
         for name in channels:
@@ -605,10 +622,11 @@ def _notes(values: np.ndarray, labels: list[str],
             notes.append(f'{label} has no finite, non-negative line, so no '
                          'composite was formed')
         elif bad.any():
-            notes.append(f'{label} has {int(bad.sum())} line'
-                         f'{"s" * (int(bad.sum()) != 1)} that are not a '
-                         'finite, non-negative density; the composite is '
-                         'not formed or judged there')
+            count = int(bad.sum())
+            notes.append(f'{label} has {count} '
+                         f'{"line that is" if count == 1 else "lines that are"}'
+                         ' not a finite, non-negative density; the composite '
+                         'is not formed or judged there')
     if share is not None:
         for label, weight in zip(labels, share, strict=True):
             if weight == 0.0:
@@ -627,12 +645,23 @@ def _notes(values: np.ndarray, labels: list[str],
                              'counts it as it reads')
                 continue
             others = np.median(np.delete(values[:, good], k, axis=0), axis=0)
-            usable = (mine > 0.0) & (others > 0.0)
+            # a line where this channel reads zero is as far below the
+            # others as a line can be, and counts toward the median: a
+            # sensor that has dropped out over most of the band reads
+            # zero at its median line
+            usable = others > 0.0
             if not usable.any():
                 continue
-            below = float(np.median(10.0 * np.log10(mine[usable]
-                                                    / others[usable])))
-            if below < -DEAD_DB:
+            with np.errstate(divide='ignore'):
+                below = float(np.median(10.0 * np.log10(mine[usable]
+                                                        / others[usable])))
+            if below == -np.inf:
+                zeros = int((mine[usable] == 0.0).sum())
+                notes.append(
+                    f'{label} reads zero at {zeros} of its {int(usable.sum())} '
+                    'lines, as a dead or disconnected sensor does; the '
+                    'composite counts it as it reads')
+            elif below < -DEAD_DB:
                 notes.append(
                     f'{label} reads {-below:.0f} dB below the other channels '
                     'at its median line, as a dead or disconnected sensor '

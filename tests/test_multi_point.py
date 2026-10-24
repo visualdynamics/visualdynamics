@@ -1,5 +1,5 @@
 """Multi-point control: the composite of several control channels, and
-the two judgements a run controlled that way is accepted on.
+the two judgments a run controlled that way is accepted on.
 
 Every case is built so its numbers are known from the construction: a
 flat reference, control channels that are the reference times a known
@@ -109,7 +109,7 @@ def test_a_strategy_or_weights_that_cannot_be_used_are_refused(
         composite(np.ones((2, 3)), strategy, weights)
 
 
-# ---- the two judgements -----------------------------------------------------
+# ---- the two judgments -----------------------------------------------------
 
 
 def test_a_dead_channel_leaves_the_composite_inside_and_is_found():
@@ -636,3 +636,246 @@ def test_leaving_the_composite_puts_the_panel_away(window, pump):
     pane.comparison_actions['error'].trigger()
     pump()
     assert not pane.multi_point_panel.isVisible()
+
+
+# ---- dead, missing and empty, the edges, and noise ------------------------------
+
+
+def test_naming_no_channels_is_refused_as_such():
+    with pytest.raises(ValueError, match='^channels names none; a composite '
+                                         'needs two or more control channels$'):
+        multi_point(reference(), run(1.0, 1.0), channels=[], scale_db=0)
+
+
+def test_one_line_not_formed_is_counted_in_the_singular():
+    reading = multi_point(reference(), run(1.0, 1.0, nan_at=(1, 50)),
+                          channels=[0, 1], scale_db=0)
+    assert ('2Z+ has 1 line that is not a finite, non-negative density; the '
+            'composite is not formed or judged there') in reading.notes
+    assert reading.judged_lines == JUDGED - 1
+
+
+def test_a_composite_formed_nowhere_is_not_judged_and_never_inside():
+    """One channel missing at every line: the composite is formed at no
+    line, so nothing is judged, and the reading says so rather than
+    "0 lines outside"; the missing channel is not judged either."""
+    from visualdynamics.plot.multi_point import describe_channel, describe_composite
+
+    reading = multi_point(reference(), run(1.0, 1.0, nan_at=(0, slice(None))),
+                          channels=[0, 1], scale_db=0)
+    assert reading.judged_lines == 0 and reading.outside_lines == 0
+    assert describe_composite(reading) == ('composite, average of 2: not '
+                                           'judged, since it was formed at no '
+                                           'line')
+    missing, live = reading.channels
+    assert missing.judged_lines == 0
+    assert describe_channel(missing, reading) == ('1Z+: not judged, since it '
+                                                  'has no finite line')
+    assert describe_channel(live, reading) == '2Z+: 0 lines outside −6/+6 dB'
+    assert reading.notes[0] == ('1Z+ has no finite, non-negative line, so no '
+                                'composite was formed')
+
+
+@pytest.mark.parametrize('line', [20.0, 2000.0])
+def test_a_hot_line_at_either_edge_of_the_band_is_found(line):
+    """One channel 4.5 times the reference (+6.5 dB) at the band's first
+    line or its last, and the reference everywhere else: outside its own
+    band at that line alone, and hidden there, since the average of the
+    four is 1.875 times the reference (+2.7 dB), inside -3/+3."""
+    measured = run(1.0, 1.0, 1.0, 1.0)
+    at = int(np.flatnonzero(LINES == line)[0])
+    measured.ordinate[0, at] = 4.5 * LEVEL
+    reading = multi_point(reference(), measured, channels=[0, 1, 2, 3],
+                          scale_db=0)
+    hot = reading.channels[0]
+    assert hot.outside_lines == hot.hidden_lines == 1
+    assert hot.outside[at] and hot.hidden[at]
+    assert reading.outside_lines == 0
+
+
+def _white(seconds, seed):
+    """Four channels of unit white noise in g, as a PSD under the
+    default frames (Hann, end to end, 5 Hz lines), and the reference at
+    its true level with warning limits 3 dB either side."""
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+
+    g, fs = 9.80665, 5120.0
+    n = int(seconds * fs)
+    history = TimeHistory(
+        np.arange(n) / fs,
+        np.random.default_rng(seed).standard_normal((4, n)) * g,
+        response_dof=['1Z+', '2Z+', '3Z+', '4Z+'],
+        ordinate_dim=['acceleration'] * 4, ordinate_unit=['g'] * 4)
+    averaging = Averaging(frame_length=1024).filled(n, fs)
+    assert averaging.window == 'hann'
+    level = g ** 2 * 2.0 / fs
+    rows = np.array([[level, level]])
+    spec = Specification([20.0, 2000.0], rows, response_dof=['1Z+'],
+                         ordinate_dim=[PSD_DIM], warning_lower=rows / 10 ** 0.3,
+                         warning_upper=rows * 10 ** 0.3)
+    return spec, history.compute_psds(averaging)
+
+
+def test_white_noise_at_the_defaults_is_never_read_as_a_dead_channel():
+    """Correct channels of white noise under the default window: the
+    dead-sensor rule never trips, and with 40 frames no line of the
+    composite or of a channel is outside its band. With 5 frames a
+    channel's lines scatter enough that about one in a hundred falls
+    outside -6/+6 dB by chance (the guide says so): never more than a
+    few in a hundred."""
+    for seed in range(10):
+        spec, psd = _white(8.0, seed)
+        reading = multi_point(spec, psd, channels=[0, 1, 2, 3], scale_db=0)
+        assert not any('dead' in note for note in reading.notes)
+        assert reading.outside_lines == 0
+        assert all(c.outside_lines == 0 for c in reading.channels)
+    out = judged = 0
+    for seed in range(10):
+        spec, psd = _white(1.0, 100 + seed)
+        reading = multi_point(spec, psd, channels=[0, 1, 2, 3], scale_db=0)
+        assert not any('dead' in note for note in reading.notes)
+        out += sum(c.outside_lines for c in reading.channels)
+        judged += 4 * reading.judged_lines
+    assert 0 < out / judged < 0.03
+
+
+def test_the_window_reads_the_composite_on_the_worker(window, pump,
+                                                      monkeypatch):
+    """The reading is made through the window's long-verb runner, and a
+    reading that comes back after a newer drawing took over is dropped
+    rather than drawn."""
+    ran = []
+    real = window._run_long
+
+    def runner(status, verb, *args, **kwargs):
+        ran.append(status)
+        return real(status, verb, *args, **kwargs)
+
+    monkeypatch.setattr(window, '_run_long', runner)
+    _composite_pair(window, pump, 1.5, 1.5, 0.0)
+    assert ran and ran[-1] == 'Reading the composite of 3 channels…'
+    assert window.data_pane.multi_point_panel.derived['channels'].text() == '3'
+
+    def overtaken(status, verb, *args, **kwargs):
+        found = real(status, verb, *args, **kwargs)
+        window._multi_point_token = object()       # a newer drawing
+        return found
+
+    monkeypatch.setattr(window, '_run_long', overtaken)
+    spec = window.project['Reference']
+    measured = window.project['Run']
+    assert window._render_multi_point('Reference', spec, 'Run', measured,
+                                      [0, 1, 2]) is None
+
+
+# ---- the mutation run's boundaries, each pinned -----------------------------------
+
+
+def test_two_channels_one_of_them_dead():
+    """The fewest channels a composite takes, one reading zero: noted."""
+    reading = multi_point(reference(), run(1.0, 0.0), channels=[0, 1],
+                          scale_db=0)
+    assert reading.notes == (('2Z+ reads zero at every line, as a dead or '
+                             'disconnected sensor does; the composite '
+                             'counts it as it reads'),)
+
+
+def test_a_channel_dropped_out_over_most_of_the_band_is_noted():
+    """Zero above 600 Hz and at the reference below: zero at its median
+    line, which the median of the lines it reads would not show."""
+    measured = run(1.0, 1.0, 1.0)
+    measured.ordinate[2, LINES > 600.0] = 0.0
+    reading = multi_point(reference(), measured, channels=[0, 1, 2],
+                          scale_db=0)
+    zeros = int((LINES > 600.0).sum())
+    assert reading.notes == ((f'3Z+ reads zero at {zeros} of its '
+                              f'{LINES.size} lines, as a dead or disconnected '
+                              'sensor does; the composite counts it as it '
+                              'reads'),)
+
+
+def test_a_channel_exactly_twenty_db_below_is_not_noted():
+    """The rule is more than 20 dB: a channel at a hundredth of the
+    others, exactly 20 dB down, is not called dead."""
+    reading = multi_point(reference(), run(1.0, 1.0, 0.01),
+                          channels=[0, 1, 2], scale_db=0)
+    assert not any('dead' in note for note in reading.notes)
+
+
+def test_a_composite_formed_nowhere_notes_only_that():
+    reading = multi_point(reference(), run(1.0, 1.0, nan_at=(0, slice(None))),
+                          channels=[0, 1], scale_db=0)
+    assert reading.notes == (('1Z+ has no finite, non-negative line, so no '
+                              'composite was formed'),)
+
+
+def test_a_scale_found_to_be_nothing_is_not_noted():
+    """Left to the comparison, a run at level resolves to no scale, and
+    the reading says nothing of one."""
+    reading = multi_point(reference(), run(1.0, 1.0), channels=[0, 1])
+    assert reading.scale_db == 0.0
+    assert not any('scaled' in note for note in reading.notes)
+
+
+def test_a_cross_term_is_left_out_of_the_default_channels():
+    """By default the channels are the autospectra that pair with the
+    specification; a cross term at a paired DOF is not one of them."""
+    from visualdynamics.core.data import Psd as Cpsd
+
+    values = np.full((3, LINES.size), LEVEL, dtype=complex)
+    cpsd = Cpsd(LINES, values, response_dof=['1Z+', '1Z+', '2Z+'],
+                reference_dof=['1Z+', '2Z+', '2Z+'],
+                ordinate_dim=[PSD_DIM] * 3)
+    assert control_channels(reference(('1Z+', '2Z+')), cpsd) == [0, 2]
+
+
+def test_record_numbers_at_their_ends():
+    """A record one past the last is refused; record 0 and the last are
+    records; a specification record is checked the same way."""
+    with pytest.raises(ValueError, match='there is no record 2'):
+        control_channels(reference(), run(1.0, 1.0), [0, 2])
+    assert control_channels(reference(), run(1.0, 1.0), [1, 0]) == [1, 0]
+    spec = reference(('1Z+', '2Z+'))
+    for record in (2, -1):
+        with pytest.raises(ValueError, match=f'has no record {record}'):
+            multi_point(spec, run(1.0, 1.0), spec_record=record, scale_db=0)
+    assert multi_point(spec, run(1.0, 1.0), spec_record=0,
+                       scale_db=0).spec_record == 0
+
+
+def test_the_reference_is_the_first_record_the_channels_pair_with():
+    spec = reference(('1Z+', '2Z+', '3Z+'))
+    reading = multi_point(spec, run(1.0, 1.0, 1.0), scale_db=0)
+    assert reading.spec_record == 0
+
+
+@pytest.mark.parametrize('band', [(0.0, 6.0), (-6.0, 0.0)])
+def test_a_band_edge_on_the_reference_is_an_edge(band):
+    """A one-sided tolerance written with its other edge on the
+    reference: the reference line itself is inside, anything past it on
+    that side is out."""
+    over = run(1.2, 1.2) if band[1] == 0.0 else run(0.8, 0.8)
+    reading = multi_point(reference(), over, channels=[0, 1],
+                          individual_band=band, scale_db=0)
+    assert all(c.outside_lines == JUDGED for c in reading.channels)
+    level = multi_point(reference(), run(1.0, 1.0), channels=[0, 1],
+                        individual_band=band, scale_db=0)
+    assert all(c.outside_lines == 0 for c in level.channels)
+
+
+def test_lines_where_the_others_read_nothing_are_not_compared():
+    """Every channel silent above 600 Hz, and one silent from 200 Hz:
+    above 600 Hz there is nothing to stand below, so those lines are
+    left out, and of the lines that remain the one channel is zero at
+    most."""
+    measured = run(1.0, 1.0, 1.0)
+    measured.ordinate[:, LINES > 600.0] = 0.0
+    measured.ordinate[2, LINES > 200.0] = 0.0
+    reading = multi_point(reference(), measured, channels=[0, 1, 2],
+                          scale_db=0)
+    compared = int((LINES <= 600.0).sum())
+    zeros = int(((LINES > 200.0) & (LINES <= 600.0)).sum())
+    assert reading.notes == ((f'3Z+ reads zero at {zeros} of its {compared} '
+                              'lines, as a dead or disconnected sensor does; '
+                              'the composite counts it as it reads'),)

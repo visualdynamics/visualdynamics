@@ -298,6 +298,10 @@ def test_a_notch_narrower_than_a_controller_cuts_is_said_to_be():
     assert p.notches[0].narrow
     assert any(note.startswith('a notch fewer than 3 lines wide (300 Hz)')
                for note in p.notes)
+    # and the verdict, which is what the status line shows, says it too
+    assert p.verdict().endswith('; the deepest is narrower than a '
+                                'controller cuts, so the notch cut will be '
+                                'wider')
 
 
 def test_a_notch_over_most_of_the_band_is_named_as_the_control():
@@ -308,6 +312,8 @@ def test_a_notch_over_most_of_the_band_is_named_as_the_control():
                                'lines: the limit channels are in effect '
                                'the control') for note in p.notes)
     assert p.control_rms / p.reference_rms == pytest.approx(np.sqrt(0.5))
+    assert p.verdict().endswith('; the limit channels are in effect the '
+                                'control')
     assert p.describe()[-2] == ("the control rms -3.01 dB from the "
                                 "reference's over the predicted lines")
 
@@ -512,6 +518,29 @@ def test_the_response_is_the_squared_magnitude_times_the_density():
                            np.array([0.04, 2.0, 1.0]))
     np.testing.assert_allclose(out[:2], [0.36, 4.0])
     assert np.isnan(out[2])
+
+
+def test_cross_terms_in_the_specification_are_never_read():
+    """A specification that is a full matrix, with a complex cross term
+    between the control channel and the limit channel (and its mirror),
+    predicts exactly what its autospectra alone predict: the prediction
+    is single-input and reads |T|^2 on autospectra only. The cross terms
+    come first, so a reader that took any record at a DOF would meet
+    them before the autospectra."""
+    plain = spec(0.18)
+    values = np.vstack([np.full((1, 2), 0.05 * G ** 2 * np.exp(0.7j)),
+                        np.full((1, 2), 0.05 * G ** 2 * np.exp(-0.7j)),
+                        plain.ordinate])
+    nan = np.full((2, 2), np.nan)
+    full = Specification(
+        plain.abscissa, values, response_dof=['1Z+', '2Z+', '1Z+', '2Z+'],
+        reference_dof=['2Z+', '1Z+', '1Z+', '2Z+'],
+        ordinate_dim='acceleration**2/frequency',
+        **{k: np.vstack([nan, v]) for k, v in plain.limits.items()})
+    t = frf(bump(3.0, 240, 260) * np.exp(0.4j))
+    alone, matrix = predict_limits(t, plain), predict_limits(t, full)
+    np.testing.assert_array_equal(matrix.control, alone.control)
+    assert matrix.describe() == alone.describe()
 
 
 def test_runs_are_the_adjacent_true_stretches():

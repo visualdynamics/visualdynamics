@@ -120,12 +120,12 @@ def response_through(transmissibility: Any, density: Any) -> np.ndarray:
     `transmissibility` is complex (or real), `density` real, one value
     per line each. A line where either is not a number is not a number.
     It is the one-input case of the output spectral density matrix of a
-    linear system, `H S H^H`, with `H` the transmissibility and `S` the
-    autospectrum.
+    linear system, `conj(H) S H^T` with a cross term stored as
+    conj(X_a) X_b (`compute_cpsds`); on one input and one output both
+    conjugations meet on the one entry and leave `|H|^2 S`, so only
+    autospectra are read and the result is the same in either
+    convention.
     """
-    # The drive prediction proposed beside this (open as its own pull
-    # request) builds `H S H^H` for matrices as `through`; on one channel
-    # it is this line. When that lands, this becomes a call to it.
     t = np.asarray(transmissibility)
     g = np.real(np.asarray(density, dtype=complex)).astype(float)
     return (np.abs(t) ** 2) * g
@@ -142,8 +142,6 @@ def _first_max(values: np.ndarray) -> int:
 
 def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
     """(first, last) indices of every run of adjacent True values."""
-    # The drive prediction proposed beside this has the same helper as
-    # `runs`; when it lands, one of the two goes.
     flags = np.concatenate([[False], np.asarray(mask, dtype=bool), [False]])
     edges = np.flatnonzero(np.diff(flags.astype(int)))
     return [(int(a), int(b) - 1) for a, b in zip(edges[::2], edges[1::2])]
@@ -476,7 +474,23 @@ class LimitPrediction:
         return lines + list(self.notes)
 
     def verdict(self) -> str:
-        """The prediction in one line."""
+        """The prediction in one line, with what makes the predicted
+        notch differ from the one a controller cuts, since the verdict
+        is what the status line shows."""
+        words = self._verdict()
+        if not self.notches:
+            return words
+        caveats = []
+        deepest = self.deepest
+        if deepest is not None and deepest.narrow:
+            caveats.append('the deepest is narrower than a controller '
+                           'cuts, so the notch cut will be wider')
+        total = int(np.isfinite(self.control).sum())
+        if total and self.notched.sum() > MOST_OF_BAND * total:
+            caveats.append('the limit channels are in effect the control')
+        return '; '.join([words, *caveats])
+
+    def _verdict(self) -> str:
         count = len(self.limited)
         which = ('the limit channel' if count == 1
                  else f'{count} limit channels')

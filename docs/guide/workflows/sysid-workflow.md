@@ -129,6 +129,13 @@ How both are computed, and the definition they follow, is in
 ![The pair read as signal to noise, line by line, in
 decibels](../images/sysid-snr.png)
 
+With the plant measured and checked, it can be put to its use before
+any test is run: select the FRF together with the specification the
+test will be controlled to and choose **Drive Prediction** on the bar.
+It predicts the drives the specification asks for through this plant,
+open loop, and reads them against the amplifier and shaker limits
+([Predicting the drives before the test](../drive-prediction.md)).
+
 ### 5. Geometry, photos, report
 
 1. Drag the article's geometry in and declare its units.

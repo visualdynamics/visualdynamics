@@ -709,3 +709,74 @@ def test_a_long_record_is_read_on_the_worker(window, pump, run, channels,
     assert pane.overload_panel.verdict.text() == (
         'Of 3 channels: 1 on the rail (2Z+); 1 reaches its range at +6 dB '
         '(1Z+).')
+
+
+# ---- the survivors of tools/mutate.py, each pinned -------------------------
+
+def test_one_sample_beyond_and_one_on_the_rail_are_each_said_in_the_singular():
+    values = np.zeros(4096)
+    values[::7] = 1.0
+    values[100] = 30.0                          # beyond a 25 range
+    beyond = channel_overload(values * G, RATE, 25.0 * G, label='a')
+    assert beyond.beyond == 1 and 'beyond' in beyond.flagged
+    assert beyond.describe('g', G).startswith(
+        'a: 1 sample beyond its range of 25 g, the largest 30 g')
+    values[100] = 25.0                          # on the rail, allowed 5
+    railed = channel_overload(values * G, RATE, 25.0 * G, label='b',
+                              rail_samples=5)
+    assert railed.rail == 1 and railed.flagged == []
+    assert railed.describe('g', G).startswith('b: 1 sample on the rail')
+
+
+def test_the_next_level_is_judged_against_the_range_less_its_margin():
+    values = np.zeros(4096)
+    values[::7] = 1.0
+    values[3] = 4.5                             # at +6 dB, 8.98 of 10
+    held = channel_overload(values, RATE, 10.0, margin=0.05)
+    assert held.flags()['next'] is False
+    near = channel_overload(values, RATE, 10.0, margin=0.2)
+    assert near.flags()['next'] is True, '8.98 is past 10 less 20 %'
+
+
+def test_a_sample_beyond_at_the_record_s_first_sample_is_counted():
+    values = np.zeros(4096)
+    values[::7] = 1.0
+    values[0] = 30.0
+    assert channel_overload(values, RATE, 25.0,
+                            spans=[(0, 4096)]).beyond == 1
+    assert channel_overload(values, RATE, None).beyond == 0
+
+
+def test_a_channel_not_read_has_no_rms_and_no_caution(clean):
+    check = history(clean / 4.0, np.zeros(clean.size)).overload_check(
+        25.0 * G)
+    live, dead = check.channels
+    assert live.rms == pytest.approx(live.statistics.rms)
+    assert np.isnan(dead.rms) and dead.cautions() == []
+    assert channel_overload(clean, RATE, 25.0).record == 0
+
+
+def test_the_worst_is_the_one_on_the_rail_before_the_one_nearest_its_range():
+    railed = np.zeros(4096)
+    railed[::7] = 1.0
+    railed[50] = 25.0                           # one sample on the rail
+    near = np.zeros(4096)
+    near[::7] = 1.0
+    near[60] = 24.0                             # nearer at the next level
+    check = history(railed, near).overload_check(25.0 * G)
+    assert check.channels[0].rail == 1 and check.channels[1].rail == 0
+    assert check.worst.label == '1Z+'
+
+
+def test_the_settings_hold_at_their_edges(run):
+    assert run.overload_check(25.0 * G, margin=0.0).margin == 0.0
+    with pytest.raises(ValueError, match='margin is a share'):
+        run.overload_check(25.0 * G, margin=1.0)
+    with pytest.raises(ValueError, match='has to be above zero'):
+        run.overload_check([25.0 * G, 0.0, 25.0 * G])
+    one = history(np.ones(64))
+    with pytest.raises(ValueError, match='2 ranges for 1 channel:'):
+        one.overload_check([1.0, 2.0])
+    with pytest.raises(ValueError, match='the record has 1 channel; there '
+                                         'is no channel 1'):
+        one.overload_check(1.0, records=[1])

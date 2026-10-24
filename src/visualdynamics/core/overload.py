@@ -47,8 +47,16 @@ scale. `table_full_scales` reads it for each channel of a time history
 by the same match the role pairing uses (`ChannelTable.identities`). A
 channel the table does not name, or names with no sensitivity, or in a
 unit of some other quantity, has no range, and says why rather than
-being judged against a guess. A range is a size either way, so a unit
-with an offset (a temperature) converts by its scale alone.
+being judged against a guess. Two rows naming one channel give it a
+range only when they agree, and say so. A range is a size either way,
+so a unit with an offset (a temperature) converts by its scale alone.
+
+The Range column holds whole volts with a default of 5 and a minimum of
+1, so a blank cell, a 0 and a fractional range such as 0.5 or 2.5 V all
+read back as 5 V. A channel whose row holds the default is still read,
+since 5 V is a common setting, but it is marked (`on_default`) and the
+words say how many channels were read against it: a channel clipped on
+a 0.5 V input would otherwise pass with 20 dB of headroom.
 
 `overload_check` reads every channel of a `TimeHistory` (also
 `TimeHistory.overload_check`), `channel_overload` one plain array; each
@@ -85,11 +93,12 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 from numpy.typing import ArrayLike
 
+from .channel_table import ChannelTable
 from .kurtosis import analyzed_span
 from .time_statistics import (
     RAIL_MARGIN,
@@ -100,7 +109,6 @@ from .time_statistics import (
 )
 
 if TYPE_CHECKING:                                    # pragma: no cover
-    from .channel_table import ChannelTable
     from .data import TimeHistory
 
 # Asked for on 2026-10-23, from a worked example: a Gaussian record of
@@ -115,6 +123,11 @@ if TYPE_CHECKING:                                    # pragma: no cover
 #: the step to the next level, in dB: minus 6 dB to full level doubles
 #: the amplitude
 STEP_DB = 6.0
+
+#: the channel table's Range column default, in volts, which a blank,
+#: zero or fractional cell also reads back as: a range of exactly this
+#: is read but marked, since it may not be the one the input had
+DEFAULT_RANGE = int(ChannelTable.COLUMNS['range'].default)
 
 #: every judged item, by key, and the name a table or the words give it
 OVERLOADS: dict[str, str] = {
@@ -138,8 +151,25 @@ def range_in_unit(range_volts: float, sensitivity: float) -> float:
     return float(range_volts) * 1000.0 / sensitivity
 
 
+class TableRanges(NamedTuple):
+    """Each channel's range as a channel table gives it.
+
+    One entry per channel of the history, in order: `full_scales` in
+    SI, NaN where there is none; `reasons`, why there is none, '' where
+    the range was read; `on_default`, whether the row's Range is the
+    column's default (`DEFAULT_RANGE`), which a blank, zero or
+    fractional cell also reads as; and `notes`, anything else to say
+    about the row the range came from, ''.
+    """
+
+    full_scales: np.ndarray
+    reasons: list[str]
+    on_default: list[bool]
+    notes: list[str]
+
+
 def table_full_scales(table: ChannelTable, history: TimeHistory
-                      ) -> tuple[np.ndarray, list[str]]:
+                      ) -> TableRanges:
     """Each channel's range in SI from a channel table, and why where
     there is none.
 
@@ -148,7 +178,10 @@ def table_full_scales(table: ChannelTable, history: TimeHistory
     DOF alone when the type is blank and the history has one channel
     there. The range is the row's Range in volts over its Sensitivity
     in mV per the row's unit (`range_in_unit`), put into SI by the
-    unit's scale.
+    unit's scale. Where two or more rows name one channel, it has a
+    range only when they all give the same one, and a note says which
+    rows; where they differ it has none, and the reason says so. A row
+    whose Range is the column's default is read and marked.
 
     Parameters
     ----------
@@ -159,12 +192,10 @@ def table_full_scales(table: ChannelTable, history: TimeHistory
 
     Returns
     -------
-    (numpy.ndarray, list of str)
-        One range per channel of `history`, in SI, NaN where there is
-        none; and one reason per channel, '' where the range was read.
+    TableRanges
+        Per channel of `history`: the range in SI, why there is none,
+        whether it is the column's default, and any note.
     """
-    from ..units import UNKNOWN, UnitError, si_transform
-
     rows = table.identities(history)
     ranges = table.ranges()
     sensitivities = table.sensitivities()
@@ -172,34 +203,69 @@ def table_full_scales(table: ChannelTable, history: TimeHistory
     count = history.num_records
     scales = np.full(count, np.nan)
     reasons = [''] * count
+    defaults = [False] * count
+    notes = [''] * count
     for i in range(count):
         identity = (history.response_dof[i], history.ordinate_dim[i])
-        row = next((k for k, named in enumerate(rows) if named == identity),
-                   None)
-        if row is None:
+        named = [k for k, row in enumerate(rows) if row == identity]
+        if not named:
             reasons[i] = 'not in the channel table'
             continue
-        in_unit = range_in_unit(ranges[row], sensitivities[row])
-        if not np.isfinite(in_unit):
-            reasons[i] = 'no sensitivity in the channel table'
+        read = [_row_range(ranges[k], sensitivities[k], units[k],
+                           history.ordinate_dim[i]) for k in named]
+        if len(named) > 1:
+            # two rows naming one channel (Brandon, 2026-10-23): the
+            # first used to win without a word
+            which = _row_numbers(named)
+            values = np.array([value for value, _reason in read])
+            finite = values[np.isfinite(values)]
+            if finite.size and (finite.size < values.size
+                                or np.ptp(finite) > 1e-12 * finite.max()):
+                reasons[i] = (f'rows {which} of the channel table name it '
+                              'with different ranges')
+                continue
+            if finite.size:
+                notes[i] = (f'rows {which} of the channel table name it, '
+                            'with the same range')
+        value, reason = read[0]
+        if not np.isfinite(value):
+            reasons[i] = reason
             continue
-        if not units[row]:
-            reasons[i] = 'no unit in the channel table'
-            continue
-        dimension = history.ordinate_dim[i]
-        if dimension == UNKNOWN:
-            # raw numbers of no stated quantity: a range in a unit says
-            # nothing about them
-            reasons[i] = 'the channel states no quantity to hold a range in'
-            continue
-        try:
-            scale, _offset = si_transform(units[row], dimension)
-        except UnitError:
-            reasons[i] = f'the table\'s unit {units[row]!r} is not {dimension}'
-            continue
-        # a range is a size either way: the unit's scale, no offset
-        scales[i] = in_unit * scale
-    return scales, reasons
+        scales[i] = value
+        defaults[i] = all(int(ranges[k]) == DEFAULT_RANGE for k in named)
+    return TableRanges(scales, reasons, defaults, notes)
+
+
+def _row_range(volts: float, sensitivity: float, unit: str,
+               dimension: str) -> tuple[float, str]:
+    """(range in SI, '') from one table row's Range, Sensitivity and
+    unit for a channel of `dimension`, or (NaN, why) where they give
+    none."""
+    from ..units import UNKNOWN, UnitError, si_transform
+
+    in_unit = range_in_unit(volts, sensitivity)
+    if not np.isfinite(in_unit):
+        return float('nan'), 'no sensitivity in the channel table'
+    if not unit:
+        return float('nan'), 'no unit in the channel table'
+    if dimension == UNKNOWN:
+        # raw numbers of no stated quantity: a range in a unit says
+        # nothing about them
+        return (float('nan'),
+                'the channel states no quantity to hold a range in')
+    try:
+        scale, _offset = si_transform(unit, dimension)
+    except UnitError:
+        return float('nan'), f'the table\'s unit {unit!r} is not {dimension}'
+    # a range is a size either way: the unit's scale, no offset
+    return float(in_unit * scale), ''
+
+
+def _row_numbers(rows: Sequence[int]) -> str:
+    """Rows counted from 1, as the table shows them: '2 and 5',
+    '1, 3 and 4'."""
+    numbers = [str(k + 1) for k in rows]
+    return ', '.join(numbers[:-1]) + ' and ' + numbers[-1]
 
 
 @dataclass(frozen=True, eq=False)
@@ -227,6 +293,12 @@ class ChannelOverload:
     #: the samples further out than the range and its margin: none
     #: unless the record was not taken through this range
     beyond: int = 0
+    #: the range came from a table row whose Range is the column's
+    #: default (`DEFAULT_RANGE`), which a blank, zero or fractional cell
+    #: also reads as, so it may not be the input's
+    on_default: bool = False
+    #: anything else to say about where the range came from, ''
+    note: str = ''
 
     @property
     def has_range(self) -> bool:
@@ -331,9 +403,28 @@ class ChannelOverload:
         into `unit` for the words, as a unit system's transform scale
         does: 9.80665 and 'g' state an acceleration in g.
         """
-        after = f' {unit}' if unit else ''
         if self.statistics is None or not np.isfinite(self.full_scale):
             return f'{self.label}: no range ({self.reason}).'
+        return self._judged(unit, scale) + ''.join(
+            f' {caution[0].upper()}{caution[1:]}.'
+            for caution in self.cautions())
+
+    def cautions(self) -> list[str]:
+        """What to doubt about the range itself, in words: that it is
+        the Range column's default, and any note on the rows it came
+        from. Empty when there is nothing."""
+        found = []
+        if self.on_default:
+            found.append(f'its range is the Range column\'s default of '
+                         f'{DEFAULT_RANGE} V, which a blank, zero or '
+                         'fractional Range also reads as')
+        if self.note:
+            found.append(self.note)
+        return found
+
+    def _judged(self, unit: str, scale: float) -> str:
+        """The judgement in words, for a channel with a range."""
+        after = f' {unit}' if unit else ''
         stats = self.statistics
         if self.beyond:
             return (f'{self.label}: {self.beyond} sample'
@@ -428,6 +519,16 @@ class OverloadCheck:
         if missing and checked:
             words += (f' {missing} channel{"s" * (missing != 1)} '
                       f'with no range.')
+        assumed = [channel for channel in self.checked if channel.on_default]
+        if assumed:
+            # not confidence the table cannot back (Brandon, 2026-10-23)
+            names = ', '.join(channel.label for channel in assumed)
+            one = len(assumed) == 1
+            words += (f' {len(assumed)} channel{"" if one else "s"} '
+                      f'({names}) read against the Range column\'s default '
+                      f'of {DEFAULT_RANGE} V, which a blank, zero or '
+                      'fractional Range also reads as: confirm '
+                      f'{"it is" if one else "they are"} the input\'s.')
         return words
 
 
@@ -549,8 +650,6 @@ def overload_check(history: TimeHistory,
         not one per channel, a range is zero or negative, the step is
         not finite, or the margin is not a share.
     """
-    from .channel_table import ChannelTable
-
     count = history.num_records
     if not np.isfinite(float(step_db)):
         raise ValueError('the step to the next level is a number of dB')
@@ -558,7 +657,7 @@ def overload_check(history: TimeHistory,
         raise ValueError('the margin is a share of the range, from 0 up '
                          'to 1')
     if isinstance(ranges, ChannelTable):
-        scales, reasons = table_full_scales(ranges, history)
+        scales, reasons, defaults, notes = table_full_scales(ranges, history)
     else:
         given = np.asarray(
             [np.nan if value is None else value
@@ -576,6 +675,7 @@ def overload_check(history: TimeHistory,
         scales = given
         reasons = ['' if np.isfinite(value) else 'no range given'
                    for value in given]
+        defaults, notes = [False] * count, [''] * count
     wanted = range(count) if records is None else [int(i) for i in records]
     spans, _phrase = analyzed_span(history)
     ordinate = np.asarray(history.ordinate)
@@ -601,7 +701,8 @@ def overload_check(history: TimeHistory,
             record=i, label=history.record_label(i), full_scale=scale,
             statistics=stats, step_db=float(step_db), reason=reasons[i],
             beyond=_beyond(np.real(ordinate[i]), spans, scale,
-                           float(margin))))
+                           float(margin)),
+            on_default=bool(defaults[i]) and known, note=notes[i]))
     return OverloadCheck(channels=tuple(channels), step_db=float(step_db),
                          margin=float(margin))
 

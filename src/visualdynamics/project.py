@@ -1544,30 +1544,40 @@ class Project(dict):
         return None
 
     def channel_table_for(self, name: Any) -> tuple[str, ChannelTable] | None:
-        """(name, table) for the channel table that describes a time
-        history: the first in its group with a row naming one of its
-        channels.
+        """(name, table) for the channel table linked with an object:
+        the one lookup the overload check and the shape values share.
 
-        A table in the group that names none of the history's channels
-        describes some other recording and is passed over, as the role
-        pairing passes it over.
+        For a time history, the first table in its group with a row
+        naming one of its channels: a table in the group that names
+        none of them describes some other recording and is passed over,
+        as the role pairing passes it over. For anything else (a shape
+        set, whose values are read at a table's channels), the first
+        table in its group. A table has none of its own.
 
         Parameters
         ----------
         name : str or object
-            The time history.
+            The object.
 
         Returns
         -------
         tuple of (str, ChannelTable), or None
             The table's name and the table, or None when no linked table
-            describes the history.
+            fits.
         """
+        # One lookup where there were two: this, and the shape values'
+        # first-table-in-the-group (Brandon, 2026-10-23).
         name = self.name_of(name)
-        if not isinstance(self.get(name), TimeHistory):
+        obj = self.get(name)
+        if isinstance(obj, TimeHistory):
+            for other, _rows in self._role_partners(name):
+                return other, self[other]
             return None
-        for other, _rows in self._role_partners(name):
-            return other, self[other]
+        if obj is None or isinstance(obj, ChannelTable):
+            return None
+        for member in self.object_group_of(name) or []:
+            if member != name and isinstance(self[member], ChannelTable):
+                return member, self[member]
         return None
 
     def _group(self, name: str) -> ObjectGroup | None:
@@ -5312,14 +5322,6 @@ class Project(dict):
         view = matrix_at(self[name], self._shape_dofs(name, dofs), form)
         return plot_transformation(found[1], view, row, **kwargs)
 
-    def _channel_table_of(self, name: str) -> ChannelTable | None:
-        """The channel table in `name`'s object group, the first when
-        there are several, or None."""
-        for member in self.object_group_of(name) or []:
-            if member != name and isinstance(self[member], ChannelTable):
-                return self[member]
-        return None
-
     def _shape_dofs(self, name: str, dofs: Any) -> list[str] | None:
         """`dofs` as DOF strings for the shape values of `name`: a list as
         given, None for every DOF of the set, or a channel choice read
@@ -5328,10 +5330,11 @@ class Project(dict):
         the window's drop-down and a script's `table`."""
         if dofs is None or not isinstance(dofs, str):
             return None if dofs is None else [str(dof) for dof in dofs]
-        table = self._channel_table_of(name)
-        if table is None:
+        found = self.channel_table_for(name)
+        if found is None:
             raise ValueError(f'{name} has no channel table in its object '
                              f'group to take {dofs!r} channels from')
+        table = found[1]
         strings = table.dof_strings()
         # a channel with no node or direction yet names no DOF
         return [strings[i] for i in table.chosen(dofs)

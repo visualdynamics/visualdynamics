@@ -14131,7 +14131,12 @@ class MainWindow(QMainWindow):
                                      # require (`core.shaker`)
                                      fit=history is not None and any(
                                          dim == 'acceleration'
-                                         for dim in history.ordinate_dim))
+                                         for dim in history.ordinate_dim),
+                                     # the overload check reads its
+                                     # ranges from a linked table
+                                     table=history is not None
+                                     and self.project.channel_table_for(
+                                         series[0][0]) is not None)
         if not (history is not None and self.data_pane.showing('fit')):
             self._held_fit = None
         predicted = (self.data_pane.showing('prediction')
@@ -22090,8 +22095,9 @@ class MainWindow(QMainWindow):
         channels and how many the set lacks, or why the form is
         refused."""
         table = self.shape_values_table
-        channels = (self.project._channel_table_of(name)
-                    if name is not None else None)
+        found = (self.project.channel_table_for(name)
+                 if name is not None else None)
+        channels = found[1] if found is not None else None
         choices = [('All DOFs', None)]
         if channels is not None:
             choices += [(self._VALUES_CHOICES[c], c) for c in channels.choices()

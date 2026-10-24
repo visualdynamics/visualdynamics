@@ -10,7 +10,10 @@ that is 37 g, past it. Through the 25 g range at full level it reads
 287 samples on the rail, 0.47 %, about 24 a second, a crest factor of
 2.83 and a kurtosis of 2.86, which the kurtosis bars' band of 2 to 4
 passes and this check does not. The range is read from a channel table:
-5 V over 200 mV/g.
+10 V over 400 mV/g. A table row whose Range is the column's default of
+5 V is read but marked, since a blank, zero or fractional Range reads
+back as 5 V too: a channel clipped at 2.5 g on a 0.5 V input over
+200 mV/g is read against 25 g, 20 dB of headroom it does not have.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from visualdynamics.core.channel_table import ChannelTable
 from visualdynamics.core.data import TimeHistory
 from visualdynamics.core.kurtosis import HIGH, LOW, channel_kurtosis
 from visualdynamics.core.overload import (
+    DEFAULT_RANGE,
     OVERLOADS,
     STEP_DB,
     channel_overload,
@@ -84,8 +88,8 @@ def run(clean):
 
 @pytest.fixture(scope='module')
 def channels():
-    """Each channel 5 V over 200 mV/g: a 25 g range."""
-    return table([1, 2, 3], [5, 5, 5], [200, 200, 200])
+    """Each channel 10 V over 400 mV/g: a 25 g range, on no default."""
+    return table([1, 2, 3], [10, 10, 10], [400, 400, 400])
 
 
 # ---- the range from the table ------------------------------------------
@@ -101,23 +105,24 @@ def test_a_sensitivity_that_is_not_a_number_gives_no_range():
 
 
 def test_the_tables_range_is_read_in_si(run, channels):
-    scales, reasons = table_full_scales(channels, run)
+    scales, reasons, defaults, notes = table_full_scales(channels, run)
     assert scales == pytest.approx([25.0 * G] * 3)
     assert reasons == ['', '', '']
+    assert defaults == [False] * 3 and notes == [''] * 3
 
 
 def test_a_range_in_si_units_is_its_volts_over_its_sensitivity(run):
     # 10 V over 51 mV per m/s^2 is 196.08 m/s^2
-    scales, _ = table_full_scales(
+    scales = table_full_scales(
         table([1, 2, 3], [10, 10, 10], [51.0] * 3, units=['m/s^2'] * 3),
-        run)
+        run).full_scales
     assert scales == pytest.approx([10000.0 / 51.0] * 3)
 
 
 def test_each_channel_without_a_range_says_why(run):
     described = table([1, 2, 7], [5, 5, 5], [200.0, float('nan'), 200.0],
                       units=['g', 'g', 'g'])
-    scales, reasons = table_full_scales(described, run)
+    scales, reasons, _defaults, _notes = table_full_scales(described, run)
     assert scales[0] == pytest.approx(25.0 * G)
     assert np.isnan(scales[1:]).all()
     assert reasons == ['', 'no sensitivity in the channel table',
@@ -127,16 +132,103 @@ def test_each_channel_without_a_range_says_why(run):
 def test_a_unit_of_another_quantity_gives_no_range(run):
     described = table([1, 2, 3], [5, 5, 5], [200.0] * 3,
                       units=['g', 'lbf', 'g'])
-    scales, reasons = table_full_scales(described, run)
+    scales, reasons, _defaults, _notes = table_full_scales(described, run)
     assert np.isnan(scales[1])
     assert reasons[1] == "the table's unit 'lbf' is not acceleration"
 
 
+def test_a_row_with_no_unit_says_so(run):
+    """A blank unit is named as blank, not as a unit of another quantity
+    (the guard before the unit is converted)."""
+    described = table([1, 2, 3], [10, 10, 10], [400.0] * 3,
+                      units=['g', '', 'g'])
+    scales, reasons, _defaults, _notes = table_full_scales(described, run)
+    assert np.isnan(scales[1])
+    assert reasons == ['', 'no unit in the channel table', '']
+
+
 def test_a_row_with_no_type_names_the_one_channel_at_its_dof(run):
+    # a blank unit too, or the table reads the type off the unit
     described = table([1, 2, 3], [5, 5, 5], [200.0] * 3,
-                      types=['', '', ''])
-    scales, _ = table_full_scales(described, run)
-    assert scales == pytest.approx([25.0 * G] * 3)
+                      units=['', '', ''], types=['', '', ''])
+    assert described.types() == ['', '', '']
+    assert described.identities(run) == [
+        ('1Z+', 'acceleration'), ('2Z+', 'acceleration'),
+        ('3Z+', 'acceleration')]
+    assert table_full_scales(described, run).reasons == [
+        'no unit in the channel table'] * 3
+
+
+def test_a_row_with_no_type_names_no_channel_where_two_share_its_dof(clean):
+    """With acceleration and force both at 1Z+, a row naming 1Z+ with no
+    type names neither: there is no one channel there to take."""
+    record = TimeHistory(np.arange(clean.size) / RATE,
+                         np.vstack([clean, clean]) * G,
+                         response_dof=['1Z+', '1Z+'],
+                         ordinate_dim=['acceleration', 'force'],
+                         ordinate_unit=['g', 'N'])
+    # a blank unit too, or the table reads the type off the unit
+    described = table([1], [10], [400.0], units=[''], types=[''])
+    assert described.types() == ['']
+    assert described.identities(record) == [None]
+    found = table_full_scales(described, record)
+    assert np.isnan(found.full_scales).all()
+    assert found.reasons == ['not in the channel table'] * 2
+
+
+def test_two_rows_naming_one_channel_must_agree(run):
+    """Rows 2 and 4 both name 2Z+. Alike, the range is read and a note
+    says which rows; different, there is no range, and the reason says
+    why, rather than the first row winning unsaid."""
+    alike = table([1, 2, 3, 2], [10, 10, 10, 5], [400.0, 400.0, 400.0, 200.0])
+    found = table_full_scales(alike, run)
+    assert found.full_scales == pytest.approx([25.0 * G] * 3)
+    assert found.notes == ['', ('rows 2 and 4 of the channel table name '
+                                'it, with the same range'), '']
+    check = run.overload_check(alike)
+    assert check.channels[1].note.startswith('rows 2 and 4')
+    assert check.channels[1].describe('g', G).endswith(
+        'Rows 2 and 4 of the channel table name it, with the same range.')
+    differ = table([1, 2, 3, 2], [10, 10, 10, 10], [400.0] * 3 + [200.0])
+    found = table_full_scales(differ, run)
+    assert np.isnan(found.full_scales[1])
+    assert found.reasons[1] == ('rows 2 and 4 of the channel table name it '
+                                'with different ranges')
+    assert not run.overload_check(differ).channels[1].has_range
+
+
+def test_a_range_on_the_columns_default_is_read_and_marked(clean):
+    """The Range column holds whole volts with a default of 5: 0.5 V, a
+    blank and a 0 all read back as 5 V. A channel clipped at 2.5 g on a
+    0.5 V input over 200 mV/g is read against 25 g with 20 dB of
+    headroom, so the words say the range is the default and ask for it
+    to be confirmed."""
+    assert DEFAULT_RANGE == 5
+    record = history(np.clip(clean, -2.5, 2.5), clean / 4.0)
+    described = table([1, 2], ['0.5', ''], [200.0, 200.0])
+    assert described.ranges().tolist() == [5, 5]
+    found = table_full_scales(described, record)
+    assert found.on_default == [True, True]
+    check = record.overload_check(described)
+    clipped, _quiet = check.channels
+    assert clipped.headroom_db == pytest.approx(20.0, abs=0.01)
+    assert clipped.flagged == [] and clipped.on_default
+    assert clipped.describe('g', G) == (
+        "1Z+: 20.0 dB of headroom, 14.0 dB at +6 dB. Its range is the "
+        "Range column's default of 5 V, which a blank, zero or fractional "
+        "Range also reads as.")
+    assert check.describe() == (
+        "All 2 channels inside their ranges, at +6 dB as well. 2 channels "
+        "(1Z+, 2Z+) read against the Range column's default of 5 V, which a "
+        "blank, zero or fractional Range also reads as: confirm they are "
+        "the input's.")
+    # a range given in SI is not the table's and carries no such mark
+    assert not record.overload_check(25.0 * G).channels[0].on_default
+    one = table([1, 2], [5, 10], [200.0, 400.0])
+    assert record.overload_check(one).describe().endswith(
+        "1 channel (1Z+) read against the Range column's default of 5 V, "
+        "which a blank, zero or fractional Range also reads as: confirm it "
+        "is the input's.")
 
 
 def test_the_tables_rows_name_the_historys_channels(run, channels):
@@ -460,14 +552,36 @@ def _overload(window, pump, record, described=None):
     return pane
 
 
-def test_a_record_with_no_table_is_told_how_to_get_one(window, pump, run):
-    pane = _overload(window, pump, run)
+def test_the_reading_is_offered_once_a_table_describes_the_record(
+        window, pump, run, channels):
+    """No button on a time history with no linked table, or with a
+    linked table that names none of its channels: there is no range to
+    read against (Brandon, 2026-10-23)."""
+    window.add_object('Run', run)
+    window.data_pane.waterfall_action.setChecked(False)
+    window.show_object('Run')
+    pump()
+    pane = window.data_pane
+    assert not pane.overload_action.isVisible()
+    assert not pane.showing('overload')
+    window.add_object('Other', table([9], [10], [400.0]))
+    window.project.link('Run', 'Other')
+    window.show_object('Run')
+    pump()
+    assert not pane.overload_action.isVisible()
+    window.add_object('Channels', channels)
+    window.project.link('Run', 'Channels')
+    window.show_object('Run')
+    pump()
     assert pane.overload_action.isVisible()
+    pane.overload_action.trigger()
+    pump()
     assert pane.showing('overload')
-    panel = pane.overload_panel
-    assert not panel.isHidden()
-    assert panel.source.text().startswith('No channel table linked')
-    assert panel.table.rowCount() == 0
+    assert pane.overload_panel.source.text() == 'Ranges from Channels'
+    # and with none, the panel says how to give it one
+    pane.overload_panel.show_check(None)
+    assert pane.overload_panel.source.text().startswith(
+        'No channel table linked')
 
 
 def test_the_linked_tables_ranges_are_read(window, pump, run, channels):
@@ -485,6 +599,7 @@ def test_the_linked_tables_ranges_are_read(window, pump, run, channels):
     assert panel.values['channel'].text() == '2Z+'
     assert panel.values['rail'].text() == '287 (0.47 %)'
     assert panel.values['range'].text() == '25 g'
+    assert panel.values['range'].toolTip() == ''
     assert panel.values['kurtosis'].text() == '2.860'
     assert panel.verdict.text() == ('Of 3 channels: 1 on the rail (2Z+); '
                                     '1 reaches its range at +6 dB (1Z+).')

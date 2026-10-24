@@ -178,7 +178,8 @@ class Reading(NamedTuple):
     #: the attribute holding its settings panel, or None for none
     panel: str | None
     #: which `show_controls` offer puts it on the bar: 'averaging',
-    #: 'sine', 'shocks', 'fit', or 'record' for either kind of record
+    #: 'sine', 'shocks', 'fit', 'record' for either kind of record, or
+    #: 'table' for a record a linked channel table describes
     offered_by: str
     #: drawn in place of the trace with no 3-D form, so the 2-D/3-D
     #: toggle is not offered while it is up
@@ -1357,9 +1358,11 @@ class DataPane(QWidget):
         # averaging's, and only its window is its own
         Reading('amplitude', 'amplitude_panel', 'averaging',
                 flat=True, sticky=True),
-        # offered wherever a record is, as the kurtosis bars are: a
-        # shock record is clipped by its range as readily as a random one
-        Reading('overload', 'overload_panel', 'record', flat=True,
+        # offered wherever a record is, as the kurtosis bars are, so
+        # long as a linked channel table describes it (Brandon,
+        # 2026-10-23): a shock record is clipped by its range as readily
+        # as a random one, but without a table there is no range
+        Reading('overload', 'overload_panel', 'table', flat=True,
                 sticky=True),
         Reading('shocks', 'shock_panel', 'shocks'),
         Reading('wavelet', 'wavelet_panel', 'averaging', sticky=True),
@@ -2116,7 +2119,8 @@ class DataPane(QWidget):
                       rms_check: bool = False,
                       conditioning: bool = False,
                       realizability: bool = False,
-                      prediction: bool = False) -> None:
+                      prediction: bool = False,
+                      table: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -2130,7 +2134,8 @@ class DataPane(QWidget):
         them for a record with a sweep specification, and `shocks` offers
         the shock view and kurtosis. `fit` offers the replication fit and
         the stroke readout, for a record with acceleration in a declared
-        unit to integrate. `octave` offers the
+        unit to integrate. `table` offers the overload check, for a
+        record a linked channel table describes. `octave` offers the
         octave bands of a plain density, `tone` the tone readout of a plain
         autospectrum, `transmissibility` the ASD ratio and H1's band
         behind an FRF computed from a time history, `confidence` the
@@ -2163,7 +2168,8 @@ class DataPane(QWidget):
         # five that shows one is worse than the undivided row was.
         offers = {'averaging': averaging, 'sine': averaging and sine,
                   'shocks': shocks, 'fit': fit,
-                  'record': averaging or shocks}
+                  'record': averaging or shocks,
+                  'table': (averaging or shocks) and table}
         for reading in self._READINGS:
             self._offer(reading.key, reading.panel,
                         offers[reading.offered_by])

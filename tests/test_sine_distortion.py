@@ -221,7 +221,8 @@ def test_a_tone_the_levels_do_not_hold_leaves_its_lines_unjudged():
     # a span reaching the other tone at all is shared: ten cycles of
     # the sweep at 150 to 350 Hz is under 0.07 s, half each side
     assert 1.0 - 0.035 <= check.seconds[shared].min() < 1.0
-    assert 3.0 < check.seconds[shared].max() <= 3.0 + 0.035,         'a span with only its edge in the other tone is shared too'
+    assert 3.0 < check.seconds[shared].max() <= 3.0 + 0.035, \
+        'a span with only its edge in the other tone is shared too'
     assert check.passed, 'the unjudged lines carry the other tone'
     assert check.ratio[0][shared].max() > 1.1, \
         'they would have been flagged if judged'

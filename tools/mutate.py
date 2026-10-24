@@ -3,6 +3,9 @@
     ./.venv/bin/python tools/mutate.py visualdynamics/core/srs.py tests/test_srs.py
     ./.venv/bin/python tools/mutate.py MODULE TEST [TEST ...] [--workers 4] [--lines 70-120]
 
+Run it with the repository's venv interpreter (`.venv/Scripts/python.exe`
+on Windows); the tests run under the same one.
+
 Each mutant is one change to the module's syntax tree — a comparison
 flipped (`<` to `<=`, `==` to `!=`, `in` to `not in`), an arithmetic
 operator swapped (`+` and `-`, `*` and `/`, `**` to `*`), `and` and
@@ -43,7 +46,11 @@ import tempfile
 import threading
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-PYTHON = REPO / '.venv' / 'bin' / 'python'
+#: the interpreter this runs under, which is the one whose packages the
+#: tests need; the repository's venv path was written in at first, and
+#: on Windows a venv keeps it under Scripts/, so the tool did not run
+#: there (2026-10-24, a contributor on Windows)
+PYTHON = pathlib.Path(sys.executable)
 
 SWAP_COMPARE = {ast.Lt: ast.LtE, ast.LtE: ast.Lt, ast.Gt: ast.GtE,
                 ast.GtE: ast.Gt, ast.Eq: ast.NotEq, ast.NotEq: ast.Eq,
@@ -117,7 +124,13 @@ def workspace(work: pathlib.Path) -> pathlib.Path:
                     ignore=shutil.ignore_patterns('__pycache__'))
     for name in BESIDE:
         if (REPO / name).exists():
-            (work / name).symlink_to(REPO / name)
+            try:
+                (work / name).symlink_to(REPO / name,
+                                         target_is_directory=True)
+            except OSError:
+                # Windows makes a symlink only in developer mode; a
+                # copy is slower to make but reads the same
+                shutil.copytree(REPO / name, work / name)
     return work
 
 
@@ -145,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--timeout', type=float, default=300.0)
     args = parser.parse_args(argv)
 
-    source = (REPO / 'src' / args.module).read_text()
+    source = (REPO / 'src' / args.module).read_text(encoding='utf-8')
     tree = ast.parse(source)
     found = sites(tree)
     if args.lines:
@@ -182,9 +195,10 @@ def main(argv: list[str] | None = None) -> int:
                     position, how, line, description = work_queue.get_nowait()
                 except queue.Empty:
                     return
-                target.write_text(mutant(tree, position, how))
+                target.write_text(mutant(tree, position, how),
+                                  encoding='utf-8')
                 lived = passes(work, args.tests, args.timeout)
-                target.write_text(source)
+                target.write_text(source, encoding='utf-8')
                 with lock:
                     if lived:
                         survivors.append((line, description))

@@ -41,7 +41,8 @@ one per channel, picked by role from a drop-down on the 3-D view's bar
 | Channel Type | what it measures: acceleration, velocity, displacement, force, pressure, strain, voltage or temperature |
 | Unit | the engineering unit, limited to the units the type can be in |
 | Sensitivity (mV/Unit) | millivolts per whatever the Unit cell holds, greater than zero. The two cells are one calibration statement, which is why the header names both |
-| Range (V) | the instrumentation's voltage limit, in whole volts, 5 V unless stated |
+| DAQ Range (V) | the DAQ input's range, in volts; blank when unstated |
+| Sensor Range (V) | the sensor's own full-scale output, in volts; blank when unstated |
 | Serial Number, Make, Model | the sensor's identity, as text |
 | Triax DOF | `X`, `Y` or `Z`: which leg of a triaxial accelerometer this is. This is not a direction; the Direction column says where it points |
 | Expiration | when its calibration runs out, with a calendar to pick from |

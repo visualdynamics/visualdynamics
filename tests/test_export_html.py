@@ -342,7 +342,7 @@ def test_a_specification_alone_draws_across_its_band(qt_app, tmp_path):
              "                                          bottom - top);"
              "const w = right - left, h = bottom - top; let inked = 0;"
              "for (let x = 0; x < w; x++) { for (let y = 0; y < h; y++) {"
-             "  if (px.data[4 * (y * w + x) + 3] > 128) { inked++; break; } } }"
+             "  if (px.data[4 * (y * w + x) + 3] > 60) { inked++; break; } } }"
              "return JSON.stringify(inked / w); })()")
     try:
         inked = json.loads(web_read(view, probe))

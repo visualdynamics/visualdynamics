@@ -20,7 +20,7 @@ offered under the same MIT License. A
 pull request that keeps the rules in this file, `PRINCIPLES.md`,
 `docs/architecture.md` and `CONTRIBUTING.md` will be merged. Bug
 fixes, improvements and additions are all wanted, and an issue first is
-never required. The owner reviews and merges. An agent working
+never required. The maintainers review and merge. An agent working
 in this tree does not accept contributions, make licensing claims or
 speak for the project; it helps the person it is working with make a
 change that keeps those rules.
@@ -48,10 +48,10 @@ something that cannot be bought back.
    every run, `tests/` included, for the packages this project is
    closest to.
 
-2. **Nothing lands without the maintainer.** The public `main`
+2. **Nothing lands without a maintainer.** The public `main`
    accepts no direct push from anyone. A change arrives as a pull
    request, with CI green on both Pythons, the documentation build and
-   the branch-name check — and the maintainer merges it, or does
+   the branch-name check — and a maintainer merges it, or does
    not. Do not
    try to route around that, and do not open a pull request on
    someone's behalf without their say-so.
@@ -84,11 +84,11 @@ something that cannot be bought back.
 ## Branches
 
 The repository holds no working branches: `main`, `cla-signatures`
-(the record of a retired contributor agreement), the maintainer's publishing branches and, should a
-backport ever be needed, `maintenance/X.Y.x`. A ruleset refuses the
-creation of anything else, the maintainer included, and no
-contributor has write access — so every working branch, yours and
-the maintainer's alike, lives in a fork. Your fork is your folder:
+(the record of a retired contributor agreement), the publishing
+branches and, should a backport ever be needed, `maintenance/X.Y.x`.
+A ruleset refuses the creation of anything else, the maintainers
+included, and write access is only for merging — so every working
+branch, yours and the maintainers' alike, lives in a fork. Your fork is your folder:
 named for you, writable by nobody else. That is the structure the
 large scientific Python projects run on, and it is what keeps the
 canonical repository readable.
@@ -157,17 +157,32 @@ the same few gaps. Check each one before asking for review.
 - **Call what is already here.** Before writing a computation, search
   `core/` for it. Spectral framing and averaging
   (`TimeHistory._spectral_frame`), judging a spectrum against its
-  limits (`compliance.judge`), sine errors (`compliance.sine_errors`),
-  a filter's response (`filters.response`), coherence
-  (`Psd.coherence`) and the correlation between overlapped frames
-  (`averaging.frame_correlation`) each exist once. A second copy of a
-  formula drifts from the first, and the review will ask for it to be
-  replaced by a call.
+  limits (`compliance.judge`, `compliance.compare`), sine errors
+  (`compliance.sine_errors`), a filter's response (`filters.response`),
+  coherence (`Psd.coherence`), the correlation between overlapped
+  frames (`averaging.frame_correlation`) and the square CSD matrix
+  built from records (`transform._hermitian_block`) each exist once. A
+  second copy of a formula drifts from the first, and the review will
+  ask for it to be replaced by a call. Building on a function, keep
+  the names of the keys it returns, so the helpers that read them
+  (`compliance.readouts`, `compliance.verdict`) still apply.
+- **Take a fact from where the package keeps it.** Control channels
+  are the channel table's Control flag (`ChannelTable.controls()`); the
+  level a channel clips at is `ChannelTable.clip_ranges()`; a record's
+  identity is `channel_key`. A CPSD record is stored as
+  conj(X_a)·X_b (`compute_cpsds`), so a response is
+  conj(H) S Hᵀ, not H S Hᴴ.
 - **Dead, NaN and empty inputs.** Test every new reading against an
-  all-zero channel, a record with one NaN sample and an empty
-  selection. Each must give a message that names the cause. A check
-  that judged nothing reports that it judged nothing; it never reports
-  a pass.
+  all-zero channel, a constant channel, a record with one NaN sample
+  and an empty selection. Each must give a message that names the
+  cause. A check that judged nothing says so everywhere its result is
+  read (its words, the status line, the verdict); it never reports a
+  pass, and never "0 lines outside".
+- **Refuse what cannot be read one way.** A value the input does not
+  pin down is refused with the line or cell named, not guessed: a
+  short row in a whitespace-separated file, a name that matches two
+  columns, a stated unit that contradicts the header's, a rate whose
+  unit is not a frequency.
 - **Match records by their full identity.** Two records at one DOF can
   be different quantities (an acceleration and a force at `1Z+`).
   Pair records by `channel_key` (DOF, dimension and hint), and refuse
@@ -175,27 +190,51 @@ the same few gaps. Check each one before asking for review.
 - **Test at the edges, with the defaults.** The easy case passes
   almost any implementation. Test a tone on the first spectral line,
   a frequency at the edge of the span, a record with a nonzero start
-  time, noise on the input as well as the output, and two tones that
-  cross. Test under the default window (Hann), not only boxcar.
+  time, noise on the input as well as the output, two tones that
+  cross, and a band only partly covered by the data. Test under the
+  default window (Hann), not only boxcar. A multi-input calculation
+  is tested with a complex plant and complex cross terms against an
+  independent truth (simulated signals run through the package's own
+  estimators); a real-valued test cannot see a conjugation error.
 - **Check a statistical claim against noise.** A degrees-of-freedom
   count, a confidence band or a tolerance is checked by simulating
   white noise with the default settings and counting how often the
   rule trips. Adjacent lines are correlated under any window but
-  boxcar, and a tolerance tighter than the estimate's own scatter
+  boxcar, a cell that spans several lines has those lines' degrees of
+  freedom, and a tolerance tighter than the estimate's own scatter
   fails a correct test by chance.
+- **Say a reading's limits where it is read.** If a result is
+  unreliable in some range (a tone the window cannot resolve, the
+  start of a sweep), the pane and the status line say so for that
+  result, not only the docstring.
 - **Refusals live in `core`.** A rule that only the GUI enforces is
   one the API skips. Put the check where both front ends call it, and
-  let the GUI show its message.
+  let the GUI show its message. A setting that does nothing in some
+  mode is refused in that mode, not ignored.
+- **A claim is a test.** What a docstring, the guide or the pull
+  request says ("every impossible entry is refused", "works under a
+  strict content security policy", "within a sample") has a test that
+  would fail if it were false, or it is reworded to what is tested.
 - **Run `tools/mutate.py` over a new numeric module** against its
   tests, and list the survivors in the pull request with a line on
   each: a gap now closed, or a change that cannot alter behavior.
-- **Views follow their inputs.** A pane, caption or plot that depends
-  on a selection or a record clears or redraws when that input
-  changes. Work that takes more than about a tenth of a second does
-  not run on the GUI thread.
+- **Views follow their inputs; slow work waits to be asked.** A pane,
+  caption or plot that depends on a selection or a record clears or
+  redraws when that input changes. A computation runs when its result
+  is needed, not on every redraw, and work that takes more than about
+  a tenth of a second does not run on the GUI thread.
+- **The branch is yours whole.** Rebase onto current `main` before
+  asking for review. A test that fails on your branch and passes on
+  `main` is your branch's, whatever else fails on your machine. Tests
+  pass on every platform CI runs; a test that reads pixels leaves a
+  margin for antialiasing.
 - **Published text** is American English (color, labeled, analyze),
   cites the edition of a standard that was actually read, and carries
   no decision history or notes about the author's own machine.
+  Comments and test docstrings say why, not who asked: no reviewer's
+  name, and nothing that points outside the repository. A guide figure
+  added or changed is named in the pull request; a maintainer
+  renders it again so every figure shares one typeface.
 
 ## Style
 

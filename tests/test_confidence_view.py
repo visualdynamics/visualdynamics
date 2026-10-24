@@ -100,7 +100,8 @@ def test_the_band_is_offered_on_an_autospectrum_alone(window, pump):
     target.statistical_dof = np.array([40.0])
     window.add_object('Target', target)
     _flat(window, pump, 'Target')
-    assert not pane.confidence_action.isVisible(),         'a specification is a target, even one carrying a count'
+    assert not pane.confidence_action.isVisible(), \
+        'a specification is a target, even one carrying a count'
 
 
 def test_the_toggle_shades_the_band_and_reads_it(window, pump):

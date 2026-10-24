@@ -249,10 +249,13 @@ def _channel_table(ds):
     # a channel with a feedback device is a drive — rattlesnake's
     # own rule — and every other enabled channel is measured as a
     # response. Mapping that to a role is translation, not guessing.
-    # The file's minimum_value/maximum_value are deliberately NOT
-    # mapped into the schema's 'range': they are the acquisition
-    # range the DAQ was set to, not the sensor's voltage limit, and
-    # the two agreeing is a coincidence of configuration.
+    # The file's minimum_value/maximum_value are the acquisition range
+    # the DAQ was set to: the schema's 'daq_range' (Brandon, 2026-10-24;
+    # until then the one Range column was read as the sensor's own limit
+    # and these were left out).
+    columns['daq_range'] = _input_ranges(columns.get('minimum_value'),
+                                     columns.get('maximum_value'),
+                                     num_channels)
     columns['role'] = ['reference' if str(value).strip() else 'response'
                        for value in columns.get(
                            'feedback_device', [''] * num_channels)]
@@ -879,6 +882,22 @@ def streamed_sysid_candidate(path: str | os.PathLike) -> bool:
 
 def _strings(var):
     return [str(v) for v in var[:]]
+
+
+def _input_ranges(lows, highs, count: int) -> list[str]:
+    """Each channel's input range in volts from the file's minimum and
+    maximum values, the larger magnitude of the two, blank where either
+    is missing or not a number."""
+    out = []
+    for i in range(count):
+        try:
+            low, high = float(lows[i]), float(highs[i])
+        except (TypeError, ValueError, IndexError):
+            out.append('')
+            continue
+        top = max(abs(low), abs(high))
+        out.append(f'{top:g}' if np.isfinite(top) and top > 0 else '')
+    return out
 
 
 # what an environment calls its averaging, in the order we would rather

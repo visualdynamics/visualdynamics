@@ -30,7 +30,8 @@ def test_every_schema_column_exists_with_its_default():
     assert table.column_names[:len(table.SCHEMA)] == list(table.SCHEMA)
     assert list(table['role']) == [''] * 3, 'undeclared, like a unit'
     assert list(table['control']) == ['False'] * 3
-    assert list(table['range']) == [5] * 3, 'the +/-5 V most hardware has'
+    assert list(table['daq_range']) == [''] * 3, 'unstated, not 5 V'
+    assert list(table['sensor_range']) == [''] * 3
     assert list(table['sensitivity']) == [''] * 3
 
 
@@ -99,17 +100,66 @@ def test_channel_numbers_stay_unique():
 def test_sensitivity_and_range_are_positive_numbers_or_blank():
     table = bare()
     table.set_cell('sensitivity', 0, '10.2')
-    table.set_cell('range', 0, '2')
-    with pytest.raises(ValueError, match='whole number'):
-        table.set_cell('range', 0, '2.5')       # volts, as an integer
+    table.set_cell('daq_range', 0, '0.5')       # a sub-volt input is stated
+    table.set_cell('daq_range', 1, '2.5')
     with pytest.raises(ValueError, match="'ten'"):
         table.set_cell('sensitivity', 0, 'ten')
-    with pytest.raises(ValueError, match='positive'):
-        table.set_cell('range', 0, '-5')
+    with pytest.raises(ValueError, match='greater than 0'):
+        table.set_cell('daq_range', 0, '-5')
+    with pytest.raises(ValueError, match='greater than 0'):
+        table.set_cell('daq_range', 0, '0')
     table.set_cell('sensitivity', 1, '')
     assert np.isnan(table.sensitivities()[1])
     assert table.sensitivities()[0] == 10.2
-    assert table.ranges()[0] == 2
+    assert list(table.daq_ranges()[:2]) == [0.5, 2.5]
+    assert np.isnan(table.daq_ranges()[2]), 'unstated is not a range'
+
+
+def test_a_channel_clips_at_the_smaller_range_stated():
+    """Either limit clips: the DAQ's input or the sensor's output. With
+    both stated the smaller is the one that matters; with one, that one."""
+    table = bare(daq_range=['10', '10', ''], sensor_range=['5', '', ''])
+    assert list(table.clip_ranges()[:2]) == [5.0, 10.0]
+    assert np.isnan(table.clip_ranges()[2])
+    assert np.isnan(table.sensor_ranges()[1])
+
+
+def test_a_table_saved_with_one_range_reads_it_as_the_daq_range():
+    """Tables saved before there were two kept one 'range' column, the
+    DAQ's limit; a spreadsheet's 'Full Scale' is the sensor's."""
+    table = bare(range=['2', '5', '10'], full_scale=['5', '', '0.5'])
+    assert list(table.daq_ranges()) == [2.0, 5.0, 10.0]
+    assert list(table.sensor_ranges()[[0, 2]]) == [5.0, 0.5]
+
+
+def test_an_unreadable_range_in_a_file_reads_as_unstated():
+    """A spreadsheet's 'five' or a 0 is not a range: it reads blank,
+    never as some default the hardware may not have."""
+    table = bare(daq_range=['five', '0', '10'])
+    assert list(table['daq_range']) == ['', '', '10']
+    assert np.isnan(table.daq_ranges()[0]) and table.daq_ranges()[2] == 10.0
+
+
+def test_a_rattlesnake_run_states_each_input_range():
+    """The file's minimum and maximum values are the DAQ's input range,
+    the level a channel clips at: the larger magnitude, blank where the
+    file leaves them empty (as virtual hardware does)."""
+    from types import SimpleNamespace
+
+    from visualdynamics.io.rattlesnake import _channel_table
+
+    def var(values):
+        return np.array(values, dtype=object)
+
+    channels = SimpleNamespace(variables={
+        'node_number': var(['1', '2', '3']),
+        'node_direction': var(['X+', 'Y+', 'Z+']),
+        'unit': var(['g', 'g', 'N']),
+        'minimum_value': var(['-10', '-0.5', '']),
+        'maximum_value': var(['10', '0.5', ''])})
+    table = _channel_table(SimpleNamespace(groups={'channels': channels}))[0]
+    assert list(table.daq_ranges()[:2]) == [10.0, 0.5]
+    assert np.isnan(table.daq_ranges()[2])
 
 
 def test_a_foreign_role_word_reads_as_undeclared():

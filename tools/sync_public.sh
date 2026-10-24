@@ -34,6 +34,11 @@ if [[ ${1:-} == --release ]]; then
     shift
 fi
 TITLE=${1:?a title for the pull request}
+# A pull request merged on the public side and not brought here would be
+# written over by this sync (Brandon, 2026-10-24: Kevin can merge there
+# now). Stop and name it; tools/take_pull.py brings it across.
+./.venv/bin/python tools/untaken_pulls.py || {
+    echo 'bring those across first, then sync' >&2; exit 1; }
 if (( RELEASE )); then
     if [[ $(git rev-parse --abbrev-ref HEAD) != main ]]; then
         echo 'a release is cut from main'; exit 1

@@ -105,6 +105,12 @@ MAX_STAGE_TOTAL = 1000
 SCALOGRAM_COLUMNS = 240
 
 
+#: the page blocks that are numbered as figures; a 'table' is numbered
+#: as a table
+_FIGURE_KINDS = ('plot', 'mac', 'map', 'scene', 'image', 'bars', 'stage',
+                 'grid')
+
+
 def render_html(report: Report, objects: Mapping[str, Any],
                 unit_system: UnitSystem | None = None, edit: bool = False,
                 channel_js: str | None = None,
@@ -135,6 +141,11 @@ def render_html(report: Report, objects: Mapping[str, Any],
     numbered figure and table, in order: what the editor's Reference
     menu offers, with the same numbering the page shows.
 
+    The report features enabled on `report` (`report.features`) act
+    here, each only as its description says; with none enabled the
+    document is the one this function has always written, byte for
+    byte.
+
     `fill` makes the page one figure filling its frame, without a title,
     marking or theme toggle (`export_html`). `theme`, 'light' or 'dark',
     fixes the page's theme, which otherwise follows the reader's.
@@ -163,8 +174,35 @@ def render_html(report: Report, objects: Mapping[str, Any],
                                 'dark': CURVE_COLORS}}
     if edit:
         payload['selected'] = -1 if selected is None else int(selected)
+    # the report features enabled on this report (`report.features`).
+    # Each acts only when enabled, so with none the page below is the
+    # page it always was, byte for byte
+    from .features import enabled as enabled_features
+
+    active = enabled_features(report)
+    conventions = 'plot_conventions' in active
+    # skeleton sections: the page laid out on the sections a test
+    # report needs, the author's own blocks held back to head them
+    skeleton = 'skeleton_sections' in active
+    #: the report block each page block was built from, and each
+    #: section's own blocks, for the skeleton
+    origins: list[Mapping[str, Any]] = []
+    held: dict[str, list[tuple[int, Mapping[str, Any], dict[str, Any]]]] = {}
+    if conventions:
+        from .plot_conventions import apply as apply_conventions
+        from .plot_conventions import figure_kind
+    #: (built block, its figure kind) for the plot conventions
+    kinded: list[tuple[dict[str, Any], str | None]] = []
     figures = tables = 0
     for index, block in enumerate(report.blocks):
+        if 'section' in block:
+            # a skeleton section's own words: drawn only while the
+            # feature is on, as the head of their section
+            if skeleton:
+                held.setdefault(str(block['section']), []).append(
+                    (index, block, _build_block(block, objects, us,
+                                                object_groups)))
+            continue
         built = _build_block(block, objects, us, object_groups)
         if built is None:
             if not edit:
@@ -188,8 +226,7 @@ def render_html(report: Report, objects: Mapping[str, Any],
         # block whichever of its figures was clicked.
         drawn = built if isinstance(built, list) else [built]
         for built in drawn:
-            if built['kind'] in ('plot', 'mac', 'map', 'scene', 'image',
-                                 'bars', 'stage', 'grid'):
+            if built['kind'] in _FIGURE_KINDS:
                 figures += 1
                 built['label'] = f'Figure {figures}'
             elif built['kind'] == 'table':
@@ -200,6 +237,28 @@ def render_html(report: Report, objects: Mapping[str, Any],
                 # click on any of them selects the block
                 built['index'] = index
             payload['blocks'].append(built)
+            if conventions:
+                kinded.append((built, figure_kind(block, objects,
+                                                  object_groups)))
+            if skeleton:
+                origins.append(block)
+    if skeleton:
+        from .skeleton import arrange
+
+        payload['blocks'] = arrange(payload['blocks'], origins, held,
+                                    objects, object_groups, edit=edit)
+        # numbered again in the order the page now shows them
+        figures = tables = 0
+        for built in payload['blocks']:
+            if built['kind'] in _FIGURE_KINDS:
+                figures += 1
+                built['label'] = f'Figure {figures}'
+            elif built['kind'] == 'table':
+                tables += 1
+                built['label'] = f'Table {tables}'
+    if conventions:
+        apply_conventions(payload, kinded,
+                          shared='shared_decades' in active)
     # text renders last: only now does every figure have its number, so
     # {{figure:...}} references can resolve — and renumber themselves
     # the next time a block is added, removed, or moved
@@ -212,9 +271,15 @@ def render_html(report: Report, objects: Mapping[str, Any],
     for built in payload['blocks']:
         if built['kind'] == 'text':
             built['html'] = to_html(
-                _resolve_figures(built.pop('text'), labeled))
+                _resolve_figures(built.pop('text'), labeled),
+                tables=skeleton)
+    if skeleton:
+        from .skeleton import finish
+
+        finish(payload['blocks'])
     data = json.dumps(payload, allow_nan=False)
-    scripts = _JS + (_EDIT_JS if edit else '')
+    css, script = page_parts(active)
+    scripts = script + (_EDIT_JS if edit else '')
     shell = _PAGE
     if edit:
         # the app hands over Qt's own qwebchannel.js to inline, because
@@ -233,7 +298,7 @@ def render_html(report: Report, objects: Mapping[str, Any],
                               trap + channel + '\n<script id="data"')
     return (shell.replace('__TITLE__', html_escape.escape(report.title))
                  .replace('__DATA__', data.replace('</', '<\\/'))
-                 .replace('__CSS__', _CSS + (_EDIT_CSS if edit else ''))
+                 .replace('__CSS__', css + (_EDIT_CSS if edit else ''))
                  .replace('__JS__', scripts))
 
 
@@ -3089,11 +3154,10 @@ def _table_block(block, source, geometry=None):
 
 
 from .page import (
-    _CSS,
     _EDIT_CSS,
     _EDIT_JS,
-    _JS,
     _PAGE,
+    page_parts,
 )
 
 

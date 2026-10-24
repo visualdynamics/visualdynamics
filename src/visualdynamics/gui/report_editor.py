@@ -9,10 +9,11 @@ clicked. Everything else is in Qt. Above the page is a bar of actions
 (Insert, Reference, Move Up, Move Down, Delete, and Export as HTML or as
 a report template), and beside it is a settings pane for the selection:
 a figure block's sources and caption, a text block's Markdown in a Qt
-editor, or the report's title and marking when nothing is selected.
-Each action is one operation on the `Report` model, which the window
-records in the journal, followed by a new render of the page. The
-exported file carries none of the editor's controls.
+editor, or the report's title, marking and Report Features panel when
+nothing is selected (`report_features_panel`). Each action is one
+operation on the `Report` model, which the window records in the
+journal, followed by a new render of the page. The exported file
+carries none of the editor's controls.
 """
 
 from __future__ import annotations
@@ -56,6 +57,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPlainTextEdit,
+    QPushButton,
     QScrollArea,
     QSplitter,
     QToolBar,
@@ -65,6 +67,7 @@ from PySide6.QtWidgets import (
 )
 
 from .icons import control_icon
+from .report_features_panel import ReportFeaturesPanel
 
 # The bar and the pane are Qt, as for every other object (Brandon,
 # 2026-09-08: "the toolbar should be the same as the task bar at the top
@@ -245,6 +248,19 @@ class ReportEditor(QWidget):
         self.title_edit: QLineEdit | None = None
         self.marking_edit: QLineEdit | None = None
         self.color_box: QComboBox | None = None
+        #: the Report Features panel, while the report's own settings
+        #: are in the pane
+        self.features_panel: ReportFeaturesPanel | None = None
+        #: how a change of report features is made: the window sets the
+        #: project's verb, so the change is journaled as a script would
+        #: make it; on its own the editor calls the registry directly.
+        #: Called as `features_changer(report, enable=, disable=,
+        #: preset=)` and returns a `FeatureSelection`.
+        self.features_changer: Callable[..., Any] | None = None
+        #: a skeleton section's None button and its Interpretation, by
+        #: field, while such a block is in the pane
+        self.none_button: QPushButton | None = None
+        self.by_edit: QLineEdit | None = None
         self.field_boxes: dict[str, QComboBox] = {}
         self._loading_pane = False
         self._text_timer: QTimer = QTimer(self)
@@ -436,6 +452,8 @@ class ReportEditor(QWidget):
         self._text_timer.stop()
         self.text_editor = self.caption_edit = None
         self.title_edit = self.marking_edit = self.color_box = None
+        self.features_panel = None
+        self.none_button = self.by_edit = None
         self.field_boxes = {}
         body = QWidget()
         form = QFormLayout(body)
@@ -482,6 +500,13 @@ class ReportEditor(QWidget):
                 form.addRow(QLabel(
                     'Click a block in the page to edit it; Insert adds '
                     'one after the selection, or at the end.'))
+                self.features_panel = ReportFeaturesPanel(report.features)
+                self.features_panel.requested.connect(
+                    lambda change: self._operate({'op': 'features',
+                                                  **change}))
+                form.addRow(self.features_panel)
+            elif block.get('kind') == 'text' and 'section' in block:
+                self._section_pane(form, block)
             elif block.get('kind') == 'text':
                 form.addRow(QLabel(f'<b>Block {self.selected + 1}</b> — text'))
                 self.text_editor = QPlainTextEdit(block.get('text', ''))
@@ -541,6 +566,46 @@ class ReportEditor(QWidget):
             self._loading_pane = False
         self.pane.setWidget(body)
         self._offer()
+
+    def _section_pane(self, form, block) -> None:
+        """The pane for a skeleton section's own block: its heading and
+        what belongs in it, its words in the Markdown editor, None for a
+        section that can have nothing to report, and who interpreted
+        for the discussion."""
+        from ..report.skeleton import ATTRIBUTED, BY_KEY
+
+        found = BY_KEY.get(str(block.get('section')))
+        if found is None:
+            # a section this version does not know: its words, as text
+            form.addRow(QLabel(f'<b>Block {self.selected + 1}</b> — text'))
+        else:
+            form.addRow(QLabel(f'<b>{html_escape.escape(found.heading)}</b>'))
+            told = QLabel(found.description)
+            told.setWordWrap(True)
+            form.addRow(told)
+        self.text_editor = QPlainTextEdit(block.get('text', ''))
+        self.text_editor.setPlaceholderText(
+            'Owed until written. Markdown: **bold**, - list, '
+            '| a | b | tables')
+        self.text_editor.textChanged.connect(self._text_changed)
+        form.addRow(self.text_editor)
+        if found is not None and found.none:
+            self.none_button = QPushButton('None')
+            self.none_button.setToolTip(
+                f'Writes "{found.none}" in place of the section\'s text')
+            self.none_button.clicked.connect(
+                lambda: self._operate({'op': 'section', 'at': self.selected,
+                                       'none': True}))
+            form.addRow(self.none_button)
+        if found is not None and found.key == ATTRIBUTED:
+            self.by_edit = QLineEdit(str(block.get('by', '')))
+            self.by_edit.setPlaceholderText('who made the interpretation')
+            self.by_edit.editingFinished.connect(
+                lambda: self._field_edited(
+                    {'op': 'section', 'at': self.selected,
+                     'by': self.by_edit.text()},
+                    str(block.get('by', '')) != self.by_edit.text().strip()))
+            form.addRow('Interpretation, by', self.by_edit)
 
     def _combo(self, form, field, label, current, options):
         box = QComboBox()
@@ -657,6 +722,28 @@ class ReportEditor(QWidget):
         self.view.loadFinished.connect(restore)
         self._offer()
 
+    def _change_features(self, operation) -> bool:
+        """Make the Report Features panel's change, and show the panel
+        the outcome. Returns whether the report changed: a refused
+        change leaves it as it was, says why on the panel, and renders
+        nothing again."""
+        from ..report.features import configure
+
+        change = {key: operation[key]
+                  for key in ('enable', 'disable', 'preset')
+                  if operation.get(key) is not None}
+        before = list(self.report.features)
+        changer = self.features_changer or configure
+        try:
+            selection = changer(self.report, **change)
+        except (TypeError, ValueError) as refused:
+            notes = [str(refused)]
+        else:
+            notes = list(selection.notes)
+        if self.features_panel is not None:
+            self.features_panel.show_state(self.report.features, notes)
+        return self.report.features != before
+
     def _scroll_back(self) -> None:
         self.page.runJavaScript(f'window.scrollTo(0, {self._scroll_to});')
 
@@ -738,6 +825,21 @@ class ReportEditor(QWidget):
             return
         if op == 'select':
             at = operation.get('at')
+            if isinstance(at, str) and at.startswith('section:'):
+                # an owed skeleton section with no block of its own yet:
+                # the click makes it, so there is a block to write in
+                from ..report.skeleton import write
+
+                try:
+                    at = write(report, at.partition(':')[2])
+                except (TypeError, ValueError):
+                    return
+                self.flush_text()
+                self.selected = at
+                self.edited.emit()
+                self.rebuild()
+                self._show_selection()
+                return
             at = int(at) if at is not None else None
             if at is not None and not 0 <= at < report.num_blocks:
                 at = None
@@ -840,6 +942,25 @@ class ReportEditor(QWidget):
             wanted = str(operation.get('value', 'ink'))
             report.marking_color = wanted if wanted in ('ink', 'red') \
                 else 'ink'
+        elif op == 'features':
+            if not self._change_features(operation):
+                return
+        elif op == 'section':
+            # a skeleton section's one-step None, or who interpreted:
+            # through the one function a script calls, which refuses
+            index = int(operation.get('at', -1))
+            if not 0 <= index < report.num_blocks or                     'section' not in report.blocks[index]:
+                return
+            from ..report.skeleton import write
+
+            try:
+                write(report, report.blocks[index]['section'],
+                      none=bool(operation.get('none')),
+                      by=operation.get('by'))
+            except (TypeError, ValueError):
+                return
+            # the pane shows the words None wrote
+            reselect = bool(operation.get('none'))
         elif op == 'field':
             index = int(operation.get('at', -1))
             if 0 <= index < report.num_blocks:

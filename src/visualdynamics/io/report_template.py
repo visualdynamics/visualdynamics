@@ -4,9 +4,10 @@ A report is a list of blocks with symbolic bindings, such as
 `@basis:Frf` or `@other:ShapeSet`, so a report written without its
 project is a template: the same figures and text, bound again to
 whatever project loads it. The file is JSON with one marker key and the
-same four fields the project file keeps for a report (title, marking,
-marking color and blocks; see `native.save_report`), under its own
-suffix, `.vdreport`. A block whose binding does not resolve in the new
+fields the project file keeps for a report (title, marking, marking
+color, blocks, and the report features when any are enabled; see
+`native.save_report`), under its own suffix, `.vdreport`. A lab's house
+template therefore carries its choice of report features. A block whose binding does not resolve in the new
 project is an unbound card there, to be pointed at an object in the
 editor's pane, as an unbound block of a built-in template is.
 
@@ -62,6 +63,10 @@ def save(report: Report, path: str | os.PathLike, unit_system: Any = None,
     out = {MARKER: 1, 'title': report.title, 'marking': report.marking,
            'marking_color': report.marking_color,
            'blocks': [dict(block) for block in report.blocks]}
+    if report.features:
+        # only when there are any: a template with none is the file it
+        # always was, and opens in a version that has no features
+        out['features'] = list(report.features)
     with open(path, 'w', encoding='utf-8') as handle:
         json.dump(out, handle, indent=1)
         handle.write('\n')
@@ -74,10 +79,16 @@ def load(path: str | os.PathLike, **_ignored: Any) -> Report:
         data = json.load(handle)
     if not isinstance(data, dict) or MARKER not in data:
         raise ValueError(f'{path} is not a Visual Dynamics report template')
+    features = data.get('features', [])
+    if (not isinstance(features, list)
+            or not all(isinstance(key, str) for key in features)):
+        raise ValueError(f'{path}: features must be a list of feature '
+                         f'keys, not {features!r}')
     return Report(title=str(data.get('title', 'Report')),
                   blocks=data.get('blocks', []),
                   marking=str(data.get('marking', 'UNCLASSIFIED')),
-                  marking_color=str(data.get('marking_color', 'ink')))
+                  marking_color=str(data.get('marking_color', 'ink')),
+                  features=features)
 
 
 def templates_folder() -> Path:

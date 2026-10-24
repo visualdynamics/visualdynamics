@@ -127,11 +127,19 @@ edited; the reference renumbers itself when blocks move. *Move Up*,
 writes the HTML file. None of the editor's controls appear in the
 exported page, which holds only the document.
 
+## Report features
+
+With nothing selected, the pane also holds the **Report Features**
+panel: optional additions to the report, each off until it is turned
+on, chosen one by one or from a preset. With none turned on, the report
+is exactly what this page describes. See
+[Report features](report-features.md).
+
 ## Saving a report as a template
 
 *Export → Report template…* on the report's bar writes the report on
-its own (its blocks, their bindings, the title and the marking, but no
-values) as a `.vdreport` file, by default into the application's
+its own (its blocks, their bindings, the title, the marking and the
+report features, but no values) as a `.vdreport` file, by default into the application's
 templates folder. A template saved there is offered by *Generate
 Report* beside the built-in ones, in every project, so a house
 template is one click away. Imported from anywhere else, the file adds

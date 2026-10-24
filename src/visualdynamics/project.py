@@ -43,6 +43,7 @@ from .core.report import Report
 from .core.shapes import ShapeSet
 from .core.sine import SineLevelSet, SineSweepSpecification
 from .names import display_name
+from .report.features import FeatureSelection
 
 # An object group: the objects declared to belong together, and what the
 # group is — 'Basis', or None for every other group. One field says it
@@ -4481,6 +4482,149 @@ class Project(dict):
             report.marking_color = marking_color
         return self.add(name, report)
 
+    def report_features(self, name: str, *, enable: Sequence[str] = (),
+                        disable: Sequence[str] = (),
+                        preset: str | None = None) -> FeatureSelection:
+        """Turn a report's optional features on or off (the report
+        editor's Report Features panel).
+
+        A report feature is an addition to the generated report, off
+        until it is enabled; with none enabled the report is exactly
+        what Visual Dynamics writes otherwise. The features, their
+        groups and what each one needs are listed in
+        `visualdynamics.report.features.FEATURES`, and the presets in
+        `PRESETS`. The choice is saved with the report and in a
+        `.vdreport` template.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        enable : sequence of str, optional
+            Feature keys to turn on. A feature that needs another can
+            be enabled in the same call as the one it needs.
+        disable : sequence of str, optional
+            Feature keys to turn off. A feature that needs one turned
+            off goes with it, and the notes say so.
+        preset : str, optional
+            'default' (no features), 'test_report' or 'flash_report':
+            the report's features are replaced by the preset's before
+            `disable` and `enable` apply. A feature the preset names
+            that is not available yet is skipped with a note.
+
+        Returns
+        -------
+        FeatureSelection
+            `enabled`, the report's features afterwards, and `notes`,
+            what was skipped or turned off along the way.
+
+        Raises
+        ------
+        ValueError
+            For an unknown feature or preset, a feature not yet
+            available, or a feature whose requirement is not met.
+            Nothing is changed.
+        TypeError
+            When `name` is not a report, or a key is not a string.
+        """
+        from .report.features import configure
+
+        return configure(self._report(name), enable=enable,
+                         disable=disable, preset=preset)
+
+    def report_section(self, name: str, section: str,
+                       text: str | None = None, *, none: bool = False,
+                       by: str | None = None) -> None:
+        """Write one skeleton section of a report (the report editor's
+        pane on a section's block).
+
+        With the report feature `skeleton_sections` on, the report is
+        laid out on the sections in
+        `visualdynamics.report.skeleton.SECTIONS`, and each section only
+        the author can write is shown as owed until it says something.
+        This sets what it says.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        section : str
+            The section's key: 'identification', 'summary',
+            'requirement', 'article', 'setup', 'instrumentation',
+            'chronology', 'results', 'deviations', 'discussion',
+            'conclusion' or 'record'.
+        text : str, optional
+            The section's words, in the report's Markdown, replacing
+            what it said.
+        none : bool, default False
+            Write the section's own wording for nothing to report, in
+            one step ('deviations' and 'discussion' only): "No
+            deviations. No anomalies. No nonconformances."
+        by : str, optional
+            Who made the interpretation ('discussion' only); an empty
+            string clears it.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            For an unknown section, `text` and `none` together, `none`
+            for a section that always has something to say, or `by`
+            outside the discussion. Nothing is changed.
+        TypeError
+            When `name` is not a report, or a value is not a string.
+        """
+        from .report.skeleton import write
+
+        write(self._report(name), section, text, none=none, by=by)
+
+    def report_check(self, name: str) -> list[str]:
+        """What a report still owes before it is issued, one line per
+        section, in order (what Export lists and asks about).
+
+        A line names the section and why: not yet written; nothing in
+        it (Instrumentation or Results with nothing generated or
+        written); or a discussion that does not say by whom. An empty
+        list means every section of the skeleton says something.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+
+        Returns
+        -------
+        list of str
+            One line per owed section, such as '4. Test Article: not
+            yet written', in the skeleton's order.
+
+        Raises
+        ------
+        ValueError
+            When the report does not have the report feature
+            `skeleton_sections` enabled: without the skeleton there is
+            nothing to check against, and an empty list would read as a
+            complete report.
+        TypeError
+            When `name` is not a report.
+        """
+        from .report.skeleton import check
+
+        return [str(owed) for owed in check(
+            self._report(name), self, self.object_groups)]
+
+    def _report(self, name: str) -> Report:
+        """The report called `name`; `TypeError` for anything else."""
+        name = self.name_of(name)
+        report = self[name]
+        if not isinstance(report, Report):
+            raise TypeError(f'{name!r} is a {type(report).__name__}, not a '
+                            'report')
+        return report
+
     def work_up(self) -> list[str]:
         """Compute every missing object the project's type expects from
         what is loaded, with the report last (Automatic on the tree's
@@ -5851,7 +5995,8 @@ _JOURNALED_VERBS = (
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',
-    'generate_report', 'export_report', 'export', 'save', 'duplicate',
+    'generate_report', 'report_features', 'report_section', 'export_report',
+    'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:
     setattr(Project, _verb, _journaled(getattr(Project, _verb)))

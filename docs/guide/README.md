@@ -116,6 +116,9 @@ that is not an alpha.
   comparison counts outside each band, beside how many the scatter of
   an average puts there, and lines combined for judging
 - [Reports](reports.md): symbolic bindings, live text, and one file out
+- [Report features](report-features.md): optional additions to a
+  report, turned on in a panel or by preset: the skeleton sections
+  and the plot conventions
 
 For signatures, see the API reference in the site navigation. For the
 layers of the package and the conventions behind them, see

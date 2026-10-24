@@ -628,6 +628,10 @@ def save_report(report: Report, group: h5py.Group) -> None:
     group.attrs['title'] = report.title
     group.attrs['marking'] = report.marking
     group.attrs['marking_color'] = report.marking_color
+    if report.features:
+        # written only when there are any, so a report with none is
+        # stored exactly as it was before features existed
+        group.attrs['features'] = json.dumps(report.features)
     group.create_dataset('blocks', data=json.dumps(report.blocks),
                          dtype=h5py.string_dtype('utf-8'))
 
@@ -640,10 +644,16 @@ def load_report(group: h5py.Group) -> Report:
     blocks = group['blocks'][()]
     if isinstance(blocks, bytes):
         blocks = blocks.decode('utf-8')
+    # a file from before report features has none, and loads with none
+    features = group.attrs.get('features', '[]')
+    if isinstance(features, bytes):
+        features = features.decode('utf-8')
+    features = json.loads(features)
     return Report(title=str(group.attrs['title']),
                   blocks=json.loads(blocks),
                   marking=str(group.attrs['marking']),
-                  marking_color=str(group.attrs['marking_color']))
+                  marking_color=str(group.attrs['marking_color']),
+                  features=features)
 
 
 def save_photos(photos: Photos, group: h5py.Group) -> None:

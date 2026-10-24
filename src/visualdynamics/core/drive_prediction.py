@@ -503,7 +503,7 @@ def _amount(value: float, dimension: str,
     """`value`, in SI, as a number and a unit in `unit_system`, SI's own
     when none is given, written as `core.stroke` writes its readings."""
     from ..units import SI
-    from .stroke import _amount as written
+    from .stroke import amount as written
 
     return written(value, dimension, SI if unit_system is None
                    else unit_system)

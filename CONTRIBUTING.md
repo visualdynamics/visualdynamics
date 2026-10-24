@@ -151,6 +151,23 @@ small models in `tests/test_fem.py`, which runs every time.
   change on purpose and watch the test fail before calling it done; a
   test that passes either way is testing nothing.
 
+Most of the fixes a review asks for fall into a few groups.
+[`AGENTS.md`](AGENTS.md), under "What review catches most often", has
+them in full. Briefly:
+
+- Call the existing function for a computation the package already
+  has (framing, judging against limits, coherence, a filter's
+  response) instead of writing a second copy.
+- Test each new reading against an all-zero channel, a NaN sample and
+  an empty selection. Nothing judged is never a pass.
+- Pair records by DOF, dimension and hint, and check their units.
+- Test at the edges (the first line, the end of the span, a nonzero
+  start time) and under the default Hann window. Check a statistical
+  rule against simulated noise.
+- Put refusals in `core`, where the API and the GUI both reach them.
+- For a numeric module, run `tools/mutate.py` against its tests and
+  list what survives in the pull request.
+
 `PRINCIPLES.md` is the standard a change is measured against, and it is
 worth reading before you start on a substantial one.
 

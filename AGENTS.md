@@ -149,6 +149,54 @@ Before saying anything is done:
 - **Own test-authorship errors plainly.** When a failure was a bad
   test rather than bad code, say which it was.
 
+## What review catches most often
+
+Most of the work a pull request needs after it is opened comes from
+the same few gaps. Check each one before asking for review.
+
+- **Call what is already here.** Before writing a computation, search
+  `core/` for it. Spectral framing and averaging
+  (`TimeHistory._spectral_frame`), judging a spectrum against its
+  limits (`compliance.judge`), sine errors (`compliance.sine_errors`),
+  a filter's response (`filters.response`), coherence
+  (`Psd.coherence`) and the correlation between overlapped frames
+  (`averaging.frame_correlation`) each exist once. A second copy of a
+  formula drifts from the first, and the review will ask for it to be
+  replaced by a call.
+- **Dead, NaN and empty inputs.** Test every new reading against an
+  all-zero channel, a record with one NaN sample and an empty
+  selection. Each must give a message that names the cause. A check
+  that judged nothing reports that it judged nothing; it never reports
+  a pass.
+- **Match records by their full identity.** Two records at one DOF can
+  be different quantities (an acceleration and a force at `1Z+`).
+  Pair records by `channel_key` (DOF, dimension and hint), and refuse
+  a record whose units do not match what it is compared against.
+- **Test at the edges, with the defaults.** The easy case passes
+  almost any implementation. Test a tone on the first spectral line,
+  a frequency at the edge of the span, a record with a nonzero start
+  time, noise on the input as well as the output, and two tones that
+  cross. Test under the default window (Hann), not only boxcar.
+- **Check a statistical claim against noise.** A degrees-of-freedom
+  count, a confidence band or a tolerance is checked by simulating
+  white noise with the default settings and counting how often the
+  rule trips. Adjacent lines are correlated under any window but
+  boxcar, and a tolerance tighter than the estimate's own scatter
+  fails a correct test by chance.
+- **Refusals live in `core`.** A rule that only the GUI enforces is
+  one the API skips. Put the check where both front ends call it, and
+  let the GUI show its message.
+- **Run `tools/mutate.py` over a new numeric module** against its
+  tests, and list the survivors in the pull request with a line on
+  each: a gap now closed, or a change that cannot alter behavior.
+- **Views follow their inputs.** A pane, caption or plot that depends
+  on a selection or a record clears or redraws when that input
+  changes. Work that takes more than about a tenth of a second does
+  not run on the GUI thread.
+- **Published text** is American English (color, labeled, analyze),
+  cites the edition of a standard that was actually read, and carries
+  no decision history or notes about the author's own machine.
+
 ## Style
 
 - Comments and docstrings explain *why*, especially where the obvious

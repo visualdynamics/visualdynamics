@@ -66,6 +66,9 @@ that is not an alpha.
 - [Taking a record to a lower sample rate](resample.md): the
   anti-alias filter first, the span and the dropped lines, and where
   content above the new Nyquist frequency folds
+- [Predicting the drives before the test](drive-prediction.md): the
+  drives a specification asks for through an FRF, one drive or several,
+  against the amplifier and shaker limits
 - [The sine sweep workflow](workflows/sine-workflow.md): tones tracked
   through a sweep and compared with the requirement
 - [The random and sine workflow](workflows/mixed-workflow.md): a sweep

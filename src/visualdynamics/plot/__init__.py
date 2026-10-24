@@ -4421,6 +4421,73 @@ def plot_chance(measured: Any, specification: Any, *,
                         size=size)
 
 
+def plot_multi_point(measured: Any, specification: Any, *,
+                     channels: Sequence[int | str] | None = None,
+                     strategy: str = 'average',
+                     weights: Sequence[float] | None = None,
+                     composite_band: str | tuple[float, float] = 'warning',
+                     individual_band: str | tuple[float, float] | None = None,
+                     spec_record: int | None = None,
+                     scale_db: float | None = None,
+                     unit_system: UnitSystem | None = None,
+                     theme: Any = None,
+                     path: str | os.PathLike | None = None,
+                     show: bool = True, title: str | None = None,
+                     size: tuple[int, int] = (1000, 700)) -> Any:
+    """A multi-point control run: the composite of its control channels
+    heavy over the channels themselves, the composite band and the
+    individual band shaded, and every line outside its band marked.
+
+        psd = history.compute_psds()
+        visualdynamics.plot.plot_multi_point(
+            psd, spec, channels=['1Z+', '2Z+', '3Z+', '4Z+'],
+            strategy='average', individual_band=(-6.0, 6.0),
+            path='composite.png')
+
+    Every number is `core.multi_point.multi_point`'s: the composite
+    against the composite band and each channel against its own, each
+    channel's legend entry saying how many lines it is outside its band
+    and how many of those the composite was inside at.
+
+    Parameters
+    ----------
+    measured : Psd
+        The run, holding the control channels' autospectra.
+    specification : Specification
+        The reference, and the bands where its limits are used.
+    channels, strategy, weights, composite_band, spec_record, scale_db
+        As for `core.multi_point.multi_point`.
+    individual_band : str or tuple of float, optional
+        As for `core.multi_point.multi_point`; `INDIVIDUAL_DB` when
+        omitted.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.multi_point import INDIVIDUAL_DB
+    from .multi_point import build_multi_point
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_multi_point(
+            widget, specification, measured, channels=channels,
+            strategy=strategy, weights=weights,
+            composite_band=composite_band,
+            individual_band=(INDIVIDUAL_DB if individual_band is None
+                             else individual_band),
+            spec_record=spec_record, scale_db=scale_db,
+            unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{strategy.capitalize()} control '
+                                       'against its composite band',
+                        size=size)
+
+
 def plot_kurtosis(history: Any, *, records: Sequence[int] | None = None,
                   low: float | None = None, high: float | None = None,
                   theme: Any = None,

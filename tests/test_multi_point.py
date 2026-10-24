@@ -404,3 +404,90 @@ def test_the_reference_must_be_a_specification_and_the_run_a_psd():
         multi_point(run(1.0), run(1.0, 1.0))
     with pytest.raises(TypeError, match='a measured PSD'):
         multi_point(reference(), reference())
+
+
+# ---- the view ------------------------------------------------------------------
+
+
+def _items(layout):
+    plot = layout.getItem(0, 0)
+    return plot, plot.listDataItems()
+
+
+def test_the_view_draws_the_composite_heavy_and_marks_the_lines_outside(
+        qt_app):
+    """A dead channel: the composite drawn once and heavy, the dead
+    channel's lines outside marked, and nothing marked on the composite,
+    which is inside its band."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.multi_point import (
+        COMPOSITE_WIDTH,
+        build_multi_point,
+        describe_channel,
+        describe_composite,
+    )
+
+    layout = pg.GraphicsLayoutWidget()
+    reading = build_multi_point(layout, reference(), run(1.5, 1.5, 0.5),
+                                channels=[0, 1, 2], scale_db=0)
+    _plot, items = _items(layout)
+    heavy = [item for item in items if getattr(item, 'is_composite', False)]
+    assert len(heavy) == 1
+    assert heavy[0].opts['pen'].widthF() == COMPOSITE_WIDTH
+    marks = [item for item in items
+             if getattr(item, 'is_outside_mark', False)]
+    # the third channel is 0.5 times, -3 dB: inside -6/+6, so nothing
+    # is marked anywhere
+    assert marks == []
+    assert describe_composite(reading) == (
+        'composite, average of 3: 0 lines outside the warning limits '
+        '(0.0 %)')
+    assert describe_channel(reading.channels[2], reading) == (
+        '3Z+: 0 lines outside −6/+6 dB')
+
+
+def test_a_channel_outside_its_band_is_marked_at_every_line_it_is_out(
+        qt_app):
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.multi_point import (
+        build_multi_point,
+        describe_channel,
+    )
+
+    layout = pg.GraphicsLayoutWidget()
+    reading = build_multi_point(layout, reference(),
+                                run(4.4, 1.0, 1.0, 1.0),
+                                channels=[0, 1, 2, 3], scale_db=0)
+    _plot, items = _items(layout)
+    marks = [item for item in items
+             if getattr(item, 'is_outside_mark', False)]
+    assert len(marks) == 1
+    assert marks[0].xData.size == JUDGED
+    assert describe_channel(reading.channels[0], reading) == (
+        f'1Z+: {JUDGED} lines outside −6/+6 dB, {JUDGED} with the '
+        'composite inside')
+
+
+def test_the_view_refuses_what_the_reading_refuses(qt_app):
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.multi_point import build_multi_point
+
+    layout = pg.GraphicsLayoutWidget()
+    with pytest.raises(ValueError, match='needs two or more'):
+        build_multi_point(layout, reference(), run(1.0, 1.0),
+                          channels=[0], scale_db=0)
+    assert layout.getItem(0, 0) is None      # nothing drawn
+
+
+def test_the_standalone_plot_writes_its_file(qt_app, tmp_path):
+    from visualdynamics.plot import plot_multi_point
+
+    path = tmp_path / 'composite.png'
+    written = plot_multi_point(run(1.5, 1.5, 0.0), reference(),
+                               channels=['1Z+', '2Z+', '3Z+'], scale_db=0,
+                               path=path, show=False)
+    assert str(written) == str(path)
+    assert path.stat().st_size > 2000

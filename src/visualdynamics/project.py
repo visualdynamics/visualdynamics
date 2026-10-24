@@ -2411,7 +2411,8 @@ class Project(dict):
             response_channel, reference_channel,
             averaging=self.averaging_of(name))
 
-    def read_partial_coherence(self, name: Any) -> Any:
+    def read_partial_coherence(self, name: Any, *,
+                               progress: Any = None) -> Any:
         """Which drive explains each response, and whether the drives
         were independent: the partial, reference and virtual coherence
         (`core.partial_coherence`).
@@ -2427,6 +2428,10 @@ class Project(dict):
         name : str or object
             The time history or the multiple coherence, by name or as
             the object itself.
+        progress : callable, optional
+            Called with ``(0, core.progress.BUSY)`` as the work starts,
+            which cannot count its own stages; the app's progress bar
+            uses it.
 
         Returns
         -------
@@ -2440,7 +2445,9 @@ class Project(dict):
             no response channels, or no more averages than references.
         """
         from .core.data import MultipleCoherence
+        from .core.progress import Ticker
 
+        Ticker(progress).busy()
         name = self.name_of(name)
         data = self[name]
         if isinstance(data, TimeHistory):
@@ -6193,7 +6200,8 @@ class Project(dict):
                            else float(max_condition)))
 
     def read_transformation(self, name: Any, *,
-                            threshold: float | None = None) -> Any:
+                            threshold: float | None = None,
+                            progress: Any = None) -> Any:
         """What a rigid-body transformation leaves unexplained of the
         density it was applied to, line by line
         (`core.transformation.read_residual`).
@@ -6215,6 +6223,10 @@ class Project(dict):
             The residual's share of the measured power at which the
             rigid-body assumption is said to stop holding; a tenth when
             left out (`core.transformation.RESIDUAL_THRESHOLD`).
+        progress : callable, optional
+            Called with ``(0, core.progress.BUSY)`` as the work starts,
+            which cannot count its own stages; the app's progress bar
+            uses it.
 
         Returns
         -------
@@ -6227,6 +6239,7 @@ class Project(dict):
             cross-spectral density through rigid shapes, or no motion
             channel of the source is in the set.
         """
+        from .core.progress import Ticker
         from .core.transform import MOTIONS, to_modal
         from .core.transformation import (
             RESIDUAL_THRESHOLD,
@@ -6234,6 +6247,7 @@ class Project(dict):
             read_residual,
         )
 
+        Ticker(progress).busy()
         name = self.name_of(name)
         provenance = self.provenance.get(name, {})
         params = provenance.get('params', {}) or {}

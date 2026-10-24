@@ -108,9 +108,9 @@ ROUND_OFF = 1e-12
 #: the angular quantity back to the motion it is the rotation of
 _ANGULAR = {ROTATIONAL[quantity]: quantity for quantity in MOTIONS}
 
-# P8 of the course's audit of the toolset: the transformation as an
-# object nobody has to take on trust, built from geometry or typed,
-# with its conditioning, its weights and its residual against frequency.
+# The transformation as an object nobody has to take on trust, built
+# from geometry or typed, with its conditioning, its weights and its
+# residual against frequency.
 
 
 def _kind_of(dof: str) -> str | None:

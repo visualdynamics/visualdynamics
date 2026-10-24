@@ -376,7 +376,8 @@ def test_the_rows_residual_is_each_channels_share_of_its_rms():
         T, 0.1 * np.outer(v, np.sin(2 * np.pi * 5 * T)),
         response_dof=['1Z+', '2Z+', '3Z+'], ordinate_dim='acceleration')
     _out, report = t.apply(small)
-    assert report.residual['1Z+'] == pytest.approx(1.0),         'a share of the RMS, whatever the RMS is'
+    assert report.residual['1Z+'] == pytest.approx(1.0), \
+        'a share of the RMS, whatever the RMS is'
     quiet = visualdynamics.TimeHistory(
         T, np.vstack([np.sin(T), np.zeros_like(T)]),
         response_dof=['1Z+', '2Z+'], ordinate_dim='acceleration')
@@ -416,7 +417,8 @@ def test_two_motions_at_the_inputs_ask_which():
         _beam().apply(record)
     out, report = _beam().apply(record, quantity='velocity')
     assert out.ordinate_dim == ['velocity', 'angular_velocity']
-    assert report.skipped == {'acceleration': 2},         'the other motion at the inputs is left out and counted'
+    assert report.skipped == {'acceleration': 2}, \
+        'the other motion at the inputs is left out and counted'
     assert report.dropped == [], 'no DOF is outside the transformation'
 
 

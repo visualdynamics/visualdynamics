@@ -119,7 +119,8 @@ def test_independent_drives_have_partial_near_ordinary():
     assert reading.references == ['1Z+', '2Z+']
     assert reading.responses == ['101Z+']
     point = reading.at(150.0)
-    assert point.frequency == pytest.approx(150.0, abs=1.0),         'the line nearest the frequency asked for'
+    assert point.frequency == pytest.approx(150.0, abs=1.0), \
+        'the line nearest the frequency asked for'
     band = slice(5, -5)
     # independent drives: removing one leaves the other's share of what
     # is left, so the partial is a little over the ordinary, never under
@@ -177,7 +178,8 @@ def test_the_pairs_are_ordered_by_how_much_of_the_band_they_couple():
     reading = read_partial_coherence(np.array([10.0, 20.0, 30.0]), matrix,
                                      ['1Z+', '2Z+', '3Z+'], ['101Z+'])
     coupled = reading.coupled()
-    assert [(one, other) for one, other, _s, _t in coupled] ==         [('1Z+', '3Z+'), ('1Z+', '2Z+')]
+    assert [(one, other) for one, other, _s, _t in coupled] == \
+        [('1Z+', '3Z+'), ('1Z+', '2Z+')]
     assert coupled[1][2] == pytest.approx(0.5)
     assert coupled[1][3] == pytest.approx(0.95)
     assert reading.effective_references()[2] == 0, 'nothing measured'
@@ -325,3 +327,73 @@ def test_the_project_reads_behind_a_multiple_coherence_or_a_history():
     with pytest.raises(ValueError, match='neither a time history nor a '
                                          'multiple coherence'):
         project.read_partial_coherence(psds)
+
+
+# ---- the edges and the default window, and what chance gives -------------------
+
+
+def _drives_and_responses(seed, n=1 << 15, start=0.0, extra=None):
+    """Two independent drives and two responses, every channel with its
+    own noise as measured (the drives' as well as the responses'), under
+    the default Hann window, from a record that starts at `start`."""
+    rng = np.random.default_rng(seed)
+    x = rng.standard_normal((2, n))
+    if extra is not None:
+        x = x + extra
+    y = np.vstack([x[0], 0.8 * x[1]])
+    measured = np.vstack([x + 0.05 * rng.standard_normal((2, n)),
+                          y + 0.1 * rng.standard_normal((2, n))])
+    history = visualdynamics.TimeHistory(
+        start + np.arange(n) / RATE, measured,
+        response_dof=['1Z+', '2Z+', '101Z+', '102Z+'],
+        ordinate_dim=['force', 'force', 'acceleration', 'acceleration'])
+    history.averaging = Averaging(frame_length=512, overlap=0.5).filled(
+        n, RATE)
+    assert history.averaging.window == 'hann'
+    return history
+
+
+def test_the_edges_a_late_start_and_crossing_tones_are_read():
+    """A tone on the first line in one drive and one at the edge of the
+    span in the other, two tones that cross, noise on every channel, and
+    a record that starts 9.5 s in: every line is defined, the multiple
+    coherence of a response made of the first drive is near one at every
+    line and the edges, and the start time changes nothing."""
+    n = 1 << 15
+    t = np.arange(n) / RATE
+    df = RATE / 512
+    tones = np.vstack([
+        np.sin(2 * np.pi * df * t)
+        + np.sin(2 * np.pi * (60.0 * t + 2.0 * t ** 2)),
+        np.sin(2 * np.pi * (RATE / 2 - df) * t)
+        + np.sin(2 * np.pi * (180.0 * t - 2.0 * t ** 2))])
+    early = _drives_and_responses(41, n, extra=tones).read_partial_coherence()
+    late = _drives_and_responses(41, n, start=9.5,
+                                 extra=tones).read_partial_coherence()
+    lines = early.frequency > 0.0
+    assert np.isfinite(early.partial[:, :, lines]).all()
+    assert early.multiple[0, lines].min() > 0.95
+    first, last = np.flatnonzero(lines)[[0, -2]]
+    assert early.multiple[0, first] > 0.95 and early.multiple[0, last] > 0.95
+    np.testing.assert_allclose(late.partial, early.partial)
+    assert early.describe(0).startswith('101Z+ against 2 references, most '
+                                        'explained by 1Z+')
+
+
+def test_independent_drives_are_never_said_to_be_coupled_by_chance():
+    """The coupling rule, checked against what chance gives: twenty
+    records of two independent white-noise drives under the default Hann
+    window, 127 frames. The coherence estimate of independent drives
+    sits near the inverse of the averages and passes 0.9 with a
+    likelihood of 0.1 raised to the averages less one: no pair is named
+    at any line, and the response made of the first drive alone is
+    explained by it every time."""
+    named = 0
+    for seed in range(20):
+        reading = _drives_and_responses(500 + seed).read_partial_coherence()
+        named += len(reading.coupled())
+        assert reading.describe(0).startswith(
+            '101Z+ against 2 references, most explained by 1Z+')
+        lines = reading.frequency > 0.0
+        assert np.nanmedian(reading.reference[0, 1, lines]) < 0.03
+    assert named == 0

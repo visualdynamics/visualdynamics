@@ -81,10 +81,11 @@ PRINCIPAL_FLOOR = 1e-10
 #: to be hard to tell apart
 COUPLED = 0.9
 
-# P7 of the course's audit of the toolset: beside the ordinary and
-# multiple coherence already here, which drive explains a response
-# (partial), and whether the drives were independent (reference and
-# virtual).
+# Beside the ordinary and multiple coherence already here: which drive
+# explains a response (partial), and whether the drives were
+# independent (reference and virtual). `_labels` below is the channel
+# labeling the matrix checks propose as well; it stays here until that
+# lands.
 
 
 def multiple_coherence(grr: np.ndarray, gry: np.ndarray,

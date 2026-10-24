@@ -12,9 +12,14 @@ two channels, the plant [[1, 0.5], [0, 1]] g/V (drive 2 reaches
 channel 1 at half strength) and the target [[1, 0.5j], [-0.5j, 2]]
 times 0.01 g^2/Hz, need the drives
 
-    Z S Z^H = [[1.5, -1 + 0.5j], [-1 - 0.5j, 2]] times 0.01 V^2/Hz,
+    conj(Z) S Z^T = [[1.5, -1 + 0.5j], [-1 - 0.5j, 2]] times 0.01 V^2/Hz,
 
-with Z = [[1, -0.5], [0, 1]] V/g. The shaker's velocity and travel are
+with Z = [[1, -0.5], [0, 1]] V/g. Because that plant is real, it cannot
+tell `conj(H) S H^T` from `H S H^H`; the convention is pinned by
+signals simulated through a complex plant with a complex cross term
+between the drives and read by the package's own `compute_cpsds` and
+`compute_frfs`, which is the truth the prediction has to agree with.
+The shaker's velocity and travel are
 pinned to the closed forms of a flat acceleration autospectrum divided
 by (2 pi f)^2 and (2 pi f)^4.
 """
@@ -175,10 +180,107 @@ def test_an_inverse_out_of_range_is_refused(settings, words):
         regularized_inverse(np.ones((1, 1, 1)), **settings)
 
 
-def test_through_is_h_s_h_conjugate_transposed():
-    h = np.array([[[1.0, 2.0j], [0.0, 1.0]]])
-    s = np.array([[[2.0, 0.5], [0.5, 1.0]]], dtype=complex)
-    assert through(h, s)[0] == pytest.approx(h[0] @ s[0] @ h[0].conj().T)
+def test_through_is_the_conjugated_plant_s_and_the_plant_transposed():
+    h = np.array([[[1.0, 2.0j], [0.5j, 1.0]]])
+    s = np.array([[[2.0, 0.5 + 0.5j], [0.5 - 0.5j, 1.0]]])
+    assert through(h, s)[0] == pytest.approx(h[0].conj() @ s[0] @ h[0].T)
+
+
+def simulated_rig(seconds=100):
+    """Two drives through a complex plant, as the package reads them.
+
+    The drives are white noise, the second carrying the first three
+    samples late, so their cross term turns in phase with frequency.
+    The plant is four short FIR filters, each with its own delays, so
+    every entry of H is complex and differs from line to line. The
+    responses are the drives run through the plant in the time domain.
+    Returns the package's own CPSD matrix of the four channels and its
+    H1 FRF from the two drives, both on the same frames (Hann, half
+    overlap)."""
+    from scipy.signal import lfilter
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+
+    rng = np.random.default_rng(7)
+    fs, frame = 1024.0, 1024
+    n = int(seconds * fs)
+    noise = rng.standard_normal((2, n))
+    drives = [noise[0], 0.9 * np.roll(noise[0], 3) + 0.5 * noise[1]]
+    taps = {(0, 0): [1.0, 0.5], (0, 1): [0.0, 0.0, 0.7],
+            (1, 0): [0.0, 0.3, 0.0, 0.2], (1, 1): [0.8, 0.0, -0.4]}
+    responses = [sum(lfilter(taps[(i, j)], 1.0, drives[j])
+                     for j in range(2)) for i in range(2)]
+    history = TimeHistory(np.arange(n) / fs, np.array(drives + responses),
+                          response_dof=['1X+', '2X+', '1Z+', '2Z+'],
+                          ordinate_dim=['voltage', 'voltage',
+                                        'acceleration', 'acceleration'])
+    averaging = Averaging(frame_length=frame, overlap=0.5,
+                          frames=2 * n // frame - 1)
+    return (history.compute_cpsds(averaging),
+            history.compute_frfs(references=['1X+', '2X+'],
+                                 averaging=averaging, method='H1'))
+
+
+def block(psd, dofs):
+    """The (lines, n, n) matrix of `psd` on `dofs`, entry (a, b) the
+    record whose response is a and reference b."""
+    where = {pair: k for k, pair in
+             enumerate(zip(psd.response_dof, psd.reference_dof))}
+    return np.stack([np.stack([psd.ordinate[where[(a, b)]] for b in dofs],
+                              axis=-1) for a in dofs], axis=-2)
+
+
+def frf_block(frf):
+    plant = np.zeros((len(frf.abscissa), 2, 2), dtype=complex)
+    for k, (r, c) in enumerate(zip(frf.response_dof, frf.reference_dof)):
+        row, column = ['1Z+', '2Z+'].index(r), ['1X+', '2X+'].index(c)
+        plant[:, row, column] = frf.ordinate[k]
+    return plant
+
+
+def test_through_matches_simulated_signals_with_complex_cross_terms():
+    """The responses' CPSD matrix the package measures is the drives'
+    measured matrix through the measured plant, to a few thousandths of
+    a dB on every autospectrum. `H S H^H` misses the same autospectra
+    by several dB, so this test fails if the conjugate moves."""
+    cpsd, frf = simulated_rig()
+    drives, responses = block(cpsd, ['1X+', '2X+']), block(cpsd, ['1Z+', '2Z+'])
+    predicted = through(frf_block(frf), drives)
+    inside = slice(1, -1)
+    for a in range(2):
+        ratio = (np.real(predicted[inside, a, a])
+                 / np.real(responses[inside, a, a]))
+        assert np.abs(10.0 * np.log10(ratio)).max() < 0.02
+    scale = np.sqrt(np.real(responses[inside, 0, 0] * responses[inside, 1, 1]))
+    assert (np.abs(predicted[inside, 0, 1] - responses[inside, 0, 1])
+            / scale).max() < 1e-3
+
+
+def test_predicted_drives_match_the_drives_that_made_the_target():
+    """The responses' measured matrix taken as the specification: the
+    drives predicted through the measured H1 are the drives that were
+    played, autospectra to a few thousandths of a dB and the cross term
+    to a thousandth of its scale, and the control channels meet it."""
+    cpsd, frf = simulated_rig()
+    keep = [k for k, pair in enumerate(zip(cpsd.response_dof,
+                                           cpsd.reference_dof))
+            if set(pair) <= {'1Z+', '2Z+'}]
+    specification = Psd(cpsd.abscissa, cpsd.ordinate[keep],
+                        response_dof=[cpsd.response_dof[k] for k in keep],
+                        reference_dof=[cpsd.reference_dof[k] for k in keep],
+                        ordinate_dim=[cpsd.ordinate_dim[k] for k in keep])
+    prediction = predict_drives(frf, specification)
+    played = block(cpsd, ['1X+', '2X+'])
+    judged = prediction.judged
+    assert judged[1:].all()
+    for a in range(2):
+        ratio = prediction.drive_asd(a)[judged] / np.real(played[judged, a, a])
+        assert np.abs(10.0 * np.log10(ratio)).max() < 0.02
+    scale = np.sqrt(np.real(played[judged, 0, 0] * played[judged, 1, 1]))
+    assert (np.abs(prediction.drive_csd[judged, 0, 1] - played[judged, 0, 1])
+            / scale).max() < 1e-3
+    assert not prediction.unmet.any()
 
 
 def test_runs_are_the_first_and_last_index_of_each_stretch():
@@ -314,6 +416,21 @@ def test_a_line_where_the_frf_is_not_a_number_is_left_out_and_said():
         math.sqrt(0.01 * 396 * 5.0))
 
 
+def test_a_plant_not_a_number_at_zero_hertz_is_not_counted_as_a_line_left_out():
+    """Zero hertz is never predicted, so an FRF that is not a number
+    there leaves out no line the prediction would have made, even where
+    a density on lines is written from zero."""
+    f = lines()
+    frf = siso_frf(f=f)
+    frf.ordinate[0, 0] = np.nan
+    density = Psd(f, np.full((1, len(f)), LEVEL * G ** 2),
+                  response_dof=['1Z+'],
+                  ordinate_dim='acceleration**2/frequency')
+    prediction = predict_drives(frf, density)
+    assert not any('not a number' in note for note in prediction.notes)
+    assert prediction.judged[1:].all() and not prediction.judged[0]
+
+
 def test_a_plant_zero_at_some_lines_says_nothing_can_be_driven_there():
     frf = siso_frf()
     frf.ordinate[0, 40:42] = 0.0
@@ -348,6 +465,38 @@ def test_a_cross_term_held_only_by_its_mirror_is_its_conjugate():
     assert mirrored.drive_csd[k] == pytest.approx(full.drive_csd[k])
 
 
+def test_a_cross_term_and_a_mirror_that_disagree_are_refused():
+    """Both halves written, the second not the first's conjugate: the
+    target between the two channels is not pinned down, so it is refused
+    and not read from whichever record comes first."""
+    spec = matrix_spec(TARGET)
+    k = next(i for i, pair in enumerate(zip(spec.response_dof,
+                                            spec.reference_dof))
+             if pair == ('2Z+', '1Z+'))
+    spec.ordinate[k] = spec.ordinate[k] * (1.0 + 1e-3)
+    with pytest.raises(ValueError, match=r'between 1Z\+ and 2Z\+ are not '
+                       'conjugates of each other'):
+        predict_drives(matrix_frf(TWO), spec)
+
+
+def test_two_records_for_one_entry_are_refused():
+    frf = matrix_frf(TWO)
+    twice = Frf(frf.abscissa, np.vstack([frf.ordinate, frf.ordinate[:1]]),
+                response_dof=list(frf.response_dof) + ['1Z+'],
+                reference_dof=list(frf.reference_dof) + ['1Z+'],
+                ordinate_dim='acceleration/voltage')
+    with pytest.raises(ValueError, match=r'two records of 1Z\+ over 1Z\+'):
+        predict_drives(twice, matrix_spec(TARGET))
+    spec = matrix_spec(TARGET)
+    doubled = Specification(spec.abscissa,
+                            np.vstack([spec.ordinate, spec.ordinate[:1]]),
+                            response_dof=list(spec.response_dof) + ['1Z+'],
+                            reference_dof=list(spec.reference_dof) + ['1Z+'],
+                            ordinate_dim='acceleration**2/frequency')
+    with pytest.raises(ValueError, match=r'two records at 1Z\+, 1Z\+'):
+        predict_drives(matrix_frf(TWO), doubled)
+
+
 def test_any_well_conditioned_plant_reproduces_its_target_exactly():
     rng = np.random.default_rng(31)
     plant = rng.standard_normal((3, 3)) + 1j * rng.standard_normal((3, 3))
@@ -372,6 +521,10 @@ def test_two_nearly_identical_drives_lose_a_direction_and_say_so():
     assert prediction.unmet_bands == [(20.0, 2000.0)]
     assert ('the inverse set aside a direction at 397 lines where the '
             'plant is ill-conditioned') in prediction.notes
+    # and the verdict, which is all the status line shows, says so too
+    assert prediction.describe()[0].endswith(
+        '; short of the target by more than 1 dB in 1 band, where these '
+        'drives are less than the test asks')
     # the plain inverse would have needed drives thousands of times larger
     loose = predict_drives(matrix_frf(plant), matrix_spec(TARGET),
                            tolerance=1e-6)

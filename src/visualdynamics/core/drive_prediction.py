@@ -4,15 +4,20 @@ the test, and what they ask of the amplifiers and the shakers.
 A random test is controlled on spectra. The control channels'
 spectral density matrix is the drives' passed through the plant,
 
-    S_yy = H S_vv H^H,
+    S_yy = conj(H) S_vv H^T,
 
 at every line, where `H` is the FRF matrix from the drives to the
 control channels (one row per control channel, one column per drive,
 in g/V or (m/s^2)/V), `S_vv` the drives' spectral density matrix and
-`H^H` the conjugate transpose of `H`. Turned round, the drives that
+`H^T` the transpose of `H`. The conjugate is on the left because a
+cross term between channels a and b is stored as conj(X_a) X_b
+(`TimeHistory.compute_cpsds`), so outputs Y = H V have the matrix
+E[conj(Y) Y^T] = conj(H) E[conj(V) V^T] H^T. Written the other way
+round, `H S_vv H^H` gives other autospectra wherever the plant and the
+cross terms are both complex. Turned round, the drives that
 would produce a target `S_ref` are
 
-    S_vv = Z S_ref Z^H,
+    S_vv = conj(Z) S_ref Z^T,
 
 with `Z` an inverse of `H`. On one drive and one control channel the
 matrices are single numbers and this is the drive autospectrum a
@@ -37,12 +42,12 @@ it is regularized, in one of two stated ways:
   growing without limit. On one channel it is `H* / (|H|^2 + lambda)`.
 
 Either way the prediction carries the control channels' response to
-the drives it predicts, `H S_vv H^H`, and the lines where that misses
+the drives it predicts, `conj(H) S_vv H^T`, and the lines where that misses
 the target by more than `UNMET_DB` are the lines the regularization
 gave up, named as bands. Any other channel the FRF holds against the
 same drives (a force gauge, a current monitor, an accelerometer on the
 article) is predicted the same way, its autospectrum the diagonal of
-`H_u S_vv H_u^H`.
+`conj(H_u) S_vv H_u^T`.
 
 The prediction is open loop, made once, before anything is played: it
 is what a controller's first drive would be with this FRF as its plant
@@ -91,8 +96,8 @@ regularized inverse is Tikhonov's, in the form Hansen sets out.
 
 1. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
    Measurement Procedures*, 4th ed. Wiley. The output spectral density
-   matrix of a multiple-input linear system, `S_yy = H S_xx H^H`, and
-   the expected largest peak of a stationary Gaussian process.
+   of a multiple-input linear system and the expected largest peak of
+   a stationary Gaussian process.
 2. Golub, G. H., & Van Loan, C. F. (2013). *Matrix Computations*, 4th
    ed. Johns Hopkins University Press. The singular value
    decomposition, the pseudo-inverse and its truncation at a relative
@@ -146,12 +151,10 @@ UNMET_DB = 1.0
 #: the share of a quantity's mean square its dominant band holds
 DOMINANT_SHARE = 0.5
 
-# The matrix assembly below (`_labels`, `_plant`, `runs`) mirrors the
-# FRF matrix builder, the channel labels and the flagged runs proposed
-# beside the conditioning check (`matrix_checks.frf_matrix`, `_labels`,
-# `flagged_runs`). They stay here until those land: `_plant` keys a
-# channel by its declared dimension and refuses one that is not, and
-# `runs` gives line indices where `flagged_runs` gives frequencies.
+# `_plant` keys a channel by its declared dimension and refuses one
+# that is not declared, so a drive point's accelerometer and its force
+# gauge are two channels and never one; `runs` gives line indices, which
+# is what the unmet lines are counted in.
 
 
 # ---- the inverse ------------------------------------------------------------
@@ -241,15 +244,16 @@ def regularized_inverse(plant: Any, *, method: str = 'truncated',
 
 
 def through(plant: Any, density: Any) -> np.ndarray:
-    """`plant` times `density` times the plant's conjugate transpose,
-    at every line: the spectral density matrix of the outputs of a
-    linear system whose inputs have the spectral density matrix
-    `density`. With an inverse for `plant`, the inputs that produce a
-    target. Both (lines, ...) arrays; the result is (lines, rows,
-    rows)."""
+    """The plant's conjugate times `density` times the plant's
+    transpose, `conj(H) S H^T`, at every line: the spectral density
+    matrix of the outputs of a linear system whose inputs have the
+    spectral density matrix `density`, each cross term stored as
+    `compute_cpsds` stores it, conj(X_a) X_b. With an inverse for
+    `plant`, the inputs that produce a target. Both (lines, ...)
+    arrays; the result is (lines, rows, rows)."""
     plant = np.asarray(plant, dtype=np.complex128)
     density = np.asarray(density, dtype=np.complex128)
-    return plant @ density @ np.conj(np.swapaxes(plant, 1, 2))
+    return np.conj(plant) @ density @ np.swapaxes(plant, 1, 2)
 
 
 # ---- channels and the two matrices --------------------------------------------
@@ -297,7 +301,14 @@ def _plant(frf: Frf) -> tuple[list[tuple[str, str]], list[tuple[str, str]],
             rows.append(row)
         if column not in columns:
             columns.append(column)
-        keys.append((rows.index(row), columns.index(column)))
+        key = (rows.index(row), columns.index(column))
+        if key in keys:
+            # two plants for one entry: which one was meant is not in
+            # the data, and taking either would be a guess
+            raise ValueError(
+                f'the FRF holds two records of {frf.response_dof[i]} over '
+                f'{frf.reference_dof[i]}; keep one')
+        keys.append(key)
     drives = sorted({quantity for _dof, quantity in columns})
     if len(drives) > 1:
         raise ValueError(
@@ -358,6 +369,11 @@ def _read_target(specification: Psd, channels: list[tuple[str, str]],
                 'them first')
         row = _channel(specification.response_dof[i], dimension, 0)
         column = _channel(references[i], dimension, 1)
+        if (row, column) in held:
+            raise ValueError(
+                f'the specification holds two records at '
+                f'{specification.response_dof[i]}, {references[i]}; '
+                'keep one')
         held[(row, column)] = i
     labels = _labels(channels)
     n = len(channels)
@@ -380,6 +396,20 @@ def _read_target(specification: Psd, channels: list[tuple[str, str]],
                     'channels the drives depend on how each pair moves '
                     'together, so every pair has to be written')
             values = ordinate[record]
+            if a != b and pair in held and mirror in held:
+                # a cross term and its mirror are one statement, each the
+                # other's conjugate; two that disagree leave the target
+                # unread rather than read from whichever comes first
+                other = np.conj(ordinate[held[mirror]])
+                scale = max(float(np.max(np.abs(values), initial=0.0)),
+                            float(np.max(np.abs(other), initial=0.0)))
+                if not np.allclose(values, other, rtol=1e-6,
+                                   atol=1e-9 * scale):
+                    raise ValueError(
+                        'the cross terms of the specification between '
+                        f'{labels[a]} and {labels[b]} are not conjugates '
+                        'of each other, so the target between them '
+                        'cannot be read; keep one or make them agree')
             if a == b:
                 values = np.real(values)
                 read = (log_interpolate(lines, specification.abscissa, values)
@@ -723,8 +753,15 @@ class DrivePrediction:
                          f'{100.0 * first.share:.0f} % '
                          f'({self.headroom_db:.1f} dB of headroom), most at '
                          f'{first.frequency:.4g} Hz')
-        lines.extend(d.describe(unit_system) for d in self.demands)
         bands = self.unmet_bands
+        if bands:
+            # the verdict is read on the status line alone, and drives
+            # that fall short of the target ask less of the rig than the
+            # test will: the shortfall travels with the verdict
+            lines[0] += (f'; short of the target by more than {UNMET_DB:g} dB'
+                         f' in {len(bands)} band{"s" * (len(bands) != 1)}, '
+                         'where these drives are less than the test asks')
+        lines.extend(d.describe(unit_system) for d in self.demands)
         if bands:
             spans = ', '.join(f'{lo:.4g} Hz' if lo == hi else
                               f'{lo:.4g} to {hi:.4g} Hz'
@@ -800,10 +837,11 @@ def predict_drives(frf: Frf, specification: Psd, *,
     to the control channels and to any other channel measured against
     the same drives; the specification names the control channels, a
     full cross-spectral matrix when there are several and its
-    autospectrum when there is one. The drives are `Z S_ref Z^H` at
-    every line, with `Z` the regularized inverse `method` names, and the
-    module docstring says how each is regularized, how the peaks are
-    read and what each rating is judged against. The prediction is open
+    autospectrum when there is one. The drives are `conj(Z) S_ref Z^T`
+    at every line, with `Z` the regularized inverse `method` names, and
+    the module docstring says how each is regularized and why the
+    conjugate is on the left, how the peaks are read and what each
+    rating is judged against. The prediction is open
     loop: what a controller's first drive would be with this FRF as its
     plant, made once.
 

@@ -18,14 +18,16 @@ correction.
 The control channels' spectral density matrix is the drives' passed
 through the plant,
 
-    S_yy = H S_vv H^H
+    S_yy = conj(H) S_vv H^T
 
 at every line: `H` the FRF matrix from the drives to the control
 channels (a row per channel, a column per drive, in g/V), `S_vv` the
-drives' matrix, `H^H` the conjugate transpose of `H`. Turned round, the
+drives' matrix, `H^T` the transpose of `H`. The conjugate sits on the
+left because the package stores the cross term between channels a and b
+as conj(X_a)·X_b, the way `compute_cpsds` computes it. Turned round, the
 drives that make a target `S_ref` are
 
-    S_vv = Z S_ref Z^H
+    S_vv = conj(Z) S_ref Z^T
 
 with `Z` an inverse of `H`. On one drive and one channel this is the
 drive spectrum a controller starts from, the target over the plant
@@ -48,7 +50,7 @@ is made of noise. The inverse is regularized in one of two stated ways:
 
 A regularized inverse no longer meets the target everywhere. The
 prediction carries the control channels' own response to the drives it
-predicts, `H S_vv H^H`, and the lines where an autospectrum misses the
+predicts, `conj(H) S_vv H^T`, and the lines where an autospectrum misses the
 target by more than 1 dB (`UNMET_DB`) are named. Those are the lines the
 inverse gave up; the cross terms are the matrix comparison's business,
 not this reading's.

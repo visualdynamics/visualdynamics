@@ -140,6 +140,16 @@ def render_html(report: Report, objects: Mapping[str, Any],
     fixes the page's theme, which otherwise follows the reader's.
     """
     # All editing moved to the app's bar and pane on 2026-09-08.
+    payload = _report_payload(report, objects, unit_system, edit,
+                              object_groups, selected, labels, fill, theme)
+    return _page_html(payload, edit, channel_js)
+
+
+def _report_payload(report, objects, unit_system=None, edit=False,
+                    object_groups=None, selected=None, labels=None,
+                    fill=False, theme=None) -> dict[str, Any]:
+    """The data a report's page draws from, as `render_html` describes
+    its arguments: one JSON-ready dict, already in display units."""
     us = unit_system or DEFAULT_SYSTEM
     from ..theme import DARK, LIGHT, VIRIDIS
 
@@ -213,6 +223,12 @@ def render_html(report: Report, objects: Mapping[str, Any],
         if built['kind'] == 'text':
             built['html'] = to_html(
                 _resolve_figures(built.pop('text'), labeled))
+    return payload
+
+
+def _page_html(payload, edit=False, channel_js=None) -> str:
+    """The one-file page around a payload: its stylesheet, its viewers
+    and the payload itself inline."""
     data = json.dumps(payload, allow_nan=False)
     scripts = _JS + (_EDIT_JS if edit else '')
     shell = _PAGE
@@ -231,7 +247,7 @@ def render_html(report: Report, objects: Mapping[str, Any],
                 '</script>')
         shell = shell.replace('<script id="data"',
                               trap + channel + '\n<script id="data"')
-    return (shell.replace('__TITLE__', html_escape.escape(report.title))
+    return (shell.replace('__TITLE__', html_escape.escape(payload['title']))
                  .replace('__DATA__', data.replace('</', '<\\/'))
                  .replace('__CSS__', _CSS + (_EDIT_CSS if edit else ''))
                  .replace('__JS__', scripts))
@@ -3048,6 +3064,212 @@ from .page import (
     _PAGE,
 )
 
+#: the fewest points a trimmed curve may keep: below this a curve
+#: draws a few segments, not its shape, and a request for it is more
+#: likely a slip than a wish
+MIN_TRIM_POINTS = 16
+
+
+def _only_channels(obj: Any, channels: Sequence[str]) -> Any:
+    """A copy of `obj` holding only its records at `channels`, the
+    response DOFs as the legend names them ('101Z+'), or None when it
+    holds none of them. The copy is made with the object's own
+    `delete_records`, so a specification's limit curves go with their
+    records."""
+    import copy
+
+    held = [str(dof) for dof in obj.response_dof]
+    keep = {str(channel) for channel in channels}
+    doomed = [i for i, dof in enumerate(held) if dof not in keep]
+    if len(doomed) == len(held):
+        return None
+    out = copy.deepcopy(obj)
+    if doomed:
+        out.delete_records(doomed)
+    return out
+
+
+def _numeric_list(value: Any) -> bool:
+    return (isinstance(value, list) and bool(value)
+            and all(v is None or (isinstance(v, (int, float))
+                                  and not isinstance(v, bool))
+                    for v in value))
+
+
+def _lists_of_length(node: Any, length: int, found: list) -> None:
+    """Every list of numbers `length` long anywhere under `node`: on a
+    plot, the arrays drawn on one abscissa of that many points."""
+    if isinstance(node, dict):
+        for value in node.values():
+            _lists_of_length(value, length, found)
+    elif _numeric_list(node):
+        # one list can hang in two places (a zone's edge is the limit's
+        # own); it is thinned once
+        if len(node) == length and all(node is not f for f in found):
+            found.append(node)
+    elif isinstance(node, list):
+        for value in node:
+            _lists_of_length(value, length, found)
+
+
+def _thin_together(values: list, riders: list, budget: int
+                   ) -> tuple[int, int]:
+    """Thin `values` and `riders`, all on one abscissa, in place to the
+    same points: those that keep every extreme of every one of `values`
+    (`decimate.shared_peak_indices`). The riders, an abscissa, go along.
+    Returns (drawn, held)."""
+    from ..decimate import shared_peak_indices
+
+    held = len(values[0])
+    rows = np.array([[np.nan if v is None else v for v in a]
+                     for a in values], dtype=float)
+    keep = shared_peak_indices(rows, budget)
+    for array in values + riders:
+        array[:] = [array[i] for i in keep]
+    return len(keep), held
+
+
+def _unstep(node: Any, held: int) -> None:
+    """Draw thinned densities as lines: a stepped curve is flat across
+    each of its bins, between bin edges one longer than its values, and
+    once most bins are gone the edges left describe none of them. Past
+    a few hundred lines a line through the kept centers draws the same
+    picture."""
+    if isinstance(node, dict):
+        edges = node.get('edges')
+        if _numeric_list(edges) and len(edges) == held + 1:
+            del node['edges']
+        if node.get('steps'):
+            node['steps'] = False
+        for value in node.values():
+            _unstep(value, held)
+    elif isinstance(node, list):
+        for value in node:
+            _unstep(value, held)
+
+
+def _trim_plot(block: dict, budget: int) -> None:
+    """One plot's curves thinned to `budget` points each, in place.
+
+    A plot's arrays share its `x` unless a curve brings an `x` of its
+    own. The shared ones are thinned together, so a band still lies
+    between points that are above one another, and a curve with its own
+    abscissa is thinned with its own arrays alone. Either way every
+    extreme of every curve is kept, and the figure's note says the data
+    was thinned, as every thinned figure's does (`_thinned_note`).
+    """
+    def thin(node, abscissa):
+        found = []
+        _lists_of_length(node, len(abscissa), found)
+        values = [a for a in found if a is not abscissa] or [abscissa]
+        drawn, held = _thin_together(values, [abscissa], budget)
+        _unstep(node, held)
+        return drawn, held
+
+    thinned = [thin(curve, curve['x']) for curve in block.get('curves', [])
+               if _numeric_list(curve.get('x'))
+               and len(curve['x']) > budget]
+    if _numeric_list(block.get('x')) and len(block['x']) > budget:
+        thinned.append(thin(block, block['x']))
+    if thinned:
+        note = _thinned_note(max(d for d, _ in thinned),
+                             max(h for _, h in thinned))
+        block['note'] = (block['note'] + ' ' + note
+                         if block.get('note') else note)
+
+
+def _trim_plots(node: Any, budget: int) -> None:
+    """Every plot under `node` (a payload, a block, a grid's cells)
+    thinned to `budget` points a curve."""
+    if isinstance(node, dict):
+        if node.get('kind') == 'plot':
+            _trim_plot(node, budget)
+            return
+        for value in node.values():
+            _trim_plots(value, budget)
+    elif isinstance(node, list):
+        for value in node:
+            _trim_plots(value, budget)
+
+
+#: how a complex plot can be read, as the app's drop-down reads it
+COMPONENTS = ('magnitude', 'phase', 'real', 'imag')
+
+
+def _figure_payload(data, specification, channel, mode, geometry, shapes,
+                    dofs, name, caption, theme, unit_system, fill,
+                    channels, max_points,
+                    component='magnitude') -> dict[str, Any]:
+    """The payload of one figure, as `export_html` and `export_figure`
+    both write it: built as a report of one block would be, then
+    narrowed to `channels` and thinned to `max_points`."""
+    from ..core.report import Report
+    from ..project import Project
+
+    if component not in COMPONENTS:
+        raise ValueError(f'component is {component!r}; a plot reads as '
+                         f'one of {", ".join(COMPONENTS)}')
+    if max_points is not None and int(max_points) < MIN_TRIM_POINTS:
+        raise ValueError(f'max_points is {max_points}; a curve keeps at '
+                         f'least {MIN_TRIM_POINTS} points')
+    if channels is not None:
+        if isinstance(channels, str):
+            channels = [channels]
+        if data is None or not hasattr(data, 'response_dof'):
+            raise ValueError('channels choose the records of the data a '
+                             'plot draws; this figure has none')
+        narrowed = _only_channels(data, channels)
+        if narrowed is None:
+            raise ValueError(
+                f'none of {list(channels)} is a channel of the data; it '
+                f'holds {sorted({str(d) for d in data.response_dof})}')
+        missing = sorted(set(map(str, channels))
+                         - {str(d) for d in narrowed.response_dof})
+        if missing:
+            raise ValueError(f'{missing} not among the data\'s channels')
+        data = narrowed
+        if specification is not None:
+            specification = (_only_channels(specification, channels)
+                             or specification)
+    holder = Project('Figure')
+    if geometry is not None:
+        holder.add('Geometry', geometry)
+        block = {'kind': 'scene', 'geometry': 'Geometry', 'shapes': '',
+                 'caption': caption}
+        if shapes is not None:
+            holder.add('Shapes', shapes)
+            holder.link('Geometry', 'Shapes')
+            block['shapes'] = 'Shapes'
+        if dofs is not None:
+            quantity, source = dofs
+            holder.add('Measured', source)
+            block.update(dofs=quantity, dofs_source='Measured')
+    elif data is not None:
+        label = name or ('Response' if specification is not None else 'Data')
+        holder.add(label, data)
+        block = {'kind': 'plot', 'source': label, 'mode': mode,
+                 'caption': caption}
+        if specification is not None:
+            holder.add('Specification', specification)
+            block['specification'] = 'Specification'
+        if channel is not None:
+            block['channel'] = channel
+        if component != 'magnitude':
+            block['component'] = component
+    else:
+        raise ValueError('a figure needs data to plot or a geometry '
+                         'to show')
+    report = Report('', [block], marking='')
+    payload = _report_payload(report, dict(holder.items()), unit_system,
+                              object_groups=holder.object_groups,
+                              fill=fill, theme=theme)
+    if not payload['blocks']:
+        raise ValueError('nothing in the figure could be drawn: the '
+                         'data, specification and channel do not meet')
+    if max_points is not None:
+        _trim_plots(payload['blocks'], int(max_points))
+    return payload
+
 
 def export_html(path: str | os.PathLike, data: Any = None, *,
                 specification: Any = None, channel: str | None = None,
@@ -3056,7 +3278,10 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
                 name: str | None = None, caption: str = '',
                 theme: str | None = None,
                 unit_system: UnitSystem | None = None,
-                fill: bool = True) -> str:
+                fill: bool = True,
+                channels: Sequence[str] | None = None,
+                max_points: int | None = None,
+                component: str = 'magnitude') -> str:
     """Write one interactive figure as a single self-contained HTML file.
 
         visualdynamics.export_html('spec.html', psd, specification=spec,
@@ -3076,6 +3301,13 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
     Otherwise it is a plot of `data`, against `specification` and its
     zones when one is given, of one `channel` when named, in `mode`
     ('curves', 'stage', 'cmif', 'mac' or 'map').
+
+    `channels` and `max_points` make the file smaller: the first keeps
+    only those records of `data` (and of `specification`), the second
+    thins every curve of a plot to that many points, keeping every
+    peak and dip, and says so under the figure. `export_figure` writes
+    the same figure as a data file and a script, for a page that cannot
+    carry an inline script.
 
     Parameters
     ----------
@@ -3105,6 +3337,13 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
         The units it is drawn in.
     fill : bool, default True
         Fill the frame; False lays it out as the report page does.
+    channels : sequence of str, optional
+        The records of `data` to keep, by response DOF ('101Z+').
+    max_points : int, optional
+        The most points a plot's curve keeps; at least 16.
+    component : {'magnitude', 'phase', 'real', 'imag'}, default 'magnitude'
+        How a plot of complex data reads, as the app's drop-down
+        reads it.
 
     Returns
     -------
@@ -3114,44 +3353,130 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
     Raises
     ------
     ValueError
-        When neither `data` nor `geometry` is given.
+        When neither `data` nor `geometry` is given, when `channels`
+        names a channel `data` does not hold, when nothing of the
+        figure can be drawn, when `max_points` is under 16, or when
+        `component` is not one of the four.
     """
     # `fill` was added for an interactive slide deck made by the scripts
     # that draw a paper's printed figures (Brandon, 2026-09-27).
     import pathlib
 
-    from ..core.report import Report
-    from ..project import Project
-
-    holder = Project('Figure')
-    if geometry is not None:
-        holder.add('Geometry', geometry)
-        block = {'kind': 'scene', 'geometry': 'Geometry', 'shapes': '',
-                 'caption': caption}
-        if shapes is not None:
-            holder.add('Shapes', shapes)
-            holder.link('Geometry', 'Shapes')
-            block['shapes'] = 'Shapes'
-        if dofs is not None:
-            quantity, source = dofs
-            holder.add('Measured', source)
-            block.update(dofs=quantity, dofs_source='Measured')
-    elif data is not None:
-        label = name or ('Response' if specification is not None else 'Data')
-        holder.add(label, data)
-        block = {'kind': 'plot', 'source': label, 'mode': mode,
-                 'caption': caption}
-        if specification is not None:
-            holder.add('Specification', specification)
-            block['specification'] = 'Specification'
-        if channel is not None:
-            block['channel'] = channel
-    else:
-        raise ValueError('export_html needs data to plot or a geometry '
-                         'to show')
-    report = Report('', [block], marking='')
-    html = render_html(report, dict(holder.items()), unit_system,
-                       object_groups=holder.object_groups, fill=fill, theme=theme)
+    payload = _figure_payload(data, specification, channel, mode, geometry,
+                              shapes, dofs, name, caption, theme,
+                              unit_system, fill, channels, max_points,
+                              component)
     path = pathlib.Path(path)
-    path.write_text(html, encoding='utf-8')
+    path.write_text(_page_html(payload), encoding='utf-8')
+    return str(path)
+
+
+def export_figure(path: str | os.PathLike, data: Any = None, *,
+                  renderer: str | os.PathLike | None = None,
+                  specification: Any = None, channel: str | None = None,
+                  mode: str = 'curves', geometry: Any = None,
+                  shapes: Any = None,
+                  dofs: tuple[str, Any] | None = None,
+                  name: str | None = None, caption: str = '',
+                  theme: str | None = None,
+                  unit_system: UnitSystem | None = None,
+                  fill: bool = False,
+                  channels: Sequence[str] | None = None,
+                  max_points: int | None = None,
+                  component: str = 'magnitude') -> str:
+    """Write one interactive figure as a JSON data file, and optionally
+    the script that draws it, for a page that mounts the figure itself.
+
+        visualdynamics.export_figure('spec.json', psd, specification=spec,
+                                     channel='101Z+', theme='light',
+                                     renderer='visualdynamics-figure.js')
+
+    The figure is the one `export_html` writes, split in two. The data
+    file holds this figure alone. The renderer is one script for every
+    figure, the same viewers the HTML file carries; a page loads it from
+    its own site and draws a figure into an element of its own:
+
+        <div id="spec"></div>
+        <script src="visualdynamics-figure.js"></script>
+        <script src="page.js"></script>   // VisualDynamicsFigure.load(
+                                          //   element, 'spec.json')
+
+    So a page whose Content-Security-Policy allows no inline script and
+    no frames can still show the figure. `VisualDynamicsFigure.mount(
+    element, data, options)` draws data already fetched, and `load(
+    element, url, options)` fetches it first; with ``{pageScroll:
+    true}`` the figure leaves the wheel and a vertical swipe to the
+    page and zooms on Ctrl or Cmd with the wheel. The figure's styles
+    are scoped to that element. The renderer refuses data written for
+    another format (`FIGURE_FORMAT`), so a page never draws a figure it
+    would misread.
+
+    Parameters
+    ----------
+    path : str or path-like
+        Where the .json goes.
+    data : DataArray or ShapeSet, optional
+        What a plot draws.
+    renderer : str or path-like, optional
+        Where to write the renderer script as well. It is the same for
+        every figure this version writes, so a page needs it once.
+    specification : Specification, optional
+        What `data` is drawn against.
+    channel : str, optional
+        The one control channel of a comparison to draw.
+    mode : str, default 'curves'
+        The plot's reading.
+    geometry : Geometry, optional
+        Makes the figure a scene.
+    shapes : ShapeSet, optional
+        What the scene animates.
+    dofs : (str, object), optional
+        A quantity and an object: its DOFs of that quantity, as arrows.
+    name : str, optional
+        What the legend calls `data`.
+    caption : str, optional
+        A line under the figure.
+    theme : {'light', 'dark'}, optional
+        Fixes the figure's theme; unset, it follows the reader's.
+    unit_system : UnitSystem, optional
+        The units it is drawn in.
+    fill : bool, default False
+        Lay the figure out as the report page does, at its own height;
+        True fills the element, which must then have a height.
+    channels : sequence of str, optional
+        The records of `data` to keep, by response DOF ('101Z+').
+    max_points : int, optional
+        The most points a plot's curve keeps; at least 16.
+    component : {'magnitude', 'phase', 'real', 'imag'}, default 'magnitude'
+        How a plot of complex data reads, as the app's drop-down
+        reads it.
+
+    Returns
+    -------
+    str
+        The data file's path.
+
+    Raises
+    ------
+    ValueError
+        As `export_html` raises them.
+    """
+    import pathlib
+
+    from .. import __version__
+    from .page import FIGURE_FORMAT, renderer_js
+
+    payload = _figure_payload(data, specification, channel, mode, geometry,
+                              shapes, dofs, name, caption, theme,
+                              unit_system, fill, channels, max_points,
+                              component)
+    payload['format'] = FIGURE_FORMAT
+    path = pathlib.Path(path)
+    path.write_text(json.dumps(payload, allow_nan=False, separators=(',', ':')),
+                    encoding='utf-8')
+    if renderer is not None:
+        # the same bytes on every platform, so a site that keeps a copy
+        # sees a change only when the renderer changed
+        pathlib.Path(renderer).write_text(renderer_js(__version__),
+                                          encoding='utf-8', newline='\n')
     return str(path)

@@ -80,7 +80,7 @@ from .project import (
     system_id_report,
     system_id_run,
 )
-from .report import export_html
+from .report import export_figure, export_html
 from .units import (
     DEFAULT_SYSTEM,
     FT_LBF_S,
@@ -198,6 +198,7 @@ __all__ = [
     '__version__',
     'check_compatibility',
     'convert',
+    'export_figure',
     'export_file',
     'export_html',
     'fem',

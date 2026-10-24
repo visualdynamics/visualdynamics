@@ -63,6 +63,67 @@ def peak_decimate_rows(x: ArrayLike, rows: ArrayLike,
     return [(x[keep], rows[k][keep]) for k, keep in enumerate(kept)]
 
 
+def shared_peak_indices(rows: ArrayLike, budget: int) -> np.ndarray:
+    """The samples of one shared abscissa to keep, at most `budget` of
+    them, so that every row keeps its extremes.
+
+    `peak_decimate_rows` gives each row its own positions, which suits
+    curves drawn on their own. Rows that share an abscissa on the page,
+    a measurement and the limits shaded about it, must keep one set of
+    positions between them, or a band is shaded between points that are
+    not above each other. This keeps, for every slice of the samples,
+    the smallest and largest value of every row, with the slices as fine
+    as the budget allows, and the first and last sample so the extent is
+    unchanged. Rows with fewer than `budget` samples keep them all.
+
+    Parameters
+    ----------
+    rows : array_like
+        (rows, samples) values on one abscissa; NaN marks a gap.
+    budget : int
+        The most samples to keep, at least two for each row and two for
+        the ends.
+
+    Returns
+    -------
+    numpy.ndarray
+        Sorted sample indices.
+
+    Raises
+    ------
+    ValueError
+        If the budget cannot hold one slice's extremes for every row.
+    """
+    rows = np.atleast_2d(np.asarray(rows, dtype=float))
+    count, samples = rows.shape
+    budget = int(budget)
+    if samples <= budget:
+        return np.arange(samples)
+    if budget < 2 * count + 2:
+        raise ValueError(f'{budget} points cannot keep the extremes of '
+                         f'{count} curves; at least {2 * count + 2} can')
+    ends = np.array([0, samples - 1])
+
+    def kept(bins):
+        return np.unique(np.concatenate(
+            [ends, *_extreme_indices(rows, bins)]))
+
+    # the most slices whose extremes fit: rows that rise and fall
+    # together share most of theirs, so the answer usually lies well
+    # above budget / (2 * rows), and a bisection finds it in a dozen
+    # vectorized passes
+    low, high = 1, budget // 2
+    best = kept(low)
+    while low < high:
+        middle = (low + high + 1) // 2
+        trial = kept(middle)
+        if len(trial) <= budget:
+            low, best = middle, trial
+        else:
+            high = middle - 1
+    return best
+
+
 def _extreme_indices(rows: np.ndarray, bins: int) -> list[np.ndarray]:
     """Per record, the sorted sample indices keeping each slice's extremes.
 

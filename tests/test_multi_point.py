@@ -491,3 +491,148 @@ def test_the_standalone_plot_writes_its_file(qt_app, tmp_path):
                                path=path, show=False)
     assert str(written) == str(path)
     assert path.stat().st_size > 2000
+
+
+# ---- the reading in the window ---------------------------------------------------
+
+
+def _composite_pair(window, pump, *factors, channels=None):
+    """A reference at the control channels and a run with these
+    factors, both in the window and selected, on the Composite
+    reading."""
+    from conftest import select_objects
+
+    dofs = [f'{k + 1}Z+' for k in range(len(factors))]
+    spec = reference(tuple(channels or dofs))
+    window.add_object('Reference', spec)
+    window.add_object('Run', run(*factors))
+    select_objects(window, pump, 'Reference', 'Run')
+    window.data_pane.comparison_actions['composite'].trigger()
+    pump()
+    return spec
+
+
+def test_the_composite_is_a_reading_of_a_random_comparison(window, pump):
+    """Offered beside Spectra, RMS Error and Lines Out, and choosing it
+    puts the panel up and the reading in it and on the status line."""
+    _composite_pair(window, pump, 1.5, 1.5, 0.0)
+    pane = window.data_pane
+    action = pane.comparison_actions['composite']
+    assert action.isVisible() and action.text() == 'Composite'
+    assert pane.comparison_view == 'composite'
+    panel = pane.multi_point_panel
+    assert panel.isVisible()
+    assert panel.derived['channels'].text() == '3'
+    assert panel.readout.text().splitlines()[:4] == [
+        ('composite, average of 3: 0 lines outside the warning limits '
+        '(0.0 %)'),
+        '1Z+: 0 lines outside −6/+6 dB',
+        '2Z+: 0 lines outside −6/+6 dB',
+        (f'3Z+: {JUDGED} lines outside −6/+6 dB, {JUDGED} with the '
+        'composite inside')]
+    assert 'reads zero at every line' in panel.readout.text()
+    assert window._status_text.endswith(
+        f'outside their own band where it is inside: 3Z+ ({JUDGED})')
+
+
+def test_one_control_channel_is_not_offered_a_composite(window, pump):
+    """A reference at one channel: the comparison has its three readings
+    and no fourth, and a Composite chosen before reads as the spectra."""
+    from conftest import select_objects
+
+    pane = window.data_pane
+    pane.comparison_view = 'composite'
+    window.add_object('Reference', reference(('1Z+',)))
+    window.add_object('Run', run(1.0, 1.0))
+    select_objects(window, pump, 'Reference', 'Run')
+    assert pane.comparison_actions['curves'].isVisible()
+    assert not pane.comparison_actions['composite'].isVisible()
+    assert pane.comparison_actions['curves'].isChecked()
+    assert not pane.multi_point_panel.isVisible()
+
+
+def test_the_panels_strategy_and_bands_redraw_the_reading(window, pump):
+    """The hot spot of four: inside its own band once the band is
+    widened to +7 dB; under maximum control the composite is the hot
+    channel and out; the weights row shows only when weighted."""
+    _composite_pair(window, pump, 4.4, 1.0, 1.0, 1.0)
+    panel = window.data_pane.multi_point_panel
+    assert not panel.weights_edit.isVisibleTo(panel)
+    assert f'1Z+: {JUDGED} lines outside' in panel.readout.text()
+    panel.individual_high.setValue(7.0)
+    pump()
+    assert '1Z+: 0 lines outside −6/+7 dB' in panel.readout.text()
+    panel.set_settings(strategy='maximum')
+    pump()
+    first = panel.readout.text().splitlines()[0]
+    assert first.startswith(f'composite, maximum of 4: {JUDGED} lines '
+                            'outside the warning limits')
+    panel.set_settings(strategy='weighted')
+    pump()
+    assert panel.weights_edit.isVisibleTo(panel)
+    assert panel.weights_edit.text() == '1, 1, 1, 1'
+
+
+def test_weights_that_do_not_fit_say_why_and_draw_nothing(window, pump):
+    _composite_pair(window, pump, 1.0, 1.0)
+    panel = window.data_pane.multi_point_panel
+    panel.set_settings(strategy='weighted')
+    panel.weights_edit.setText('1, 2, 3')
+    panel.weights_edit.editingFinished.emit()
+    pump()
+    assert panel.readout.text() == '3 weights for 2 channels; give one per ' \
+                                   'channel'
+    assert panel.derived['channels'].text() == '—'
+    assert window.data_pane.graphics.getItem(0, 0) is None
+    panel.weights_edit.setText('1, x')
+    panel.weights_edit.editingFinished.emit()
+    pump()
+    assert panel.readout.text().startswith('the weights are numbers')
+
+
+def test_the_composite_band_starts_on_the_specifications_limits(window, pump):
+    """The reference carries warning limits and no abort: the composite
+    box offers the warning limits and a band in dB, starts on the
+    limits, and the channel box starts on a band in dB."""
+    _composite_pair(window, pump, 1.0, 1.0)
+    panel = window.data_pane.multi_point_panel
+    keys = [panel.composite_box.itemData(i)
+            for i in range(panel.composite_box.count())]
+    assert keys == ['warning', 'db']
+    assert panel.settings()['composite_band'] == 'warning'
+    assert panel.settings()['individual_band'] == INDIVIDUAL_DB
+    assert not panel.composite_low.isVisibleTo(panel)
+    assert panel.individual_low.isVisibleTo(panel)
+
+
+def test_the_composite_reading_is_journaled_as_its_plot_call(window, pump):
+    _composite_pair(window, pump, 1.5, 1.5, 0.0)
+    panel = window.data_pane.multi_point_panel
+
+    def journaled():
+        return [line for line in window.project.journal
+                if line.startswith('visualdynamics.plot.plot_multi_point(')]
+
+    assert journaled() == [
+        ("visualdynamics.plot.plot_multi_point(project['Run'], "
+        "project['Reference'], channels=['1Z+', '2Z+', '3Z+'], "
+        "strategy='average', composite_band='warning', "
+        "individual_band=(-6.0, 6.0), path='multi_point.png', show=False)")]
+    panel.set_settings(strategy='weighted', weights=(2.0, 1.0, 1.0),
+                       composite_band=(-2.0, 2.0))
+    pump()
+    assert journaled() == [
+        ("visualdynamics.plot.plot_multi_point(project['Run'], "
+        "project['Reference'], channels=['1Z+', '2Z+', '3Z+'], "
+        "strategy='weighted', weights=[2.0, 1.0, 1.0], "
+        "composite_band=(-2.0, 2.0), individual_band=(-6.0, 6.0), "
+        "path='multi_point.png', show=False)")]
+
+
+def test_leaving_the_composite_puts_the_panel_away(window, pump):
+    _composite_pair(window, pump, 1.0, 1.0)
+    pane = window.data_pane
+    assert pane.multi_point_panel.isVisible()
+    pane.comparison_actions['error'].trigger()
+    pump()
+    assert not pane.multi_point_panel.isVisible()

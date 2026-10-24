@@ -71,10 +71,12 @@ def comparing(window, pump):
 
 
 def test_a_comparison_offers_all_four(window, pump):
+    """And a fifth, Composite, since this run holds several control
+    channels to combine (a single one is `test_multi_point`'s case)."""
     comparing(window, pump)
     offered = {k for k, a in window.data_pane.comparison_actions.items()
                if a.isVisible()}
-    assert offered == {'curves', 'error', 'lines', 'chance'}
+    assert offered == {'curves', 'error', 'lines', 'chance', 'composite'}
     assert not window.data_pane.toolbar.isHidden()
 
 

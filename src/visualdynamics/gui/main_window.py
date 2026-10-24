@@ -1114,6 +1114,10 @@ class MainWindow(QMainWindow):
         # the grid is the preview of the settings being made
         self.data_pane.matrix_panel.changed.connect(
             lambda _settings: self.render_current())
+        # the multi-point reading's strategy and bands redraw it at
+        # once: the plot is the preview of the settings being made
+        self.data_pane.multi_point_panel.changed.connect(
+            lambda _settings: self.render_current())
         self.data_pane.octave_panel.apply_asked.connect(
             self.compute_octave)
         # the tone readout: the toggle redraws, and a window chosen in
@@ -14886,11 +14890,18 @@ class MainWindow(QMainWindow):
         self.data_pane.offer_rms(levels is not None)
         if levels is not None and self.data_pane.rms_wanted:
             return self._render_levels(levels)
-        # three readings of one comparison, and the bar offers them:
+        # four readings of one comparison, and the bar offers them:
         # the spectra themselves, the level each channel came out at,
-        # and how much of each channel's band fell outside
+        # how much of each channel's band fell outside, and those lines
+        # beside what chance puts there
         comparison = self._compliance_rows(series)
-        self.data_pane.show_comparison_views(comparison is not None)
+        # and a fifth where the measurement holds two or more control
+        # channels: the composite the controller held, beside each
+        # channel against its own band
+        multi = (self._multi_point_found(series)
+                 if comparison is not None else None)
+        self.data_pane.show_comparison_views(comparison is not None,
+                                             composite=multi is not None)
         # two plain densities selected together read two ways: drawn
         # over each other, or divided in decibels — the signal-to-
         # noise reading (Brandon, 2026-08-25). A specification is not
@@ -14928,9 +14939,15 @@ class MainWindow(QMainWindow):
             # comparison has, and for the same reason: the plot draws
             # the channels that were picked and is never the whole list
             self._show_compliance_table(comparison)
-        if comparison is not None and self.data_pane.comparison_view == 'chance':
+        reading = self.data_pane.comparison_reading(multi is not None)
+        if comparison is not None and reading == 'chance':
             return self._render_chance(series)
-        if comparison is not None and self.data_pane.comparison_view != 'curves':
+        if comparison is not None and reading == 'composite':
+            # one flat plot of every control channel and its composite:
+            # no depth axis to offer
+            self.data_pane.offer_waterfall(False)
+            return self._render_multi_point(*multi)
+        if comparison is not None and reading != 'curves':
             return self._render_bars(comparison)
         # a density pair upstream has already claimed the toggle; the
         # comparison machinery below must not un-offer it
@@ -20415,6 +20432,105 @@ class MainWindow(QMainWindow):
             f'dof={settings["dof"]!r}, scale_db={scale!r}, '
             "path='chance.png', show=False)")
         return title_text(result, label)
+
+
+    def _multi_point_found(self, series):
+        """(spec name, specification, measured name, measured,
+        channels) when a comparison's measurement holds two or more
+        control channels to combine, else None.
+
+        The channels are the records picked on the measured side, or,
+        with the whole object selected, the autospectra that pair with
+        the specification: `core.multi_point.control_channels`, the
+        rule the reading itself uses, so the Composite reading is
+        offered exactly where it can be made.
+        """
+        from ..core.data import Psd, Specification
+        from ..core.multi_point import control_channels
+
+        specs = [(name, data) for name, data, _records in series
+                 if isinstance(data, Specification)]
+        measured = [(name, data, records) for name, data, records in series
+                    if isinstance(data, Psd)
+                    and not isinstance(data, Specification)]
+        if len(specs) != 1 or len(measured) != 1:
+            return None
+        spec_name, spec = specs[0]
+        name, data, records = measured[0]
+        picked = [int(i) for i in records] if records else None
+        try:
+            channels = control_channels(spec, data, picked)
+        except ValueError:
+            return None
+        return spec_name, spec, name, data, channels
+
+    def _render_multi_point(self, spec_name, spec, name, measured, channels):
+        """The control channels combined as the controller held them:
+        the composite heavy over the channels, both bands shaded, the
+        lines outside each band marked, and the counts and notes in the
+        panel beside it.
+
+        The settings are the panel's and every number is
+        `core.multi_point.multi_point`'s, at the scale the rest of the
+        comparison uses. A setting the reading refuses (weights that do
+        not fit the channels, a band the specification does not carry)
+        leaves the plot empty and the reason in the panel and on the
+        status line, with no numbers that would read as a result.
+        """
+        from ..plot.multi_point import build_multi_point, describe_composite
+        from .multi_point_panel import parse_weights
+
+        panel = self.data_pane.multi_point_panel
+        carries = {pair: any(f'{pair}_{edge}' in spec.limits
+                             for edge in ('lower', 'upper'))
+                   for pair in ('warning', 'abort')}
+        panel.offer_bands(spec_name, carries['warning'], carries['abort'],
+                          len(channels))
+        panel.show()
+        settings = panel.settings()
+        scale = self.project.comparison_scale(spec, name)
+        self.data_pane.graphics.clear()
+        try:
+            if isinstance(settings['weights'], str):
+                parse_weights(settings['weights'])     # raises the reason
+            reading = build_multi_point(
+                self.data_pane.graphics, spec, measured, channels=channels,
+                scale_db=scale, unit_system=self.unit_system,
+                theme=self.theme_name, **settings)
+        except ValueError as error:
+            panel.show_results(None, str(error))
+            return str(error)
+        panel.show_results(reading)
+        self._journal_multi_point(name, spec_name, measured, channels,
+                                  settings, scale)
+        text = describe_composite(reading)
+        if reading.hiding:
+            text += ('; outside their own band where it is inside: '
+                     + ', '.join(f'{c.label} ({c.hidden_lines})'
+                                 for c in reading.hiding))
+        return text
+
+    def _journal_multi_point(self, name, spec_name, measured, channels,
+                             settings, scale):
+        """The Composite reading, journaled as the headless call that
+        draws it (`_journal_view`). Channels are named by DOF where a
+        DOF names one record, by record otherwise."""
+        dofs = [str(dof) for dof in measured.response_dof]
+        named = [dofs[i] for i in channels]
+        if any(dofs.count(dof) > 1 for dof in named):
+            named = list(channels)
+        prefix = (f'visualdynamics.plot.plot_multi_point(project[{name!r}], '
+                  f'project[{spec_name!r}]')
+        line = (f'{prefix}, channels={named!r}, '
+                f"strategy={settings['strategy']!r}")
+        if settings['weights'] is not None:
+            line += f", weights={list(settings['weights'])!r}"
+        line += (f", composite_band={settings['composite_band']!r}, "
+                 f"individual_band={settings['individual_band']!r}")
+        if scale:
+            line += f', scale_db={scale!r}'
+        self._journal_view(prefix, line + ", path='multi_point.png', "
+                                          'show=False)')
 
     def _render_kurtosis(self, history, series):
         """How Gaussian each channel of this record is, a bar apiece.

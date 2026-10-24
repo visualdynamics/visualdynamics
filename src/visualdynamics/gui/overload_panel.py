@@ -180,6 +180,10 @@ class OverloadPanel(QWidget):
             loud = bool(item.flagged)
             tip = (finding(item) if loud
                    else item.reason and f'No range: {item.reason}')
+            if item.has_range and item.cautions():
+                # what to doubt about the range itself, on its row
+                tip = '\n'.join([tip] * bool(tip) + [
+                    f'{c[0].upper()}{c[1:]}.' for c in item.cautions()])
             for column, text in enumerate(cells):
                 cell = QTableWidgetItem(text)
                 if column:
@@ -216,7 +220,8 @@ class OverloadPanel(QWidget):
             })
         if channel.has_range:
             text.update({
-                'range': f'{channel.full_scale / scale:.4g}{after}',
+                'range': (f'{channel.full_scale / scale:.4g}{after}'
+                          + (', the default' if channel.on_default else '')),
                 'headroom': f'{channel.headroom_db:.2f} dB',
                 'rail': (f'{channel.rail} '
                          f'({percent(channel.rail_share or 0.0)})'),
@@ -231,4 +236,5 @@ class OverloadPanel(QWidget):
         for key, value in text.items():
             self.values[key].setText(value)
         self.values['range'].setToolTip(
-            '' if channel.has_range else f'No range: {channel.reason}')
+            '\n'.join(f'{c[0].upper()}{c[1:]}.' for c in channel.cautions())
+            if channel.has_range else f'No range: {channel.reason}')

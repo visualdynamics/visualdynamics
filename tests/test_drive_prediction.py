@@ -869,7 +869,8 @@ def test_many_unmet_bands_are_counted_past_the_third(notches, words):
     frf = Frf(f, (gains * G)[None].astype(complex), response_dof='1Z+',
               reference_dof='1Z+', ordinate_dim='acceleration/voltage')
     held = predict_drives(frf, flat_spec(), method='tikhonov', weight=1e-4)
-    assert f'target not met by the inverse within 1 dB at {words}' in         held.describe()
+    assert f'target not met by the inverse within 1 dB at {words}' in \
+        held.describe()
 
 
 def test_a_dof_holding_two_channels_has_to_be_named_in_full():

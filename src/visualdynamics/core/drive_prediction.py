@@ -1035,7 +1035,7 @@ def _demands(prediction: DrivePrediction, rows: list[tuple[str, str]],
                       frequency=top, band=band)
 
     def against(ceiling):
-        """The judgement of a plain peak against a plain limit."""
+        """The judgment of a plain peak against a plain limit."""
         return lambda level, peak: (level, peak, None if ceiling is None
                                     else peak / ceiling)
 

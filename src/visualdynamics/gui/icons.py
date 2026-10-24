@@ -529,6 +529,50 @@ def _draw_notch(painter, color):
                              (36, 30), (40, 24), (58, 24)]))
 
 
+def _draw_partial_coherence(painter, color):
+    """The multiple coherence's ceiling and curve, with one dashed curve
+    held well under it.
+
+    What the button draws, in miniature: the set of drives explains the
+    response (the solid curve near the ceiling), and one drive alone,
+    the others removed, explains only part of it (the dashed curve).
+    The two are told apart by the dash, as on the plot.
+    """
+    ceiling = QColor(color)
+    ceiling.setAlpha(130)
+    painter.setPen(QPen(ceiling, 4))
+    painter.drawLine(QPointF(8, 12), QPointF(56, 12))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(color, 5))
+    painter.drawPath(_curve([
+        (8, 20), (18, 19), (25, 22), (32, 30), (39, 22), (46, 19),
+        (56, 20)]))
+    dashed = _pen(color, 4)
+    dashed.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(dashed)
+    painter.drawPath(_curve([
+        (8, 44), (18, 40), (26, 48), (34, 52), (42, 42), (50, 46),
+        (56, 44)]))
+
+
+def _draw_transformation(painter, color):
+    """A level line across the top and a dashed line that stays low,
+    then climbs to meet it at the right.
+
+    What the button draws: the measured power, and the residual the
+    rigid-body motions leave, small until the article starts to flex.
+    """
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(color, 5))
+    painter.drawPath(_curve([(6, 16), (20, 14), (34, 17), (46, 15),
+                             (58, 14)]))
+    dashed = _pen(color, 4)
+    dashed.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(dashed)
+    painter.drawPath(_curve([(6, 52), (24, 51), (38, 48), (46, 38),
+                             (52, 24), (58, 18)]))
+
+
 def _draw_tone(painter, color):
     """A spike standing on a flat floor, a triangle on its top.
 
@@ -2579,6 +2623,8 @@ def control_icon(name: str) -> QIcon:
      'conditioning': _draw_conditioning,
      'realizability': _draw_realizability,
      'drive_prediction': _draw_drive_prediction,
+     'partial_coherence': _draw_partial_coherence,
+     'transformation': _draw_transformation,
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'sweep_rate': _draw_sweep_rate,

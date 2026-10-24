@@ -2879,8 +2879,28 @@ function fixedWindow(block, home, full) {
 }
 """
 
+#: the skeleton's headings, owed cards and closing lines (feature
+#: `skeleton_sections`). Its blocks are text the renderer has already
+#: drawn (`report.skeleton.finish`), so it needs style and no script.
+#: An owed card is the verdict's fail color, framed dashed and headed
+#: in capitals, so it reads as owed in a monochrome copy too.
+_SKELETON_CSS = """
+h2.skeleton { font-size: 1.3rem; margin: 2rem 0 .6rem;
+  padding-bottom: .25rem; border-bottom: 1px solid var(--line); }
+div.owed { border: 2px dashed #c0392b; border-radius: 6px;
+  padding: .6rem .9rem; white-space: normal;
+  background: color-mix(in srgb, #c0392b 8%, var(--paper)); }
+div.owed strong { color: #c0392b; letter-spacing: .06em;
+  margin-right: .4rem; }
+span.owed { color: #c0392b; font-weight: 700; }
+.interpretation { color: var(--faint); font-style: italic; }
+.endmark { margin-top: 2.5rem; text-align: center; font-weight: 600;
+  letter-spacing: .06em; }
+"""
+
 #: page code by feature: (splices into `_JS`, functions added, CSS added)
 FEATURE_PAGE = {
+    'skeleton_sections': ((), '', _SKELETON_CSS),
     'plot_conventions': (_STYLE_SPLICES, _STYLE_JS, _STYLE_CSS),
     'shared_decades': (_WINDOW_SPLICES, _WINDOW_JS, ''),
 }

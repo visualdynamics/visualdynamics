@@ -52,6 +52,82 @@ A preset names features that are not built yet. Choosing it turns on
 the ones that are available and lists, under the panel, each one it
 skipped and why. A set that matches no preset shows as *Custom*.
 
+## Skeleton sections
+
+**Skeleton sections** (group Structure) lays the report out on the
+sections a test report needs, in the order its readers look for them,
+and closes it with the line "End of report.", so a reader holding the
+pages knows whether all of them are there.
+
+| Section | What belongs in it | Filled by |
+|---|---|---|
+| 1. Identification | title, number and revision, the laboratory, the customer, the dates, who authorized it | the author |
+| 2. Summary | what was tested and why, the result against each requirement, the deviations by number, the open anomalies | the author, above the pass/fail box and the generated description |
+| 3. Requirement | the governing document, the plan and procedure, the tolerance clause, the completion criteria | the author |
+| 4. Test Article | description, part and serial, configuration, condition | the author |
+| 5. Setup and Method | facility, fixture, control strategy, settings, equipment and calibration | the author |
+| 6. Instrumentation | the channel table and any sensor averaging | the geometry, DOF scenes, photographs and channel table |
+| 7. Chronology | the runs in order, interruptions and failures, from the log | the author |
+| 8. Results | the control against the tolerance and every other result | every other generated figure and its text |
+| 9. Deviations, Anomalies and Nonconformances | each one in full, or None | the author |
+| 10. Discussion and Interpretation | what the results mean, and by whom, or None | the author |
+| 11. Conclusion | the statement of conformity and the rule it was decided by | the author, with the generated reading guide under it |
+| 12. Record and Data Package | what is attached, referenced and kept | the author |
+
+A generated report's own sections fall under the skeleton by what they
+hold: a section with the pass/fail box, or one of text only before the
+first figure, goes under the Summary; a section with the geometry, a
+DOF scene, a photograph or the channel table goes under
+Instrumentation; one of text only after the last figure goes under the
+Conclusion; everything else goes under Results. Their headings sit one
+level below the skeleton's. The report's blocks themselves are not
+moved: the layout is made when the page is drawn, and turning the
+feature off gives back the page as it was.
+
+**Owed sections.** A section only the author can write shows, until it
+says something, as a framed card reading NOT YET WRITTEN with what
+belongs there. Instrumentation and Results are owed only when nothing
+falls under them. The program never writes an author's words for them:
+the article, the method, the chronology, the findings, the discussion
+and the conclusion stay the engineer's. What it adds is fixed text:
+the conclusion always ends "The results relate only to the item
+tested.", and the discussion is labeled with who made the
+interpretation, or *not stated* until someone is named.
+
+In the editor, click a section's heading to write it. The pane shows
+what belongs in the section above the Markdown editor; for Deviations,
+Anomalies and Nonconformances and for Discussion and Interpretation a
+**None** button writes "No deviations. No anomalies. No
+nonconformances." or "No interpretation is offered beyond the
+results." in one step, and the discussion has an **Interpretation, by**
+field. A section's text can hold pipe tables:
+
+```text
+| Run | Level | Duration |
+|-----|------:|---------:|
+| 1   | -6 dB |    2 min |
+| 2   |  0 dB |   10 min |
+```
+
+**Before export.** Export first lists every section still owed (not yet
+written, nothing in it, or a discussion that does not say by whom) and
+asks whether to export anyway. A script asks the same question:
+
+```python
+project.report_features('Report', enable=['skeleton_sections'])
+project.report_section('Report', 'article', 'Bracket, part 1234, serial 7.')
+project.report_section('Report', 'deviations', none=True)
+project.report_section('Report', 'discussion', 'The notch is the fixture.',
+                       by='J. Doe')
+project.report_check('Report')
+# ['1. Identification: not yet written', '2. Summary: not yet written', ...]
+```
+
+`report_section` refuses an unknown section, None for a section that
+always has something to say, and an attribution outside the
+discussion. `report_check` refuses a report without the skeleton,
+since there is then nothing to check it against.
+
 ## Plot conventions
 
 **Plot conventions** (group Figures) puts a report's figures under
@@ -84,7 +160,6 @@ and are grayed out until each is built:
 
 | Feature | Group | What it will add |
 |---|---|---|
-| Skeleton sections | Structure | every section a test report needs, owed sections marked until written or set to None, and a check before export |
 | Runs and chronology | Structure | run identity, a results section per run, and the runs in time order with duration at level |
 | Requirement and results | Results | the requirement in words and a met or not met row per criterion; the pass/fail box labeled a screening without one |
 | Findings register | Results | deviations, anomalies and nonconformances in four parts, the fact filled from the measurement |

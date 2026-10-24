@@ -4947,16 +4947,103 @@ class Project(dict):
         TypeError
             When `name` is not a report, or a key is not a string.
         """
-        from .core.report import Report
         from .report.features import configure
 
+        return configure(self._report(name), enable=enable,
+                         disable=disable, preset=preset)
+
+    def report_section(self, name: str, section: str,
+                       text: str | None = None, *, none: bool = False,
+                       by: str | None = None) -> None:
+        """Write one skeleton section of a report (the report editor's
+        pane on a section's block).
+
+        With the report feature `skeleton_sections` on, the report is
+        laid out on the sections in
+        `visualdynamics.report.skeleton.SECTIONS`, and each section only
+        the author can write is shown as owed until it says something.
+        This sets what it says.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        section : str
+            The section's key: 'identification', 'summary',
+            'requirement', 'article', 'setup', 'instrumentation',
+            'chronology', 'results', 'deviations', 'discussion',
+            'conclusion' or 'record'.
+        text : str, optional
+            The section's words, in the report's Markdown, replacing
+            what it said.
+        none : bool, default False
+            Write the section's own wording for nothing to report, in
+            one step ('deviations' and 'discussion' only): "No
+            deviations. No anomalies. No nonconformances."
+        by : str, optional
+            Who made the interpretation ('discussion' only); an empty
+            string clears it.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            For an unknown section, `text` and `none` together, `none`
+            for a section that always has something to say, or `by`
+            outside the discussion. Nothing is changed.
+        TypeError
+            When `name` is not a report, or a value is not a string.
+        """
+        from .report.skeleton import write
+
+        write(self._report(name), section, text, none=none, by=by)
+
+    def report_check(self, name: str) -> list[str]:
+        """What a report still owes before it is issued, one line per
+        section, in order (what Export lists and asks about).
+
+        A line names the section and why: not yet written; nothing in
+        it (Instrumentation or Results with nothing generated or
+        written); or a discussion that does not say by whom. An empty
+        list means every section of the skeleton says something.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+
+        Returns
+        -------
+        list of str
+            One line per owed section, such as '4. Test Article: not
+            yet written', in the skeleton's order.
+
+        Raises
+        ------
+        ValueError
+            When the report does not have the report feature
+            `skeleton_sections` enabled: without the skeleton there is
+            nothing to check against, and an empty list would read as a
+            complete report.
+        TypeError
+            When `name` is not a report.
+        """
+        from .report.skeleton import check
+
+        return [str(owed) for owed in check(
+            self._report(name), self, self.object_groups)]
+
+    def _report(self, name: str) -> Report:
+        """The report called `name`; `TypeError` for anything else."""
         name = self.name_of(name)
         report = self[name]
         if not isinstance(report, Report):
             raise TypeError(f'{name!r} is a {type(report).__name__}, not a '
                             'report')
-        return configure(report, enable=enable, disable=disable,
-                         preset=preset)
+        return report
 
     def work_up(self) -> list[str]:
         """Compute every missing object the project's type expects from
@@ -6422,8 +6509,8 @@ _JOURNALED_VERBS = (
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',
-    'generate_report', 'report_features', 'export_report', 'export', 'save',
-    'duplicate',
+    'generate_report', 'report_features', 'report_section', 'export_report',
+    'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:
     setattr(Project, _verb, _journaled(getattr(Project, _verb)))

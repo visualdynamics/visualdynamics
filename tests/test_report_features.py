@@ -23,7 +23,9 @@ from visualdynamics.core.report import Report
 from visualdynamics.report import features as rf
 from visualdynamics.report import page, plot_conventions, render_html
 
-LIVE = ('plot_conventions', 'shared_decades')
+LIVE = ('skeleton_sections', 'plot_conventions', 'shared_decades')
+#: the plot conventions and their option
+CONVENTIONS = ('plot_conventions', 'shared_decades')
 
 #: the catalogue the plan registers: one feature per report gap, plus
 #: the shared-decades option of the plot conventions
@@ -77,10 +79,10 @@ def test_every_feature_is_off_by_default():
     assert Report().features == []
 
 
-def test_the_catalogue_is_the_road_map_with_one_feature_built():
+def test_the_catalogue_is_the_road_map_with_the_built_features_live():
     assert set(rf.FEATURES) == CATALOGUE
     live = tuple(key for key, f in rf.FEATURES.items() if f.available)
-    assert live == LIVE, 'the plot conventions and their option, nothing else'
+    assert live == LIVE, 'the built features, nothing else'
     for feature in rf.FEATURES.values():
         assert feature.group in rf.GROUPS
         assert feature.title and feature.description.endswith('.')
@@ -144,7 +146,7 @@ def test_an_unmet_requirement_is_refused_and_named():
     assert rf.reason('shared_decades', ['plot_conventions']) == ''
     # asked for together, the one needed comes first whatever the order
     assert rf.configure(report, enable=['shared_decades',
-                                        'plot_conventions']).enabled == LIVE
+                                        'plot_conventions']).enabled == CONVENTIONS
 
 
 def test_a_missing_capability_is_named(monkeypatch):
@@ -181,7 +183,7 @@ def test_a_refused_call_changes_nothing():
 
 def test_turning_a_feature_off_takes_what_needs_it_with_a_note():
     report = Report()
-    rf.configure(report, enable=LIVE)
+    rf.configure(report, enable=CONVENTIONS)
     selection = rf.configure(report, disable=['plot_conventions'])
     assert selection.enabled == () and report.features == []
     assert selection.notes == (
@@ -194,8 +196,8 @@ def test_the_presets_enable_what_they_can_and_say_what_they_skipped():
     assert selection.enabled == LIVE
     skipped = [key for key in rf.PRESETS['test_report'].features
                if key not in LIVE]
-    assert len(selection.notes) == len(skipped) == 9
-    assert selection.notes[0] == ('Test report: Skeleton sections skipped, '
+    assert len(selection.notes) == len(skipped) == 8
+    assert selection.notes[1] == ('Test report: Findings register skipped, '
                                   'not yet available')
     flash = rf.configure(report, preset='flash_report')
     assert flash.enabled == () and report.features == []
@@ -227,7 +229,7 @@ def test_enabled_reads_only_what_can_act():
                               'shared_decades'])
     assert rf.enabled(report) == ()
     report.features = [*report.features, 'plot_conventions']
-    assert rf.enabled(report) == LIVE
+    assert rf.enabled(report) == CONVENTIONS
     # a later version's key is kept through a change made here
     rf.configure(report, disable=['shared_decades'])
     assert 'from_a_later_version' in report.features
@@ -359,7 +361,8 @@ def test_the_page_code_is_spliced_only_where_anchored():
     for key, (splices, functions, _style) in page.FEATURE_PAGE.items():
         for anchor, _replacement in splices:
             assert page._JS.count(anchor) == 1, (key, anchor)
-        assert functions.strip()
+        # a feature adds a script, a stylesheet, or both
+        assert functions.strip() or _style.strip()
     css, js = page.page_parts(LIVE)
     for call in ('legendStyle(block, curve, i, item)',
                  'lineDash(block, curve, index)', 'endLabels(g, block',
@@ -559,22 +562,22 @@ def test_dead_nan_and_empty_inputs_under_the_conventions():
                    ordinate_dim=['acceleration**2/frequency'])}
     report = Report('R', [{'kind': 'plot', 'source': 'Dead'},
                           {'kind': 'plot', 'source': 'Gap'}],
-                    features=list(LIVE))
+                    features=list(CONVENTIONS))
     dead, gap = _payload(render_html(report, objects,
                                      unit_system=visualdynamics.SI))['blocks']
     assert dead['logx'] is True and gap['logx'] is True
     assert all(v is None for v in dead['curves'][0]['y'])
     assert gap['home'] == {'x0': 1.0, 'x1': 4.0, 'y0': -2.0, 'y1': -1.0}
     assert dead['home'] == gap['home'], 'it opens where its kind opens'
-    empty = Report('R', features=list(LIVE))
+    empty = Report('R', features=list(CONVENTIONS))
     assert _payload(render_html(empty, {}))['blocks'] == []
-    assert rf.configure(empty, enable=[]) == rf.FeatureSelection(LIVE, ())
+    assert rf.configure(empty, enable=[]) == rf.FeatureSelection(CONVENTIONS, ())
 
 
 def test_the_random_report_shares_its_decades(run):
     project, name = run
     try:
-        project.report_features(name, enable=LIVE)
+        project.report_features(name, enable=CONVENTIONS)
         data = _payload(_render(project, name))
     finally:
         project[name].features = []
@@ -605,7 +608,7 @@ def test_the_figures_draw_their_styles_in_a_real_browser_engine(tmp_path):
                response_dof=['1X+', '1Y+', '1Z+'],
                ordinate_dim=['acceleration**2/frequency'] * 3)
     report = Report('R', [{'kind': 'plot', 'source': 'PSDs'}],
-                    features=list(LIVE))
+                    features=list(CONVENTIONS))
     path = tmp_path / 'styled.html'
     html = render_html(report, {'PSDs': psds})
     path.write_text(html, encoding='utf-8')
@@ -706,7 +709,7 @@ def test_a_box_changes_the_report_through_the_verb(editing):
     with open(editor._page_path, encoding='utf-8') as page_file:
         assert '"line_patterns"' in page_file.read(), 'the page re-rendered'
     panel.boxes['shared_decades'].setChecked(True)
-    assert report.features == list(LIVE)
+    assert report.features == list(CONVENTIONS)
     panel.boxes['plot_conventions'].setChecked(False)
     assert report.features == []
     assert not panel.boxes['shared_decades'].isChecked()
@@ -720,7 +723,7 @@ def test_the_preset_selector_applies_and_lists_what_it_skipped(editing):
     panel.preset_box.setCurrentIndex(panel.preset_box.findData('test_report'))
     assert report.features == list(LIVE)
     assert panel.boxes['plot_conventions'].isChecked()
-    assert 'Skeleton sections skipped, not yet available' in panel.notes.text()
+    assert 'Findings register skipped, not yet available' in panel.notes.text()
     assert panel.preset_box.currentData() == 'test_report'
     panel.boxes['shared_decades'].setChecked(False)
     assert panel.preset_box.currentText() == 'Custom', 'a set no preset names'

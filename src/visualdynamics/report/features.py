@@ -35,7 +35,8 @@ from typing import Any
 # Kevin Cross's plan for the report features, 2026-10-24: every
 # improvement to the generated report is an optional feature, off by
 # default, chosen in a selection tool, with presets. This module is the
-# framework; P23 (plot conventions) is the one feature built with it.
+# framework; P23 (plot conventions) was the first feature built with
+# it, and P18 (skeleton sections, `report/skeleton.py`) the second.
 
 #: the groups the selection tool lays the features out in, in order
 GROUPS = ('Structure', 'Results', 'Records', 'Issue control', 'Figures')
@@ -108,15 +109,16 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 
 
 #: every report feature, in the order the selection tool shows them
-#: within their groups. Only `plot_conventions` and its option
-#: `shared_decades` are built; the rest are the road map.
+#: within their groups. `skeleton_sections`, `plot_conventions` and its
+#: option `shared_decades` are built; the rest are the road map.
 FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'skeleton_sections', 'Skeleton sections', 'Structure',
-        'Every section a test report needs, in order. A section only the '
-        'author can write is shown as owed until it is written, or set '
-        "to 'None' in one step; the export lists what is still owed.",
-        available=False),
+        'Every section a test report needs, in order, with what the '
+        'project generates under the sections it answers. A section only '
+        'the author can write is shown as owed until it is written; the '
+        "deviations and the discussion can be set to 'None' in one step, "
+        'and the export lists what is still owed.'),
     ReportFeature(
         'run_sections', 'Runs and chronology', 'Structure',
         'Run identity on each record, a results section for each run, '

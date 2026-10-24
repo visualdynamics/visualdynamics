@@ -58,6 +58,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPlainTextEdit,
+    QPushButton,
     QScrollArea,
     QSplitter,
     QToolBar,
@@ -261,6 +262,10 @@ class ReportEditor(QWidget):
         #: Called as `features_changer(report, enable=, disable=,
         #: preset=)` and returns a `FeatureSelection`.
         self.features_changer: Callable[..., Any] | None = None
+        #: a skeleton section's None button and its Interpretation, by
+        #: field, while such a block is in the pane
+        self.none_button: QPushButton | None = None
+        self.by_edit: QLineEdit | None = None
         self.field_boxes: dict[str, QComboBox] = {}
         self._loading_pane = False
         self._text_timer: QTimer = QTimer(self)
@@ -454,6 +459,7 @@ class ReportEditor(QWidget):
         self.record_caption_check = self.record_caption_label = None
         self.title_edit = self.marking_edit = self.color_box = None
         self.features_panel = None
+        self.none_button = self.by_edit = None
         self.field_boxes = {}
         body = QWidget()
         form = QFormLayout(body)
@@ -505,6 +511,8 @@ class ReportEditor(QWidget):
                     lambda change: self._operate({'op': 'features',
                                                   **change}))
                 form.addRow(self.features_panel)
+            elif block.get('kind') == 'text' and 'section' in block:
+                self._section_pane(form, block)
             elif block.get('kind') == 'text':
                 form.addRow(QLabel(f'<b>Block {self.selected + 1}</b> — text'))
                 self.text_editor = QPlainTextEdit(block.get('text', ''))
@@ -597,6 +605,46 @@ class ReportEditor(QWidget):
         self.record_caption_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
         form.addRow(self.record_caption_label)
+
+    def _section_pane(self, form, block) -> None:
+        """The pane for a skeleton section's own block: its heading and
+        what belongs in it, its words in the Markdown editor, None for a
+        section that can have nothing to report, and who interpreted
+        for the discussion."""
+        from ..report.skeleton import ATTRIBUTED, BY_KEY
+
+        found = BY_KEY.get(str(block.get('section')))
+        if found is None:
+            # a section this version does not know: its words, as text
+            form.addRow(QLabel(f'<b>Block {self.selected + 1}</b> — text'))
+        else:
+            form.addRow(QLabel(f'<b>{html_escape.escape(found.heading)}</b>'))
+            told = QLabel(found.description)
+            told.setWordWrap(True)
+            form.addRow(told)
+        self.text_editor = QPlainTextEdit(block.get('text', ''))
+        self.text_editor.setPlaceholderText(
+            'Owed until written. Markdown: **bold**, - list, '
+            '| a | b | tables')
+        self.text_editor.textChanged.connect(self._text_changed)
+        form.addRow(self.text_editor)
+        if found is not None and found.none:
+            self.none_button = QPushButton('None')
+            self.none_button.setToolTip(
+                f'Writes "{found.none}" in place of the section\'s text')
+            self.none_button.clicked.connect(
+                lambda: self._operate({'op': 'section', 'at': self.selected,
+                                       'none': True}))
+            form.addRow(self.none_button)
+        if found is not None and found.key == ATTRIBUTED:
+            self.by_edit = QLineEdit(str(block.get('by', '')))
+            self.by_edit.setPlaceholderText('who made the interpretation')
+            self.by_edit.editingFinished.connect(
+                lambda: self._field_edited(
+                    {'op': 'section', 'at': self.selected,
+                     'by': self.by_edit.text()},
+                    str(block.get('by', '')) != self.by_edit.text().strip()))
+            form.addRow('Interpretation, by', self.by_edit)
 
     def _combo(self, form, field, label, current, options):
         box = QComboBox()
@@ -816,6 +864,21 @@ class ReportEditor(QWidget):
             return
         if op == 'select':
             at = operation.get('at')
+            if isinstance(at, str) and at.startswith('section:'):
+                # an owed skeleton section with no block of its own yet:
+                # the click makes it, so there is a block to write in
+                from ..report.skeleton import write
+
+                try:
+                    at = write(report, at.partition(':')[2])
+                except (TypeError, ValueError):
+                    return
+                self.flush_text()
+                self.selected = at
+                self.edited.emit()
+                self.rebuild()
+                self._show_selection()
+                return
             at = int(at) if at is not None else None
             if at is not None and not 0 <= at < report.num_blocks:
                 at = None
@@ -921,6 +984,22 @@ class ReportEditor(QWidget):
         elif op == 'features':
             if not self._change_features(operation):
                 return
+        elif op == 'section':
+            # a skeleton section's one-step None, or who interpreted:
+            # through the one function a script calls, which refuses
+            index = int(operation.get('at', -1))
+            if not 0 <= index < report.num_blocks or                     'section' not in report.blocks[index]:
+                return
+            from ..report.skeleton import write
+
+            try:
+                write(report, report.blocks[index]['section'],
+                      none=bool(operation.get('none')),
+                      by=operation.get('by'))
+            except (TypeError, ValueError):
+                return
+            # the pane shows the words None wrote
+            reselect = bool(operation.get('none'))
         elif op == 'field':
             index = int(operation.get('at', -1))
             if 0 <= index < report.num_blocks:

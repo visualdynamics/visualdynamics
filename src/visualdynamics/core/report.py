@@ -42,6 +42,10 @@ class Report:
 
     Block shapes:
       {'kind': 'text',  'text': str}
+        (a text block carrying 'section' holds the author's words for
+        one section of the skeleton, and 'by' who interpreted, in the
+        discussion; it is drawn only while the report feature
+        `skeleton_sections` is on: `visualdynamics.report.skeleton`)
       {'kind': 'plot',  'source': name,
                         'mode': curves|cmif|mac|map|stage|scalogram|
                                 pair|ratio|overlay,
@@ -2603,7 +2607,9 @@ def prune_unbound(report: Report, objects: Mapping[str, Any],
     removed, heading and text included, so there is no heading over
     nothing. When some can, only the ones that cannot are removed, so
     the editor shows no unbound cards for a run that has no geometry.
-    A section with no figures (the summary, the conclusions) stays. An
+    A section with no figures (the summary, the conclusions) stays, and
+    so does a skeleton section's own text block (one carrying
+    'section', report feature `skeleton_sections`) wherever it sits. An
     empty project keeps the whole outline, since there the template
     itself is being read. `report` is changed in place and returned.
     """
@@ -2633,7 +2639,10 @@ def prune_unbound(report: Report, objects: Mapping[str, Any],
         figures = [i for i in section
                    if report.blocks[i].get('kind') != 'text']
         if figures and not any(bound(report.blocks[i]) for i in figures):
-            doomed.extend(section)
+            # a skeleton section's own words are the author's, and
+            # never go with the figures around them
+            doomed.extend(i for i in section
+                          if 'section' not in report.blocks[i])
         else:
             doomed.extend(i for i in figures if not bound(report.blocks[i]))
     report.remove(doomed)

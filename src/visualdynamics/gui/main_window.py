@@ -18272,6 +18272,8 @@ class MainWindow(QMainWindow):
             self._show_status('Select a report to export')
             return
         name = self.object_item().text(0)
+        if not self._export_owed(obj, name):
+            return
         path, _ = QFileDialog.getSaveFileName(
             self, 'Export Report', f'{name}.html', 'Report (*.html)')
         if not path:
@@ -18287,6 +18289,30 @@ class MainWindow(QMainWindow):
         self._show_status(
             f'Exported {os.path.basename(path)}{note} — opens in any '
             'browser, nothing to install')
+
+    def _export_owed(self, report: Report, name: str) -> bool:
+        """With skeleton sections on, list the sections the report
+        still owes and ask whether to export anyway; True to go on.
+        Without the feature there is no skeleton to check, and nothing
+        is asked."""
+        from ..report.features import enabled
+        from ..report.skeleton import FEATURE
+
+        if FEATURE not in enabled(report):
+            return True
+        owed = self.project.report_check(name)
+        if not owed:
+            return True
+        lines = '\n'.join(owed)
+        with self._asking():
+            answer = QMessageBox.question(
+                self, 'Export Report',
+                f'{name} still owes {len(owed)} section'
+                f'{"s" * (len(owed) != 1)}:\n\n{lines}\n\nExport anyway?',
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+        return answer == QMessageBox.StandardButton.Yes
 
     def _merge_candidates(self):
         """[(name, object)] when the selection is a legitimate merge —

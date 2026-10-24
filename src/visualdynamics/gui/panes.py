@@ -49,6 +49,7 @@ from .mesh_panel import MeshPanel
 from .mesh_solids_panel import MeshSolidsPanel
 from .modes_panel import ModesPanel
 from .octave_panel import OctavePanel
+from .partial_coherence_panel import PartialCoherencePanel
 from .pattern_panel import PatternPanel
 from .pulse_panel import PulsePanel
 from .replication_fit_panel import ReplicationFitPanel
@@ -63,6 +64,7 @@ from .stroke_panel import StrokePanel
 from .sweep_rate_panel import SweepRatePanel
 from .tone_panel import TonePanel
 from .toolbars import fence, shows_anything, tidy
+from .transformation_panel import TransformationPanel
 from .transmissibility_panel import TransmissibilityPanel
 from .truncate_panel import TruncatePanel
 from .wavelet_panel import WaveletPanel
@@ -212,6 +214,12 @@ class DataPane(QWidget):
     tone_toggled = Signal(bool)
     #: the transmissibility reading was asked for (True) or put away
     transmissibility_toggled = Signal(bool)
+    #: the partial coherence behind a multiple coherence was asked for
+    #: (True) or put away
+    partial_coherence_toggled = Signal(bool)
+    #: the rigid-body residual behind a transformed density was asked
+    #: for (True) or put away
+    transformation_toggled = Signal(bool)
     #: a sine specification's sweep-rate reading was asked for (True)
     #: or put away (False)
     sweep_rate_toggled = Signal(bool)
@@ -268,6 +276,8 @@ class DataPane(QWidget):
         self.octave_wanted: bool = False
         self.tone_wanted: bool = False
         self.transmissibility_wanted: bool = False
+        self.partial_coherence_wanted: bool = False
+        self.transformation_wanted: bool = False
         self.sweep_rate_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
         self.kurtosis_wanted: bool = False
@@ -380,6 +390,10 @@ class DataPane(QWidget):
         self.transmissibility_panel: TransmissibilityPanel = \
             TransmissibilityPanel()
         self.transmissibility_panel.hide()
+        self.partial_coherence_panel: PartialCoherencePanel =             PartialCoherencePanel()
+        self.partial_coherence_panel.hide()
+        self.transformation_panel: TransformationPanel =             TransformationPanel()
+        self.transformation_panel.hide()
         # the modes a sine sweep is checked against, beside the sweep
         # drawn through their bands; the Sweep Rate reading shows it
         self.sweep_rate_panel: SweepRatePanel = SweepRatePanel()
@@ -435,6 +449,8 @@ class DataPane(QWidget):
         plot_row.addWidget(self.srs_tolerance_panel)
         plot_row.addWidget(self.tone_panel)
         plot_row.addWidget(self.transmissibility_panel)
+        plot_row.addWidget(self.partial_coherence_panel)
+        plot_row.addWidget(self.transformation_panel)
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.signature_panel)
@@ -965,6 +981,40 @@ class DataPane(QWidget):
         # history, and by nothing else, so it starts put away
         self.transmissibility_action.setVisible(False)
         toolbar.addAction(self.transmissibility_action)
+        # a multiple coherence read behind: which drive explains each
+        # response once the others are removed, and whether the drives
+        # were independent. A reading of a coherence that exists, drawn
+        # in place of it, with the summary in the pane
+        self.partial_coherence_action: QAction = QAction(
+            control_icon('partial_coherence'), 'Partial Coherence', self)
+        self.partial_coherence_action.setCheckable(True)
+        self.partial_coherence_action.setToolTip(
+            'Draw the partial coherence of the response with each drive, '
+            'the other drives removed, under the multiple coherence; the '
+            'coherence between the drives; and how many independent '
+            'drives the test had at each line')
+        self.partial_coherence_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('partial_coherence',
+                                                      checked))
+        self.partial_coherence_action.setVisible(False)
+        toolbar.addAction(self.partial_coherence_action)
+        # and a density transformed through rigid shapes read behind:
+        # what the six motions explain of the measured power at the
+        # channels, and the residual they leave
+        self.transformation_action: QAction = QAction(
+            control_icon('transformation'), 'Rigid-Body Residual', self)
+        self.transformation_action.setCheckable(True)
+        self.transformation_action.setToolTip(
+            'Draw the measured power at the channels the transformation '
+            'used, the part the six rigid-body motions explain and the '
+            'residual, with the frequency up to which the residual stays '
+            'under a tenth of the power: where the rigid-body assumption '
+            'holds')
+        self.transformation_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('transformation',
+                                                      checked))
+        self.transformation_action.setVisible(False)
+        toolbar.addAction(self.transformation_action)
         # a sine specification read against the modes it sweeps
         # through: the time and cycles in each half-power band, and
         # whether the rate lets the mode build. A reading of the
@@ -1031,6 +1081,7 @@ class DataPane(QWidget):
             [self.octave_action, self.tone_action],
             [self.sweep_rate_action],
             [self.transmissibility_action],
+            [self.partial_coherence_action, self.transformation_action],
             self.comparison_group.actions(),
             self.spectra_group.actions(),
             self.replication_group.actions(),
@@ -1160,7 +1211,8 @@ class DataPane(QWidget):
         self.truncate_toggled.emit(checked)
 
     def _choose_toggle(self, key: str, checked: bool) -> None:
-        """The octave, tones, transmissibility or sweep-rate button,
+        """The octave, tones, transmissibility, partial coherence,
+        rigid-body residual or sweep-rate button,
         each a toggle of its own: remember it, put its panel away when
         it is unchecked, then say so."""
         setattr(self, f'{key}_wanted', bool(checked))
@@ -1806,7 +1858,9 @@ class DataPane(QWidget):
                       residual: bool = False,
                       octave: bool = False, sine: bool = False,
                       tone: bool = False, fit: bool = False,
-                      transmissibility: bool = False) -> None:
+                      transmissibility: bool = False,
+                      partial_coherence: bool = False,
+                      transformation: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -1823,7 +1877,11 @@ class DataPane(QWidget):
         unit to integrate. `octave` offers the
         octave bands of a plain density, `tone` the tone readout of a plain
         autospectrum, `transmissibility` the ASD ratio and H1's band
-        behind an FRF computed from a time history, and `residual` the
+        behind an FRF computed from a time history, `partial_coherence`
+        the partial and reference coherence behind a multiple coherence
+        computed from one, `transformation` the rigid-body residual
+        behind a density transformed through rigid shapes, and
+        `residual` the
         fit's residual CMIF. The pair,
         3-D, frequency-axis, quantity and page controls are hidden here;
         the code that draws offers them afterwards.
@@ -1879,6 +1937,12 @@ class DataPane(QWidget):
         # project, read on its magnitude
         self._offer('transmissibility', 'transmissibility_panel',
                     transmissibility)
+        # the readings behind a multiple coherence and a transformed
+        # density, each offered only on its own kind of object
+        self._offer('partial_coherence', 'partial_coherence_panel',
+                    partial_coherence)
+        self._offer('transformation', 'transformation_panel',
+                    transformation)
         self.residual_action.setVisible(residual)
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
@@ -1951,6 +2015,8 @@ class DataPane(QWidget):
                        self.drive_point_action, self.cmif_action,
                        self.octave_action, self.tone_action,
                        self.transmissibility_action,
+                       self.partial_coherence_action,
+                       self.transformation_action,
                        self.sweep_rate_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,

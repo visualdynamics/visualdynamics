@@ -1002,6 +1002,12 @@ class MainWindow(QMainWindow):
         # and the transmissibility behind an FRF: the toggle redraws
         self.data_pane.transmissibility_toggled.connect(
             lambda _wanted: self.render_current())
+        # and the readings behind a multiple coherence and a transformed
+        # density, drawn in place of them: the toggles redraw
+        self.data_pane.partial_coherence_toggled.connect(
+            lambda _wanted: self.render_current())
+        self.data_pane.transformation_toggled.connect(
+            lambda _wanted: self.render_current())
         # the acts, asked for where their settings are set (Brandon,
         # 2026-08-28): each button is a second entrance to the same
         # verb the bar's act offers, so provenance, badges and the
@@ -12348,6 +12354,122 @@ class MainWindow(QMainWindow):
             # the plot went with the drawing it belonged to
             pass
 
+    def _partial_coherence_source(self, series):
+        """(name, coherence, records) when the selection is one multiple
+        coherence computed in this project from a time history with two
+        or more references: the coherence the partial coherence reading
+        can be read behind (`Project.read_partial_coherence`). None
+        otherwise, which also hides the button. With one reference the
+        partial coherence is the ordinary coherence and the multiple, so
+        there is nothing more to read."""
+        from ..core.data import MultipleCoherence
+
+        if len(series) != 1:
+            return None
+        name, data, records = series[0]
+        if not isinstance(data, MultipleCoherence) or name not in self.project:
+            return None
+        provenance = self.project.provenance.get(name, {})
+        source = self.project.get(provenance.get('source'))
+        if (provenance.get('verb') != 'compute_multiple_coherence'
+                or not isinstance(source, TimeHistory)):
+            return None
+        drives = [role for role in source.channel_roles().values()
+                  if role == 'reference']
+        if len(drives) < 2:
+            return None
+        return name, data, records
+
+    def _render_partial_coherence(self, name, coherence, records):
+        """The partial coherence reading of one response, drawn in place
+        of the multiple coherence it is read behind
+        (`plot.partial_coherence`), with its summary in the pane. The
+        response is the first record picked, or the first record.
+        Returns the status line."""
+        from ..plot.partial_coherence import build_partial_coherence
+
+        panel = self.data_pane.partial_coherence_panel
+        panel.show()
+        self.data_pane.offer_waterfall(False)
+        self.data_pane.show_waterfall(False)
+        self.data_pane.graphics.clear()
+        record = int(records[0]) if records else 0
+        try:
+            reading = self.project.read_partial_coherence(name)
+        except ValueError as refusal:
+            panel.show_reading(None, refusal=str(refusal))
+            return f'No partial coherence read: {refusal}'
+        response = str(coherence.response_dof[record])
+        k = (reading.responses.index(response)
+             if response in reading.responses else 0)
+        build_partial_coherence(self.data_pane.graphics, reading, k,
+                                theme=self.theme_name)
+        panel.show_reading(reading, k)
+        prefix = ('visualdynamics.plot.plot_partial_coherence('
+                  f'project.read_partial_coherence({name!r})')
+        self._journal_view(
+            prefix, f"{prefix}, {reading.responses[k]!r}, "
+                    "path='partial_coherence.png', show=False)")
+        return reading.describe(k)
+
+    def _transformation_source(self, series):
+        """(name, density, records) when the selection is one density
+        transformed in this project from a cross-spectral density
+        through six unscaled rigid-body shapes: the transform the
+        rigid-body residual can be read behind
+        (`Project.read_transformation`). None otherwise, which also
+        hides the button."""
+        from ..core.rigid import is_rigid_set
+
+        if len(series) != 1:
+            return None
+        name, data, records = series[0]
+        if not isinstance(data, Psd) or name not in self.project:
+            return None
+        provenance = self.project.provenance.get(name, {})
+        source = self.project.get(provenance.get('source'))
+        shapes = self.project.get(
+            (provenance.get('params') or {}).get('shapes'))
+        if (provenance.get('verb') != 'transform'
+                or not isinstance(source, Psd)
+                or source.reference_dof is None
+                or not isinstance(shapes, ShapeSet)
+                or not is_rigid_set(shapes) or not shapes.unscaled):
+            return None
+        return name, data, records
+
+    def _render_transformation(self, name, density, records):
+        """The rigid-body residual reading, drawn in place of the
+        transformed density it is read behind (`plot.transformation`),
+        with the transformation and the residual in the pane. Returns
+        the status line."""
+        from ..plot.transformation import build_transformation_residual
+
+        del density, records          # the reading is of the whole transform
+        panel = self.data_pane.transformation_panel
+        panel.show()
+        self.data_pane.offer_waterfall(False)
+        self.data_pane.show_waterfall(False)
+        self.data_pane.graphics.clear()
+        try:
+            reading = self.project.read_transformation(name)
+        except ValueError as refusal:
+            panel.show_reading(None, refusal=str(refusal))
+            return f'No rigid-body residual read: {refusal}'
+        build_transformation_residual(self.data_pane.graphics, reading,
+                                      unit_system=self.unit_system,
+                                      theme=self.theme_name)
+        panel.show_reading(
+            reading,
+            length_scale=float(self.unit_system.from_si(1.0, 'length')),
+            length_unit=self.unit_system.label_text('length'))
+        prefix = ('visualdynamics.plot.plot_transformation_residual('
+                  f'project.read_transformation({name!r})')
+        self._journal_view(
+            prefix, f"{prefix}, path='transformation_residual.png', "
+                    "show=False)")
+        return reading.describe()
+
     def _draw_truncation(self, history):
         """Gray the ends being cut away and put the span beside it.
 
@@ -12762,6 +12884,12 @@ class MainWindow(QMainWindow):
                                      transmissibility=self.
                                      _transmissibility_source(series)
                                      is not None,
+                                     partial_coherence=self.
+                                     _partial_coherence_source(series)
+                                     is not None,
+                                     transformation=self.
+                                     _transformation_source(series)
+                                     is not None,
                                      # a declared unit, as the readings
                                      # require (`core.shaker`)
                                      fit=history is not None and any(
@@ -12782,6 +12910,16 @@ class MainWindow(QMainWindow):
                                 ('stroke', self._render_stroke)):
                 if self.data_pane.showing(key):
                     return render(history, series[0][0], series[0][2])
+        # the readings behind a multiple coherence and a transformed
+        # density replace the drawing of the object they are read behind
+        behind = (self.data_pane.showing('partial_coherence')
+                  and self._partial_coherence_source(series))
+        if behind:
+            return self._render_partial_coherence(*behind)
+        behind = (self.data_pane.showing('transformation')
+                  and self._transformation_source(series))
+        if behind:
+            return self._render_transformation(*behind)
         if all_frf and self.data_pane.showing_cmif:
             drawn = build_cmif(self.data_pane.graphics, series,
                                unit_system=self.unit_system,

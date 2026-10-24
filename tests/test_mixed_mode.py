@@ -858,3 +858,98 @@ def test_correctly_controlled_narrowbands_pass_on_white_noise():
                            onset=0.0).narrowbands
         failed += [('swept', seed)] * (row.passed is not True)
     assert failed == []
+
+
+# ---- the survivors of tools/mutate.py, each pinned -------------------------
+
+@pytest.mark.parametrize('given', [
+    {'width': 0.0}, {'share': 0.0, 'width': None}, {'share': 2.0, 'width': None},
+    {'sweep_to': 0.0, 'rate': 1.0}, {'sweep_to': 90.0, 'rate': 0.0},
+    {'tolerance_db': 0.0}, {'level': 0.0},
+])
+def test_a_band_of_nothing_is_refused(given):
+    fields = {'center': 50.0, 'level': 1.0, 'width': 4.0, **given}
+    with pytest.raises(ValueError):
+        Narrowband(**fields)
+
+
+@pytest.mark.parametrize('given', [
+    {'frequency': 0.0}, {'amplitude': 0.0}, {'sweep_to': 0.0, 'rate': 1.0},
+    {'sweep_to': 40.0, 'rate': 0.0},
+])
+def test_a_tone_of_nothing_is_refused(given):
+    with pytest.raises(ValueError):
+        Tone(**{'frequency': 20.0, 'amplitude': 1.0, **given})
+
+
+def test_the_smallest_real_settings_are_accepted():
+    assert Narrowband(50.0, 1.0, width=4.0, tolerance_db=0.5).tolerance_db \
+        == 0.5
+    assert Narrowband(50.0, 1.0, share=1.9).edges()[0] > 0.0
+    with pytest.raises(ValueError, match='below zero frequency'):
+        Narrowband.between(0.0, 10.0, 1.0)
+    with pytest.raises(ValueError):
+        Narrowband.between(10.0, 10.0, 1.0)
+
+
+def test_a_log_sweep_moves_its_width_in_its_octaves_over_its_rate():
+    """A band 8 Hz wide about 100 Hz, swept at 2 octaves a minute,
+    spans log2(104/96) octaves: 0.1155 of an octave, 3.46 s."""
+    band = Narrowband(100.0, 1.0, width=8.0, sweep_to=400.0, rate=2.0,
+                      mode=LOG)
+    assert band.crossing_seconds(100.0) == pytest.approx(
+        np.log2(104.0 / 96.0) / 2.0 * 60.0)
+
+
+def test_the_sheet_s_words_are_in_the_unit_asked(composite):
+    reading = composite[2]
+    said = reading.describe('g', 1.0 / G)
+    floor = reading.floor
+    assert said.startswith(f'1Z+: floor {floor.measured / G:.3g} g rms '
+                           f'(written {floor.reference / G:.3g}), 3 tones '
+                           f'{reading.tones_measured / G:.3g} g rms, total '
+                           f'{reading.total.measured / G:.3g} g rms')
+    one = judge_mixed(_record(tones=TONES[:1]), _spec(tones=TONES[:1]),
+                      onset=0.0)
+    assert ', 1 tone ' in one.describe('g', 1.0 / G)
+    narrow = Narrowband.plus_minus(300.0, 5.0, 0.02 * G ** 2)
+    banded = judge_mixed(_record(tones=()), MixedSpecification(
+        _floor(), narrowbands=[narrow]))
+    assert ', 1 narrowband, ' in banded.describe()
+
+
+def test_a_floor_line_4_db_over_is_outside_and_2_db_over_is_not():
+    """The line tolerance is 3 dB on power: 10^(3/10), not three times."""
+    def bump(db):
+        def extra(t, rng):
+            # 1/395 g²/Hz more by `db` over 200 to 240 Hz
+            more = (10.0 ** (db / 10.0) - 1.0) * 40.0 / 395.0
+            return _noise(200.0, 240.0, np.sqrt(more), rng, len(t))
+        return extra
+
+    over = judge_mixed(_record(tones=(), extra=bump(4.5)),
+                       MixedSpecification(_floor()))
+    under = judge_mixed(_record(tones=(), extra=bump(1.5)),
+                        MixedSpecification(_floor()))
+    assert over.floor.outside >= 30
+    assert under.floor.outside <= 5
+
+
+def test_a_floor_mostly_left_out_and_a_tone_off_the_floor_are_said():
+    """A width left out of 160 Hz about three tones takes over half the
+    floor's lines, and a tone at 4 Hz stands below the floor's 5 Hz
+    start: each gets its note."""
+    wide = judge_mixed(_record(), _spec(exclusion=160.0), onset=0.0)
+    assert wide.floor.left_out > 0.5
+    assert any(note.endswith('% of the floor\'s lines are left out for '
+                             'tones and narrowbands; what is left is judged '
+                             'and the rest is not')
+               and note.startswith(f'{100 * wide.floor.left_out:.0f} %')
+               for note in wide.notes)
+    narrow = judge_mixed(_record(), _spec(exclusion=1.0), onset=0.0)
+    assert not any('% of the floor' in note for note in narrow.notes)
+    low = ((4.0, 0.5),) + TONES
+    off = judge_mixed(_record(tones=low), _spec(tones=low), onset=0.0)
+    assert any('the floor is not written under all of it' in note
+               for note in off.notes)
+    assert not any('not written under' in note for note in narrow.notes)

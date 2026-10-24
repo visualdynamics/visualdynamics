@@ -397,7 +397,7 @@ def _field_value(obj, field, us):
             'num_frames': lambda: f'{averaging.frames}',
             'frame_length': lambda: f'{averaging.frame_length}',
             'window': lambda: f'{averaging.window}',
-            'overlap': lambda: f'{round(averaging.overlap * 100)}%',
+            'overlap': lambda: averaging.overlap_text(),
         }.get(field, lambda: None)()
         if answer is not None:
             return answer
@@ -1004,8 +1004,8 @@ def _stage_page(block, source, objects, us, caption, page):
                     float(source.abscissa[0]))
                 marks['averaging']['label'] = (
                     f'{averaging.frames} x {averaging.frame_length} '
-                    f'samples, {averaging.window}, '
-                    f'{round(averaging.overlap * 100)}% overlap')
+                    f'samples, {averaging.window_text()}, '
+                    f'{averaging.overlap_text()} overlap')
         if getattr(source, 'shocks', None):
             marks['shocks'] = shock_stage_geometry(
                 source.shocks, staged['extents'], float(source.abscissa[0]))
@@ -2278,8 +2278,8 @@ def _averaging_marks(source):
                   'band_alpha', 'glyph_alpha')},
         'window': [round(float(v / peak), 4) for v in shape],
         'label': (f'{averaging.frames} x {averaging.frame_length} samples, '
-                  f'{averaging.window}, '
-                  f'{round(averaging.overlap * 100)}% overlap'),
+                  f'{averaging.window_text()}, '
+                  f'{averaging.overlap_text()} overlap'),
     }
 
 

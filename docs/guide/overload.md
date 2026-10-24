@@ -29,8 +29,19 @@ table's row that names it, by its DOF and its channel type (or its DOF
 alone when the type is blank and the record has one channel there), the
 same match the roles use. A channel the table does not name, or names
 with no sensitivity, or in a unit of another quantity, has no range and
-says why; it is not judged against a guess. A range can also be given
-directly in SI, one per channel or one for all.
+says why; it is not judged against a guess. Two rows that name one
+channel give it a range only when they agree, and the check notes which
+rows; where they differ the channel has no range. A range can also be
+given directly in SI, one per channel or one for all.
+
+The Range column holds whole volts, with a default of 5 V and a minimum
+of 1 V, so a blank cell, a 0, and a fractional range such as 0.5 or
+2.5 V all read back as 5 V. A channel clipped at 2.5 g on a 0.5 V input
+over 200 mV/g is then read against 25 g, with 20 dB of headroom it does
+not have. Since 5 V is also a common setting, a channel whose row holds
+it is still read, but it is marked (`on_default`), its words say its
+range is the column's default, and the check's words count the channels
+read against it and ask for the range to be confirmed.
 
 ## What it reports
 
@@ -49,6 +60,7 @@ range makes of them.
 | `headroom_db` | the range over the largest excursion, in dB: 20 log10(range / peak). At or below 0 dB the range was reached |
 | `next_peak`, `next_headroom_db` | the largest excursion scaled up by the step to the next level (`step_db`, 6 dB by default), and the headroom left there |
 | `beyond` | samples further out than the range and its margin |
+| `on_default`, `note`, `cautions()` | whether the range came from a Range cell holding the column's default, any note on the table rows it came from, and both in words |
 | `statistics` | the channel's `TimeStatistics`, for every other number |
 
 Three things are judged, each channel for the first that applies:
@@ -79,7 +91,7 @@ next level) read the whole check.
 
 Twelve seconds of Gaussian random, flat at 0.04 g²/Hz from 20 to
 2,000 Hz and sampled at 5,120 a second, read 8.88 grms with a largest
-peak of 37 g. Three channels, each a 5 V input on a 200 mV/g chain, a
+peak of 37 g. Three channels, each a 10 V input on a 400 mV/g chain, a
 25 g range: the record at minus 6 dB, the record at full level through
 the range, and the record at minus 12 dB.
 
@@ -127,13 +139,15 @@ samples are crosses, and every flagged bar carries its finding in words.
 ## In the app
 
 *Overload* is on a time history's bar beside *Kurtosis* and
-*Statistics*, one of the readings of a record. It reads the ranges from
-the channel table linked with the record, and with none it says so and
-how to give it one. The panel names the table the ranges came from and
+*Statistics*, one of the readings of a record, once a channel table
+linked with the record names one of its channels; it reads the ranges
+from that table. The panel names the table the ranges came from and
 holds the step to the next level and the margin; under them is a row a
 channel, its headroom and its samples on the rail, with each flagged
 channel in bold, then the numbers for the channel the trace draws, and
-the judgement in words. Clicking a channel's row draws its trace.
+the judgement in words. A range taken from the column's default reads
+"the default" beside it, and its row and value say why in their tips.
+Clicking a channel's row draws its trace.
 Dragging the floor on the headroom bars moves the step. Every edit
 redraws at once, and the reading is journaled as its `plot_overload`
 call.

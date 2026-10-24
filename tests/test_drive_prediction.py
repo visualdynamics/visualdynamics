@@ -543,6 +543,21 @@ def test_more_drives_than_channels_takes_the_least_power_and_says_so():
                for note in prediction.notes)
 
 
+def test_fewer_drives_than_channels_meets_the_target_in_least_squares():
+    """One drive reaching two channels alike, and a target asking them to
+    move independently at 0.01 g^2/Hz each: the inverse is [1/2, 1/2],
+    so the drive is a quarter of the summed target, 0.005 V^2/Hz, both
+    channels read half their target (3 dB short), and the note says why."""
+    prediction = predict_drives(matrix_frf([[1.0], [1.0]]),
+                                matrix_spec(np.diag([0.01, 0.01])))
+    k = at(prediction, 100.0)
+    assert prediction.drive_asd(0)[k] == pytest.approx(0.005)
+    assert prediction.shortfall_db[k] == pytest.approx(
+        [10.0 * math.log10(0.5)] * 2)
+    assert any(note.startswith('fewer drives than control channels')
+               for note in prediction.notes)
+
+
 # ---- what the drives ask of the shaker -------------------------------------------
 
 

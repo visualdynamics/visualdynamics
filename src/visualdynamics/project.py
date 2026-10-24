@@ -5968,6 +5968,10 @@ _VERB_APPLIES: tuple = (
         for other in p.values()))),
     # a specification bands too, limits and all (Brandon, 2026-09-18)
     ('compute_octave', lambda p, o: isinstance(o, Psd)),
+    # a cross-spectral matrix repaired where no signals could have it;
+    # the Realizability reading's apply button
+    ('make_realizable', lambda p, o: (isinstance(o, Psd)
+                                      and o.reference_dof is not None)),
     # what a file could not say: a PSD that is a requirement, and back
     # — but not a specification with limits, which a PSD cannot hold
     ('read_as_specification', lambda p, o: (

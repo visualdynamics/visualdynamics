@@ -1028,6 +1028,14 @@ class MainWindow(QMainWindow):
             lambda _wanted: self.render_current())
         self.data_pane.rms_check_panel.changed.connect(
             self._rms_check_chosen)
+        # and the two matrix checks: the toggles redraw, and the
+        # realizability reading's button makes the repaired matrix
+        self.data_pane.conditioning_toggled.connect(
+            lambda _wanted: self.render_current())
+        self.data_pane.realizability_toggled.connect(
+            lambda _wanted: self.render_current())
+        self.data_pane.realizability_panel.apply_asked.connect(
+            self.make_realizable)
         # the acts, asked for where their settings are set (Brandon,
         # 2026-08-28): each button is a second entrance to the same
         # verb the bar's act offers, so provenance, badges and the
@@ -1206,6 +1214,11 @@ class MainWindow(QMainWindow):
         #: the time history and threshold chosen in the rms check's
         #: pane, by spectrum name, so a redraw keeps them
         self._rms_check_settings: dict[str, dict[str, Any]] = {}
+        #: the matrix check on the plot (`_render_matrix_check`): which
+        #: one, the reading, its cursor; None while neither is up. And
+        #: where each object's cursor was left, by (check, name)
+        self._matrix_check: dict[str, Any] | None = None
+        self._matrix_check_frequencies: dict[tuple[str, str], float] = {}
         #: and the shock windows, the same way
         self.shock_overlays: list[Any] = []
         #: which comparison the plot is drawing, so the compliance table
@@ -9594,6 +9607,7 @@ class MainWindow(QMainWindow):
         self._clear_transmissibility()
         self._clear_confidence()
         self._clear_rms_check()
+        self._clear_matrix_check()
         # and so does the 3-D surface: the waterfall path raises it
         # again itself, so a photo, a report, a fit or an empty
         # selection never inherits the last selection's 3-D view. Here
@@ -13104,6 +13118,152 @@ class MainWindow(QMainWindow):
             except RuntimeError:
                 # the plot went with the drawing it belonged to
                 pass
+    # ---- the two matrix checks: conditioning and realizability ----------
+
+    def _matrix_check_source(self, check, series):
+        """(name, object) when the selection is one object the check
+        reads: for 'conditioning', an FRF from two references or more, or
+        a CSD; for 'realizability', a CSD (a PSD or specification with
+        cross terms). None otherwise, which is also what hides the
+        button. The whole object is the matrix read; a script picks
+        records with the method's `records`."""
+        if len(series) != 1:
+            return None
+        name, data, _records = series[0]
+        if name is None or data is None:
+            return None
+        if isinstance(data, Psd):
+            return (name, data) if data.reference_dof is not None else None
+        if check == 'conditioning' and isinstance(data, Frf):
+            references = {str(dof) for dof in (data.reference_dof or [])}
+            return (name, data) if len(references) > 1 else None
+        return None
+
+    def _render_matrix_check(self, check, name, data):
+        """The check's figure in place of the plot
+        (`plot.matrix_checks`), a cursor on its top plot, and the reading
+        at the cursor's line in the check's pane. A refusal from the
+        core (an incomplete matrix, records in two units) is said in the
+        pane and on the status line, with nothing drawn. Returns the
+        status line."""
+        import pyqtgraph as pg
+        from PySide6.QtCore import Qt
+
+        from ..plot.matrix_checks import (
+            build_conditioning,
+            build_realizability,
+        )
+        from ..units import UNKNOWN
+
+        pane = self.data_pane
+        panel = getattr(pane, f'{check}_panel')
+        pane.offer_waterfall(False)
+        pane.show_waterfall(False)
+        pane.graphics.clear()
+        panel.show()
+        try:
+            reading = getattr(data, check)()
+        except (ValueError, TypeError) as refusal:
+            panel.show_reading(None, refusal=f'No {check} read: {refusal}')
+            return f'{name}: no {check} read: {refusal}'
+        scale, unit = 1.0, ''
+        if check == 'conditioning':
+            if reading.dimension != UNKNOWN:
+                scale = float(self.unit_system.from_si(1.0,
+                                                       reading.dimension))
+                unit = self.unit_system.label_text(reading.dimension)
+            plots = build_conditioning(pane.graphics, reading,
+                                       unit_system=self.unit_system,
+                                       theme=self.theme_name)
+            flagged = reading.ill
+        else:
+            plots = build_realizability(pane.graphics, reading,
+                                        theme=self.theme_name)
+            flagged = reading.failing
+        top = plots[0]
+        f = np.asarray(reading.frequency, dtype=float)
+        positive = f[f > 0.0]
+        frequency = self._matrix_check_frequencies.get((check, name))
+        if (frequency is None or not len(positive)
+                or not positive[0] <= frequency <= f[-1]):
+            # the first flagged line off DC, where the reading has
+            # something to say; the middle of the span when nothing is
+            # flagged. The frequency axis is in decades, so never DC
+            lit = np.flatnonzero(flagged & (f > 0.0))
+            frequency = (float(f[lit[0]]) if len(lit)
+                         else float(positive[len(positive) // 2])
+                         if len(positive) else 1.0)
+        color = resolve_theme(self.theme_name)['plot_foreground']
+        cursor = pg.InfiniteLine(
+            pos=float(np.log10(frequency)), angle=90, movable=True,
+            pen=pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine))
+        top.addItem(cursor, ignoreBounds=True)
+        self._matrix_check = {'check': check, 'name': name,
+                              'reading': reading, 'plot': top,
+                              'cursor': cursor, 'scale': scale,
+                              'unit': unit}
+        cursor.sigPositionChanged.connect(self._matrix_check_moved)
+        call = f'visualdynamics.plot.plot_{check}'
+        self._journal_view(
+            f'{call}(project[{name!r}]',
+            f"{call}(project[{name!r}].{check}(), path='{check}.png', "
+            'show=False)')
+        self._matrix_check_moved()
+        return f'{name}: {reading.describe()}'
+
+    def _matrix_check_moved(self, _line=None):
+        """Read the line under the cursor into the pane and the status
+        line. Returns the status line."""
+        state = self._matrix_check
+        if state is None:
+            return None
+        reading = state['reading']
+        f = reading.frequency
+        frequency = float(np.clip(10.0 ** float(state['cursor'].value()),
+                                  f[0], f[-1]))
+        self._matrix_check_frequencies[(state['check'],
+                                        state['name'])] = frequency
+        point = reading.at(frequency)
+        panel = getattr(self.data_pane, f'{state["check"]}_panel')
+        if state['check'] == 'conditioning':
+            panel.show_reading(reading, point, scale=state['scale'],
+                               unit=state['unit'])
+            message = point.describe(state['unit'], state['scale'])
+        else:
+            panel.show_reading(reading, point)
+            message = point.describe()
+        message = f'{state["name"]}, {message}'
+        self._show_status(message)
+        return message
+
+    def _clear_matrix_check(self):
+        """Let go of the cursor before every drawing; the figure itself
+        goes with the layout it was drawn in."""
+        state, self._matrix_check = self._matrix_check, None
+        if state is None:
+            return
+        try:
+            state['cursor'].sigPositionChanged.disconnect(
+                self._matrix_check_moved)
+        except (RuntimeError, TypeError):
+            pass
+
+    def make_realizable(self) -> None:
+        """Repair the selected CSD or specification to the nearest
+        realizable matrix and add the result beside it: the
+        Realizability reading's apply button, the verb a script calls."""
+        acted = self._act_on(
+            lambda o: isinstance(o, Psd) and o.reference_dof is not None,
+            'Select a CSD or a specification with cross terms to repair',
+            self.project.make_realizable)
+        if acted is None:
+            return
+        name, _obj, added = acted
+        # shown at once, with the reading still up, so the button's
+        # result is read the same way: realizable at every line
+        self.show_object(added)
+        self._show_status(f'{added}: {name} repaired to the nearest '
+                          'realizable matrix — linked to it')
 
     def _rms_check_source(self, series):
         """(name, spectrum, record, histories) when the selection is one
@@ -13652,6 +13812,14 @@ class MainWindow(QMainWindow):
                                          series) is not None,
                                      rms_check=self._rms_check_source(
                                          series) is not None,
+                                     conditioning=self.
+                                     _matrix_check_source(
+                                         'conditioning', series)
+                                     is not None,
+                                     realizability=self.
+                                     _matrix_check_source(
+                                         'realizability', series)
+                                     is not None,
                                      # a declared unit, as the readings
                                      # require (`core.shaker`)
                                      fit=history is not None and any(
@@ -13674,6 +13842,10 @@ class MainWindow(QMainWindow):
                                 ('resample', self._render_resample)):
                 if self.data_pane.showing(key):
                     return render(history, series[0][0], series[0][2])
+        for check in ('conditioning', 'realizability'):
+            source = self._matrix_check_source(check, series)
+            if source is not None and self.data_pane.showing(check):
+                return self._render_matrix_check(check, *source)
         if all_frf and self.data_pane.showing_cmif:
             drawn = build_cmif(self.data_pane.graphics, series,
                                unit_system=self.unit_system,

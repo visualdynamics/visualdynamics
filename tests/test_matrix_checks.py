@@ -483,11 +483,15 @@ def test_make_realizable_adds_the_repair_and_refreshes_to_it():
     assert project[name].realizability().realizable
     assert project.provenance[name]['verb'] == 'make_realizable'
     assert project.journal[-1] == "project.make_realizable('Spec')"
+    assert 'make_realizable' in dict(project.verbs('Spec'))
     before = project[name].ordinate.copy()
     project.refresh(name)
     np.testing.assert_array_equal(project[name].ordinate, before)
     with pytest.raises(ValueError, match='nothing to repair'):
         project.make_realizable(name)
+    project.add('Autos', Psd(F, np.ones((2, 4)), response_dof=['1Z+', '2Z+'],
+                             ordinate_dim=['acceleration**2/frequency'] * 2))
+    assert 'make_realizable' not in dict(project.verbs('Autos'))
 
 
 # ---- the edges the first mutation pass found unwatched ----------------------

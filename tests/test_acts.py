@@ -32,7 +32,7 @@ PANE_VERBS = {'filter_data', 'truncate_data', 'detect_shocks',
               'compute_spectra', 'compute_psds', 'compute_cpsds',
               'compute_srs', 'compute_frfs', 'compute_multiple_coherence',
               'compute_octave', 'generate_rigid_body_modes',
-              'solve_modes', 'author_specification'}
+              'solve_modes', 'author_specification', 'make_realizable'}
 #: the comparison table's own act: two sets are matched where they
 #: are compared, pair by pair
 TABLE_VERBS = {'match_modes'}

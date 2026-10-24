@@ -1074,6 +1074,83 @@ def plot_composition():
           f'{f[np.argmax(after.ordinate[0])]:.0f} Hz')
 
 
+def _low_level_survey():
+    """A low-level random run and the full-level test it is for, as
+    (history, specification, profiles): 24 s of random from 20 to
+    2000 Hz at 12 dB under the profile on the control channel 1Z+, the
+    responses at a bracket (2Z+, a 250 Hz mode at Q 15), a second point
+    (3Z+, 700 Hz at Q 8) and a monitor (4Z+, 1.2 kHz at Q 10), each with
+    0.05 g rms of noise the input did not cause. The profile rises at
+    6 dB an octave from 0.01 g²/Hz at 20 Hz to 0.04 from 80 to 500 Hz
+    and falls at 3 dB an octave to 0.01 at 2 kHz, within plus or minus
+    3 dB; the bracket may see 2 g²/Hz and the second point 1."""
+    import numpy as np
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import Specification, TimeHistory
+
+    g, fs, seconds = 9.80665, 5120.0, 24.0
+    n = int(fs * seconds)
+    f = np.fft.rfftfreq(n, 1.0 / fs)
+    breakpoints = np.array([20.0, 80.0, 500.0, 2000.0])
+    levels = np.array([0.01, 0.04, 0.04, 0.01])
+    shape = np.zeros(len(f))
+    inside = (f >= 20.0) & (f <= 2000.0)
+    shape[inside] = np.sqrt(10.0 ** np.interp(
+        np.log10(f[inside]), np.log10(breakpoints), np.log10(levels)))
+    spectrum = np.fft.rfft(np.random.default_rng(2610).standard_normal(n))
+    x = np.fft.irfft(spectrum * shape, n)
+    area = np.trapezoid(shape ** 2, f)
+    x *= np.sqrt(area / 16.0) / np.std(x)
+
+    def mode(fn, q):
+        r, z = f / fn, 1.0 / (2.0 * q)
+        return (1.0 + 2j * z * r) / (1.0 - r ** 2 + 2j * z * r)
+
+    rows = [x]
+    for k, (fn, q) in enumerate(((250.0, 15.0), (700.0, 8.0),
+                                 (1200.0, 10.0))):
+        y = np.fft.irfft(np.fft.rfft(x) * mode(fn, q), n)
+        rows.append(y + np.random.default_rng(2611 + k).standard_normal(n)
+                    * 0.05)
+    history = TimeHistory(np.arange(n) / fs, np.vstack(rows) * g,
+                          response_dof=['1Z+', '2Z+', '3Z+', '4Z+'],
+                          ordinate_dim=['acceleration'] * 4,
+                          ordinate_unit=['g'] * 4)
+    history.averaging = Averaging(frame_length=4096, overlap=0.5,
+                                  window='hann').filled(n, fs)
+    specification = Specification(
+        breakpoints, levels[None] * g ** 2, response_dof=['1Z+'],
+        ordinate_dim='acceleration**2/frequency',
+        abort_lower=levels[None] * g ** 2 / 2.0,
+        abort_upper=levels[None] * g ** 2 * 2.0)
+    profiles = Specification(
+        np.array([20.0, 2000.0]), np.array([[2.0, 2.0], [1.0, 1.0]]) * g ** 2,
+        response_dof=['2Z+', '3Z+'], ordinate_dim='acceleration**2/frequency')
+    return history, specification, profiles
+
+
+def limit_prediction():
+    """The notch two limit channels would cut at full level, predicted
+    from the H1 of a low-level run: the bracket's 250 Hz mode needs a
+    notch deep enough to take the control outside its abort tolerance,
+    the second point's 700 Hz mode a shallower one that stays inside,
+    and the monitor is predicted with no limit."""
+    from visualdynamics.core.limit_prediction import predict_limits
+    from visualdynamics.plot import plot_limit_prediction
+    from visualdynamics.units import DEFAULT_SYSTEM
+
+    history, specification, profiles = _low_level_survey()
+    transmissibility = history.compute_frfs(references=['1Z+'], method='H1')
+    prediction = predict_limits(transmissibility, specification, profiles)
+    for line in prediction.describe(DEFAULT_SYSTEM):
+        print(f'  {line}')
+    plot_limit_prediction(transmissibility, specification, profiles,
+                          unit_system=DEFAULT_SYSTEM, show=False,
+                          size=(1000, 1100),
+                          path=str(OUT / 'limit-prediction.png'))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -1098,6 +1175,7 @@ def main():
     amplitude_spectrum()
     comparison_chance()
     plot_composition()
+    limit_prediction()
     print('done')
 
 

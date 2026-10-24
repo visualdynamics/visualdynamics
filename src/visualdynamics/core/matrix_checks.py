@@ -460,10 +460,19 @@ class Conditioning:
         if not runs:
             return (f'{self.title}: condition number within '
                     f'{self.limit:g} at all {judged} lines judged '
-                    f'(largest {worst:.4g})')
+                    f'(largest {worst:.4g}){_unjudged(self.judged)}')
         flagged = int(self.ill.sum())
         return (f'{self.title}: condition number over {self.limit:g} at '
-                f'{flagged} of {judged} lines, {_span_text(runs)}')
+                f'{flagged} of {judged} lines, {_span_text(runs)}'
+                f'{_unjudged(self.judged)}')
+
+
+def _unjudged(judged: np.ndarray) -> str:
+    """'; 3 lines not judged' when some were not, else nothing: a
+    verdict over the lines judged is not one over the rest, and the
+    verdict is all the status line shows."""
+    left = int(np.size(judged) - np.count_nonzero(judged))
+    return f'; {left} line{"s" * (left != 1)} not judged' if left else ''
 
 
 def condition_matrix(frequency: Any, matrix: Any, rows: Any, columns: Any,
@@ -922,10 +931,12 @@ class Realizability:
         if not judged:
             return f'{n} channels: no line could be judged'
         if self.realizable:
-            return f'{n} channels: realizable at all {judged} lines'
+            return (f'{n} channels: realizable at all {judged} lines'
+                    f'{_unjudged(self.judged)}')
         flagged = int(self.failing.sum())
         text = (f'{n} channels: not realizable at {flagged} of {judged} '
-                f'lines, {_span_text(self.bands())}')
+                f'lines, {_span_text(self.bands())}'
+                f'{_unjudged(self.judged)}')
         worst = self.worst()
         if worst is not None:
             i, j, line = worst

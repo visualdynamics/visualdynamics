@@ -13,6 +13,7 @@ quarter.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 
 import numpy as np
@@ -203,6 +204,9 @@ def test_a_nan_line_a_zero_line_and_a_dead_drive():
     assert any('1 lines are zero throughout' in n for n in reading.notes)
     assert 'not judged' in reading.at(20.0).describe()
     assert not reading.at(20.0).ill, 'a line not judged is not flagged'
+    # the verdict, which is the status line, counts the lines left out
+    assert reading.describe().endswith('at all 2 lines judged (largest 3); '
+                                       '2 lines not judged')
     dead = h.copy()
     dead[:, :, 1] = 0.0
     dead[1, 0, 0] = 3.0
@@ -334,6 +338,8 @@ def test_nan_lines_are_not_judged_and_nothing_judged_is_no_pass():
     assert not reading.failing[2]
     assert any('not a finite number' in n for n in reading.notes)
     assert reading.bands() == [(10.0, 20.0), (40.0, 40.0)]
+    assert 'not realizable at 3 of 3 lines' in reading.describe()
+    assert '; 1 line not judged' in reading.describe()
     nothing = check_spectral_matrix(F, np.full((4, 3, 3), np.nan),
                                     ['a', 'b', 'c'])
     assert not nothing.realizable
@@ -781,6 +787,80 @@ def test_a_measured_csd_is_realizable_at_every_line_and_at_the_edges():
     assert short.averaging.frames == 2
     reading = short.compute_cpsds().realizability()
     assert reading.realizable and (reading.rank[1:] <= 2).all()
+
+
+def test_a_complex_plant_measured_from_records_conditions_as_its_truth():
+    """Two drives, the second carrying the first three samples late plus
+    its own part, through four FIR filters with their own delays: every
+    plant entry complex and different line to line. The H1 FRF the
+    package measures from the records conditions within 3 percent of
+    the plant's own singular values, worked from the taps at each line.
+    A singular value is unchanged by conjugating or transposing the
+    matrix, so this pins the matrix's assembly from complex records,
+    not a convention."""
+    from scipy.signal import lfilter
+
+    fs, n = 1024.0, 1 << 16
+    rng = np.random.default_rng(7)
+    w = rng.standard_normal((2, n))
+    drives = [w[0], 0.9 * np.roll(w[0], 3) + 0.5 * w[1]]
+    taps = {(0, 0): [1.0, 0.5], (0, 1): [0.0, 0.0, 0.7],
+            (1, 0): [0.0, 0.3, 0.0, 0.2], (1, 1): [0.8, 0.0, -0.4]}
+    responses = [sum(lfilter(taps[(i, j)], 1.0, drives[j]) for j in range(2))
+                 for i in range(2)]
+    history = _history(np.vstack(drives + responses), fs,
+                       dofs=['1X+', '2X+', '1Z+', '2Z+'],
+                       dims=['voltage', 'voltage', 'acceleration',
+                             'acceleration'])
+    frf = history.compute_frfs(references=['1X+', '2X+'], method='H1')
+    reading = frf.conditioning()
+    z = np.exp(-2j * np.pi * reading.frequency / fs)
+    plant = np.zeros((len(z), 2, 2), dtype=complex)
+    for (i, j), values in taps.items():
+        plant[:, i, j] = sum(tap * z ** k for k, tap in enumerate(values))
+    singular = np.linalg.svd(plant, compute_uv=False)
+    truth = singular[:, 0] / singular[:, -1]
+    inside = slice(1, -1)
+    np.testing.assert_allclose(reading.condition[inside], truth[inside],
+                               rtol=0.03)
+
+
+def test_a_measured_csd_with_complex_cross_terms_and_one_term_flipped():
+    """Three channels nearly copies of one another at delays of 0, 3 and
+    7 samples: their measured matrix has complex cross terms and is
+    realizable at every line. The same matrix with one pair's cross term
+    conjugated on both sides, as a record written in the other
+    convention would be, is still Hermitian but no longer holds
+    together wherever that pair's phase is away from 0 and 180 degrees,
+    and the check says so."""
+    fs, n = 1024.0, 1 << 15
+    rng = np.random.default_rng(23)
+    w = rng.standard_normal((3, n))
+    signals = np.vstack([w[0], np.roll(w[0], 3) + 0.05 * w[1],
+                         np.roll(w[0], 7) + 0.05 * w[2]])
+    csd = _history(signals, fs).compute_cpsds()
+    measured = csd.realizability()
+    assert measured.judged.all() and measured.realizable, measured.describe()
+    flipped = copy.deepcopy(csd)
+    at = {pair: k for k, pair in enumerate(zip(csd.response_dof,
+                                               csd.reference_dof))}
+    for pair in (('1Z+', '2Z+'), ('2Z+', '1Z+')):
+        flipped.ordinate[at[pair]] = np.conj(csd.ordinate[at[pair]])
+    reading = flipped.realizability()
+    phase = np.degrees(np.angle(csd.ordinate[at[('1Z+', '2Z+')]]))
+    away = np.abs(np.sin(np.radians(phase))) > 0.5
+    assert reading.failing[away].all()
+    assert not reading.realizable
+    # the upper triangle alone, completed from the mirrors as their
+    # conjugates, reads exactly as the whole matrix does
+    upper = [k for k, (r, c) in enumerate(zip(csd.response_dof,
+                                              csd.reference_dof)) if r <= c]
+    half = csd.realizability(upper)
+    assert half.realizable
+    np.testing.assert_allclose(half.eigenvalues, measured.eigenvalues,
+                               rtol=1e-9, atol=1e-12)
+    np.testing.assert_allclose(csd.conditioning(upper).condition,
+                               csd.conditioning().condition, rtol=1e-9)
 
 
 def test_white_noise_trips_neither_check_by_chance():

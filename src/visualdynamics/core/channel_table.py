@@ -75,12 +75,13 @@ TRIAX = ('X', 'Y', 'Z')
 #: Headers, where title-casing the column name is not the answer.
 #: Sensitivity says its units here because it has no column to say them
 #: in — it is mV per whatever the Unit cell beside it holds, and the two
-#: are one calibration statement. Range is always volts: the
-#: instrumentation's limit, not the sensor's.
+#: are one calibration statement. The two ranges are always volts: the
+#: DAQ input's, and the sensor's own full-scale output.
 TITLES = {
     'triax_dof': 'Triax DOF',
     'sensitivity': 'Sensitivity (mV/Unit)',
-    'range': 'Range (V)',
+    'daq_range': 'DAQ Range (V)',
+    'sensor_range': 'Sensor Range (V)',
     'unit_x': 'Unit X',
     'unit_y': 'Unit Y',
     'unit_z': 'Unit Z',
@@ -245,7 +246,7 @@ class ChannelTable:
     ----------
     frame : pandas.DataFrame
         The table, one row per channel, columns in `SCHEMA` order. Every
-        cell is text except `channel` and `range`, which are integers.
+        cell is text except `channel`, which is an integer.
         `node` is text too, blank where no node was recorded.
     """
     # Text and not numbers for the other columns: a serial number that
@@ -273,7 +274,15 @@ class ChannelTable:
         'channel_type': Spec('choice', choices=CHANNEL_TYPES),
         'unit': Spec('unit'),
         'sensitivity': Spec('float', minimum=0),
-        'range': Spec('int', default='5', minimum=1),
+        # Two limits, either of which clips a channel: the DAQ input's
+        # range and the sensor's own full-scale output (an ICP
+        # accelerometer saturates near 5 V whatever the DAQ is set to).
+        # Volts, blank when unstated. Until Brandon, 2026-10-24, there
+        # was one 'range', a whole number defaulting to 5: a 0.5 V input
+        # read as 5 V and passed a clipped channel with 20 dB of headroom
+        # it did not have, and 0.5 V could not be typed at all
+        'daq_range': Spec('float', minimum=0),
+        'sensor_range': Spec('float', minimum=0),
         'serial_number': Spec('text'),
         'make': Spec('text'),
         'model': Spec('text'),
@@ -297,7 +306,11 @@ class ChannelTable:
         'unit': ('units', 'engineering_unit', 'engineering_units', 'eu'),
         'channel_type': ('type', 'sensor_type', 'measurement', 'quantity'),
         'sensitivity': ('sens', 'sensitivity_mv_eu', 'cal_factor'),
-        'range': ('voltage_range', 'full_scale', 'full_scale_voltage'),
+        # 'range' is the one column a saved table had before there were
+        # two; it was the DAQ's limit by every source that filled it
+        'daq_range': ('range', 'voltage_range', 'input_range', 'daq_input_range'),
+        'sensor_range': ('full_scale', 'full_scale_voltage', 'full_scale_output',
+                         'sensor_full_scale'),
         'serial_number': ('serial', 'sn', 'serial_no'),
         'make': ('manufacturer', 'vendor', 'brand'),
         'model': ('model_number', 'part_number', 'model_no'),
@@ -416,7 +429,7 @@ class ChannelTable:
         if spec.kind == 'int':
             if not text:
                 # an int column has no blank: a channel without a number
-                # is not a channel, and a range of nothing is not a limit
+                # is not a channel
                 raise ValueError(f'{name} cannot be blank')
             number = float(text)
             if number != int(number):
@@ -825,10 +838,24 @@ class ChannelTable:
         return np.array([float(v) if str(v).strip() else np.nan
                          for v in self.frame['sensitivity']])
 
-    def ranges(self) -> np.ndarray:
-        """Each channel's instrumentation voltage range, in volts, as
-        integers (5 by default)."""
-        return np.array([int(v) for v in self.frame['range']])
+    def daq_ranges(self) -> np.ndarray:
+        """Each channel's DAQ input range in volts, NaN where unstated."""
+        return self._volts('daq_range')
+
+    def sensor_ranges(self) -> np.ndarray:
+        """Each sensor's full-scale output in volts, NaN where unstated."""
+        return self._volts('sensor_range')
+
+    def clip_ranges(self) -> np.ndarray:
+        """The level each channel clips at, in volts: the smaller of its
+        DAQ range and its sensor range, whichever is stated, NaN where
+        neither is."""
+        with np.errstate(invalid='ignore'):
+            return np.fmin(self.daq_ranges(), self.sensor_ranges())
+
+    def _volts(self, column: str) -> np.ndarray:
+        return np.array([float(v) if str(v).strip() else np.nan
+                         for v in self.frame[column]])
 
     def __getitem__(self, name: str) -> np.ndarray:
         """A column as a numpy array, which is what every reader wants."""

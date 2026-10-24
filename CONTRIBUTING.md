@@ -95,8 +95,8 @@ skipped and the rest of the suite is unaffected.
 ## How a change travels
 
 Work in a fork. The repository itself holds no working branches, only
-`main` and the maintainer's publishing branches, and a ruleset refuses
-the creation of any other branch, the maintainer's included. Your fork
+`main` and the publishing branches, and a ruleset refuses the
+creation of any other branch, the maintainers' included. Your fork
 is your own space: nobody else can create a branch there, and the
 fork's name says whose branch it is.
 
@@ -165,8 +165,15 @@ them in full. Briefly:
   start time) and under the default Hann window. Check a statistical
   rule against simulated noise.
 - Put refusals in `core`, where the API and the GUI both reach them.
+- Take a fact from where the package keeps it: control channels from
+  the channel table's Control flag, a CPSD's conjugation from
+  `compute_cpsds`.
+- A claim in a docstring, the guide or the pull request has a test
+  that would fail if it were false.
 - For a numeric module, run `tools/mutate.py` against its tests and
   list what survives in the pull request.
+- Rebase onto current `main` before asking for review; a test that
+  fails on your branch and passes on `main` is your branch's.
 
 `PRINCIPLES.md` is the standard a change is measured against, and it is
 worth reading before you start on a substantial one.

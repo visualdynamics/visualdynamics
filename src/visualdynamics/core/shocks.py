@@ -355,7 +355,8 @@ def _windowed(runs: list[tuple[int, int]], hops: int, loud: np.ndarray,
         j0 = int(np.ceil(last / scale))
         j1 = min(int(limit / scale), len(loud))
         peak = loud[int(first / scale):max(j0, int(first / scale) + 1)]
-        line = max(quiet_line, float(peak.max()) - settled)             if peak.size else quiet_line
+        line = (max(quiet_line, float(peak.max()) - settled)
+                if peak.size else quiet_line)
         under = np.nonzero(loud[j0:j1] < line)[0]
         settle = round((j0 + (int(under[0]) if under.size else j1 - j0))
                        * scale)

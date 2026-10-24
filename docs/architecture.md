@@ -218,6 +218,7 @@ the suite, and they are why the rules above are more than preferences:
 | `test_declared_dependencies.py` | What the modules import, what `pyproject.toml` declares and what the frozen build carries all agree. |
 | `test_window_lifetime.py` | A closed window is destroyed. A leak here once grew CI's workers to gigabytes. |
 | `test_public_tree.py` | What is published names no affiliation and no held-back material. |
+| `test_joined_lines.py` | No line of Python holds two pieces of code run together across a wide gap, the trace of a line continuation lost in an edit. |
 
 ## Where to go next
 

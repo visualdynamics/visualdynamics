@@ -38,7 +38,8 @@ def test_a_new_channel_is_blank_but_its_number():
         if name == 'channel':
             continue
         assert str(table[name][0]) == spec.default, name
-    assert table['range'][0] == 5
+    assert table['daq_range'][0] == '' and table['sensor_range'][0] == '', \
+        'unstated until someone says'
 
 
 def test_no_channels_cannot_be_added():

@@ -1148,10 +1148,7 @@ def _judge_floor(spec, channel, residual_psd, lines_kept, floor_db):
     lower = judge(bounded, residual_psd, record, 0, 'warning_lower', False, 0)
     left, _right = residual_psd.bin_bounds()
     middles = np.array([0.5 * (cell['low'] + cell['high'])
-                        for cell in target['cells']])
-    if not len(middles):
-        empty = np.zeros(0, dtype=bool)
-        return 0.0, 0.0, empty, empty
+                        for cell in target['cells']], dtype=np.float64)
     # each cell lies on the spectrum's lines, so its middle is within
     # a line's bin and names that line
     line = np.searchsorted(left, middles, side='right') - 1
@@ -1187,7 +1184,9 @@ def _judge_tone(history, spec, tone, column, band, onset, start, tolerance,
                        onset=tone_onset, channels=[channel])[0]
     read = np.abs(np.asarray(level.ordinate[0])).astype(np.float64)
     written = tone.target(level.abscissa)[:, column]
-    settled = np.asarray(level.seconds) >= start
+    # the band settles from the tone's own start, which is `start_time`
+    # after the environment's
+    settled = np.asarray(level.seconds) >= start + float(tone.start_time)
     if not settled.any():
         settled = np.ones(read.shape, dtype=bool)
     read, written = read[settled], written[settled]
@@ -1378,7 +1377,8 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
     settle : float, optional
         Seconds from `onset` before which nothing is read, so the band
         has settled; `settling_seconds` of the band by default, and
-        none without tones.
+        none without tones. A tone that turns on later (its
+        `start_time`) is read from that long after its own start.
     averaging : Averaging, optional
         How the residual's spectrum is averaged; the record's own, or
         half-overlapped Hann frames at 1 Hz lines or finer, by default.

@@ -1138,18 +1138,25 @@ def test_a_record_one_frame_long_is_read_and_a_shorter_one_refused():
 
 def test_a_tone_that_turns_on_later_than_the_environment_is_read_from_then():
     """A tone's `start_time` puts it that long after the onset: a tone
-    on from 4 s to 14 s reads its level when timed from there."""
-    tone = Tone(19.44, G).sine_tone(10.0, start_time=4.0)
-    tones = SineSweepSpecification([tone], [CHANNEL],
-                                   ordinate_unit='m/s**2')
+    on from 4 s to 14 s reads its level when timed from there, and its
+    band settles from its own start, so it is read for as long as the
+    same tone on from the onset is."""
+    def on(start):
+        tone = Tone(19.44, G).sine_tone(10.0, start_time=start)
+        tones = SineSweepSpecification([tone], [CHANNEL],
+                                       ordinate_unit='m/s**2')
 
-    def late(t, _rng):
-        return np.where((t >= 4.0) & (t < 14.0),
-                        np.sin(2.0 * np.pi * 19.44 * t), 0.0)
+        def played(t, _rng):
+            return np.where((t >= start) & (t < start + 10.0),
+                            np.sin(2.0 * np.pi * 19.44 * t), 0.0)
 
-    reading = judge_mixed(_record(tones=(), extra=late),
-                          MixedSpecification(_floor(), tones), onset=0.0)
-    assert reading.tones[0].measured / G == pytest.approx(1.0, rel=0.02)
+        return judge_mixed(_record(tones=(), extra=played),
+                           MixedSpecification(_floor(), tones),
+                           onset=0.0).tones[0]
+
+    late, early = on(4.0), on(0.0)
+    assert late.measured / G == pytest.approx(1.0, rel=0.02)
+    assert abs(late.readings - early.readings) <= 1
 
 
 def test_a_fixed_band_with_no_line_over_the_floor_is_not_judged():
@@ -1378,3 +1385,69 @@ def test_each_floor_cell_is_kept_or_left_out_by_its_own_line():
     alone = ~kept
     _power, _asked, judged, out = _judge_floor(spec, CHANNEL, psd, alone, 3.0)
     assert judged.sum() == 1 and out.sum() == 1
+
+
+def test_the_guide_s_figures_read_what_the_guide_says():
+    """The two composites `tools/make_concept_figures.py` draws for the
+    guide, built the same way, read the figures the guide quotes: the
+    sine-on-random sheet's 1.003 grms residual, 2.477 g rms of tones,
+    0.986 against 0.986 for the floor with 2.8 percent of its lines left
+    out, and 2.671 for the whole drive; the swept band of the second in
+    37 slices of about 9 degrees of freedom, a floor line 112, its level
+    0.2 dB over."""
+    fs = 2048.0
+    floor = Specification(np.array([5.0, 500.0]),
+                          np.array([[1.0 / 495.0] * 2]) * G ** 2,
+                          response_dof=[CHANNEL],
+                          ordinate_dim=['acceleration**2/frequency'])
+
+    def noise(seconds, low, high, grms, rng):
+        n = int(fs * seconds)
+        spectrum = np.fft.rfft(rng.standard_normal(n))
+        f = np.fft.rfftfreq(n, 1.0 / fs)
+        spectrum[(f < low) | (f > high)] = 0.0
+        x = np.fft.irfft(spectrum, n)
+        return x * grms / np.sqrt(np.mean(x ** 2))
+
+    def record(x):
+        return TimeHistory(np.arange(len(x)) / fs, x[None] * G,
+                           response_dof=[CHANNEL],
+                           ordinate_dim=['acceleration'], ordinate_unit=['g'])
+
+    tones = ((4.86, 0.12), (19.44, 1.944), (38.88, 2.50), (58.32, 1.50))
+    x = noise(60.0, 5.0, 500.0, 1.0, np.random.default_rng(3304))
+    t = np.arange(len(x)) / fs
+    for frequency, amplitude in tones:
+        x = x + amplitude * np.sin(2.0 * np.pi * frequency * t + frequency)
+    spec = MixedSpecification(floor, [Tone(f, a * G) for f, a in tones],
+                              seconds=60.0)
+    sheet = judge_mixed(record(x), spec, onset=0.0)
+    assert sheet.floor.residual / G == pytest.approx(1.003, abs=5e-4)
+    assert sheet.tones_measured / G == pytest.approx(2.477, abs=5e-4)
+    assert sheet.floor.measured / G == pytest.approx(0.986, abs=5e-4)
+    assert sheet.floor.reference / G == pytest.approx(0.986, abs=5e-4)
+    assert 100 * sheet.floor.left_out == pytest.approx(2.8, abs=0.05)
+    assert sheet.total.measured / G == pytest.approx(2.671, abs=5e-4)
+    assert [round(row.measured / G, 3) for row in sheet.tones] == [
+        0.122, 1.945, 2.496, 1.498]
+
+    rng = np.random.default_rng(3305)
+    seconds = 30.0
+    x = noise(seconds, 3.0, 520.0, np.sqrt(517.0 / 495.0), rng)
+    x = x + noise(seconds, 285.0, 315.0, np.sqrt(0.02 * 30.0), rng)
+    swept = Narrowband(150.0, 0.05 * G ** 2, width=16.0, sweep_to=250.0,
+                       rate=10.0, name='track')
+    n = len(x)
+    base = np.fft.fft(rng.standard_normal(n) + 1j * rng.standard_normal(n))
+    base[np.abs(np.fft.fftfreq(n, 1.0 / fs)) > 8.0] = 0.0
+    phase = 2.0 * np.pi * np.cumsum(swept.center_at(np.arange(n) / fs)) / fs
+    y = np.real(np.fft.ifft(base) * np.exp(1j * phase))
+    x = x + y * np.sqrt(0.05 * 16.0 / np.mean(y ** 2))
+    bands = MixedSpecification(
+        floor, None, [Narrowband.plus_minus(300.0, 5.0, 0.02 * G ** 2,
+                                            name='engine'), swept])
+    reading = judge_mixed(record(x), bands)
+    _engine, track = reading.narrowbands
+    assert track.slices == 37 and round(track.slice_dof) == 9
+    assert round(reading.floor.dof) == 112
+    assert track.error_db == pytest.approx(0.2, abs=0.05)

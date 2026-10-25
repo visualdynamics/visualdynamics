@@ -3,8 +3,9 @@
 
 The app reads a record or a spectrum in ways a test report has to carry:
 the time statistics of a random record (the drive's skewness, kurtosis
-and density, which MIL-STD-810H (2019), Method 514.8, paragraph
-4.2.2.1, asks for whenever the drive departs from a Gaussian), whether
+and density, which MIL-STD-810H (2019), Method 514.8, in the text
+under Table 514.8-II, asks for whenever the drive departs from a
+Gaussian), whether
 a shock record's velocity returns to rest, the points rule of a shock
 response spectrum, a classical pulse against its tolerance, a sine record's
 distortion, a sweep's rate against the modes it passes, two signatures

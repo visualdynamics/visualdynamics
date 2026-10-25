@@ -233,8 +233,9 @@ every object it reads, so a random report carries the time statistics
 of its record, a shock report the velocity check and the points rule,
 and a sine report the distortion of each tone; the time statistics are
 not made for a shock, transient or sine report, whose records are not
-meant to be Gaussian. MIL-STD-810H (2019), Method 514.8, paragraph
-4.2.2.1, asks for a drive that departs from a Gaussian distribution to
+meant to be Gaussian. MIL-STD-810H (2019), Method 514.8, in the text
+under Table 514.8-II, asks for a drive that departs from a Gaussian
+distribution to
 be documented with its time history, its skewness and kurtosis, and its
 probability density: the time statistics block carries the last three
 beside the time histories the report already draws.

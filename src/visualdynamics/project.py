@@ -1454,6 +1454,69 @@ class Project(dict):
     def __dir__(self) -> list[str]:
         return sorted({*super().__dir__(), *dir(Selection(self))})
 
+    def modal_basis(self, name: Any,
+                    records: Sequence[int] | None = None) -> str | None:
+        """The shape set an object's modal records are coordinates of,
+        by name: the set whose shapes turn them into motion.
+
+        Read from where the records came from. Modal responses computed
+        from forces (`compute_modal_responses`) name their set in each
+        comment; a transform's result names it in its provenance; an
+        object derived from either (filtered, decimated, cropped) keeps
+        its source's set. None when nothing says, when the records named
+        come from two sets, or when the set is gone or has fewer modes
+        than the records.
+
+        Parameters
+        ----------
+        name : str or object
+            The object, by name or as the object itself.
+        records : sequence of int, optional
+            Read only these records; every record at a modal DOF when
+            omitted.
+
+        Returns
+        -------
+        str or None
+            The shape set's name.
+        """
+        from .core.validate import modal_coordinate
+
+        name = self.name_of(name)
+        data = self[name]
+        if not isinstance(data, DataArray):
+            return None
+        picked = (range(data.num_records) if records is None else records)
+        modal = [i for i in picked
+                 if modal_coordinate(data.response_dof[i]) is not None]
+        if not modal:
+            return None
+        named = set()
+        for i in modal:
+            label, _colon, rest = (data.comment[i] or '').partition(': ')
+            if rest.startswith('modal ') and isinstance(self.get(label),
+                                                        ShapeSet):
+                named.add(label)
+        if not named:
+            # a transform's result, or something derived from one
+            seen, step = set(), name
+            while step not in seen and step in self.provenance:
+                seen.add(step)
+                entry = self.provenance[step]
+                shapes = entry.get('params', {}).get('shapes')
+                if entry.get('verb') == 'transform' and shapes:
+                    named.add(shapes)
+                    break
+                step = entry.get('source')
+        if len(named) != 1:
+            return None
+        basis = named.pop()
+        modes = self.get(basis)
+        highest = max(modal_coordinate(data.response_dof[i]) for i in modal)
+        if not isinstance(modes, ShapeSet) or modes.num_shapes < highest:
+            return None
+        return basis
+
     def geometry_for(self, name: Any) -> tuple[str, Geometry] | None:
         """(name, geometry) for the geometry an object is drawn on and
         checked against: the one in its group, otherwise the active one.
@@ -2177,12 +2240,15 @@ class Project(dict):
     def transform(self, source: Any, shapes: Any, *,
                   records: Sequence[int] | None = None,
                   name: str | None = None) -> str:
-        """Transform physical responses through a shape set to modal
-        responses (Transform to Modal Responses), one record per mode and
-        quantity at the modal coordinates `M1` … `Mn`.
+        """Transform a record's channels through a shape set to modal
+        coordinates (Transform to Modal Coordinates), one record per mode
+        and quantity at `M1` … `Mn`.
 
         The motions are transformed as `q = Φ⁺u` and the forces as
-        `Φᵀf`. Any shape set can be used; with the six rigid-body shapes of a
+        `Φᵀf`. It is a change of coordinates only: the set's
+        frequencies, damping and masses are not used (for the response
+        a mode makes to forces, see `compute_modal_responses`). Any shape
+        set can be used; with the six rigid-body shapes of a
         geometry this is the virtual point transformation. The result is
         linked into the record's group when a shape set there has every
         mode it names, and is otherwise in no group. Its provenance
@@ -2202,7 +2268,7 @@ class Project(dict):
             the tree. All of them when omitted.
         name : str, optional
             What to call the result. Defaults to the record's name
-            followed by 'Modal Responses'.
+            followed by 'Modal Coordinates'.
 
         Returns
         -------
@@ -2221,7 +2287,7 @@ class Project(dict):
         if picked is not None:
             params['records'] = picked
         return self._derive(source, result,
-                            name or f'{source} Modal Responses',
+                            name or f'{source} Modal Coordinates',
                             recipe=('transform', params))
 
     def expand(self, source: Any, shapes: Any, *,
@@ -2247,7 +2313,7 @@ class Project(dict):
             tree. All of them when omitted.
         name : str, optional
             What to call the result. Defaults to the record's name with
-            'Modal Responses' replaced by 'Physical Responses', and the
+            'Modal Coordinates' replaced by 'Physical Responses', and the
             modes listed in parentheses when not all of them are used.
 
         Returns
@@ -2480,6 +2546,72 @@ class Project(dict):
         return self._derive(source, made,
                             name or f'{source} {KINDS.get(kind, kind)}',
                             recipe=('generate_signal', chosen.to_dict()))
+
+    def compute_modal_responses(self, source: Any, shapes: Any, *,
+                                quantity: str = 'acceleration',
+                                modes: Sequence[int] | None = None,
+                                records: Sequence[int] | None = None) -> str:
+        """Compute how each mode of a shape set answers the forces in a
+        time history, and append the modal responses to it (Compute Modal
+        Responses).
+
+        The history's force channels are made modal through the set
+        (pᵣ = Σ φₖᵣ fₖ; channels already holding the set's modal forces
+        are used as they are), and each mode's equation is solved
+        exactly for a force linear between samples, from rest
+        (`core.modal_response`). The responses are appended as records
+        `M1` … `Mn`, one per mode, each comment naming the set; records
+        an earlier run through the same set appended are replaced, so
+        the history never holds two answers for one mode. The rest of
+        the history, and its averaging and shock windows, are kept.
+
+        Parameters
+        ----------
+        source : str or object
+            The time history, by name or as the object itself. It is
+            changed in place.
+        shapes : str or object
+            The shape set: real modes with frequency, damping and modal
+            mass, by name or as the object itself.
+        quantity : str, default 'acceleration'
+            'displacement', 'velocity' or 'acceleration' of each modal
+            coordinate.
+        modes : sequence of int, optional
+            Which modes, by index in the set from zero; all of them when
+            omitted.
+        records : sequence of int, optional
+            Which of the history's records are the forces; every force
+            channel when omitted.
+
+        Returns
+        -------
+        str
+            The time history's name.
+
+        Raises
+        ------
+        TypeError
+            If `source` is not a time history or `shapes` not a shape
+            set.
+        ValueError
+            As `core.modal_response.modal_responses`: no force on a DOF
+            the set covers, a complex set, a mode not in the set, uneven
+            sampling, or a quantity it does not know.
+        """
+        from .core.modal_response import appended, modal_responses
+
+        source = self.name_of(source)
+        set_name = self.name_of(shapes)
+        history, modal_set = self[source], self[set_name]
+        if not isinstance(history, TimeHistory):
+            raise TypeError(f'{source!r} is not a time history')
+        if not isinstance(modal_set, ShapeSet):
+            raise TypeError(f'{set_name!r} is not a shape set')
+        responses = modal_responses(history, modal_set, modes=modes,
+                                    quantity=quantity, records=records,
+                                    label=set_name)
+        self[source] = appended(history, responses, set_name)
+        return source
 
     def merge_coincident_nodes(self, source: Any,
                                tolerance: float | None = None,
@@ -4925,12 +5057,15 @@ class Project(dict):
         return plot(**kwargs)
 
     def animate(self, name: str, mode: int = 0, **kwargs: Any) -> Any:
-        """Animate a mode shape, or a complex spectrum's operating
-        deflection shape, on the object's geometry.
+        """Animate a mode shape, a complex spectrum's operating
+        deflection shape, or a time history, on the object's geometry.
 
         The geometry is the one `geometry_for` gives; with none, this
         raises ValueError. A spectrum's line is picked with
-        `frequency=` in `kwargs`.
+        `frequency=` in `kwargs`. A time history whose modal records
+        have a shape set behind them (`modal_basis`) plays those records
+        through the set's shapes on the set's geometry, unless
+        `quantity=` picks one of its physical measurements.
 
         Parameters
         ----------
@@ -4947,10 +5082,18 @@ class Project(dict):
             The plotter the animation is running in.
         """
         name = self.name_of(name)
-        home = self.geometry_for(name)
-        if home is None:
-            raise ValueError(f'{name!r} has no geometry — link one')
         target = self[name]
+        drawn_on = name
+        quantity = kwargs.get('quantity')
+        if (isinstance(target, TimeHistory) and 'shapes' not in kwargs
+                and (quantity is None or quantity.startswith('modal_'))):
+            basis = self.modal_basis(name, kwargs.get('records'))
+            if basis is not None:
+                # the modes move the set's geometry, not the forces'
+                drawn_on, kwargs = basis, {**kwargs, 'shapes': self[basis]}
+        home = self.geometry_for(drawn_on)
+        if home is None:
+            raise ValueError(f'{drawn_on!r} has no geometry — link one')
         if isinstance(target, ShapeSet):
             return target.animate(home[1], mode, **kwargs)
         # spectra pick a line by `frequency=`, not a mode number, and a
@@ -5839,21 +5982,33 @@ def _reads_as(project, obj, direction):
     """Whether some shape set in the project reads `obj` as physical
     (transformable) or modal (expandable) — the applicability of a
     two-object verb, answered against every partner available."""
-    from .core.transform import reads_as
-
     if not isinstance(obj, DataArray):
         return False
-    return any(reads_as(obj, other) == direction
+    return any(_goes(obj, other, direction)
                for other in project.values() if isinstance(other, ShapeSet))
 
 
+def _goes(data, shapes, direction):
+    """Whether `data` transforms through `shapes` the given way. Modal
+    is wider than reading as modal: a history of forces with modal
+    responses appended reads physical, and its modal records expand."""
+    from .core.transform import expands, reads_as
+
+    if direction == 'modal':
+        return expands(data, shapes)
+    return reads_as(data, shapes) == direction
+
+
 def _physical_name(source, result=None):
-    """'Run Modal Responses' expands to 'Run Physical Responses'; a
+    """'Run Modal Coordinates' expands to 'Run Physical Responses'; a
     specification to '… Physical Specification'; anything else gets
     the responses suffix."""
-    suffix = ' Modal Responses'
-    if source.endswith(suffix):
-        return source[:-len(suffix)] + ' Physical Responses'
+    # 'Modal Responses' is the name transforms took until Brandon renamed
+    # the act Transform to Modal Coordinates (2026-10-25); projects saved
+    # before then still hold it
+    for suffix in (' Modal Coordinates', ' Modal Responses'):
+        if source.endswith(suffix):
+            return source[:-len(suffix)] + ' Physical Responses'
     if isinstance(result, Specification):
         return f'{source} at Physical DOFs'
     return f'{source} Physical Responses'
@@ -5862,14 +6017,12 @@ def _physical_name(source, result=None):
 def _pair_reads(project, objects, direction):
     """One data object and one shape set — a geometry may come along
     — and the record reads through the set the given way."""
-    from .core.transform import reads_as
-
     data = [o for o in objects if isinstance(o, DataArray)]
     sets = [o for o in objects if isinstance(o, ShapeSet)]
     rest = [o for o in objects
             if not isinstance(o, (DataArray, ShapeSet, Geometry))]
     return (len(data) == 1 and len(sets) == 1 and not rest
-            and reads_as(data[0], sets[0]) == direction)
+            and _goes(data[0], sets[0], direction))
 
 
 def _two_sets_on_two_geometries(project, objects):
@@ -5890,7 +6043,21 @@ def _mergeable(project, objects):
 
 #: the verbs that act on a *combination* of objects, with what makes
 #: one — the bar's answer for a multi-selection (`selection_verbs`)
+def _forces_and_modes(objects: Sequence[Any]) -> bool:
+    """One time history holding a force channel and one real shape set
+    (`compute_modal_responses`)."""
+    histories = [o for o in objects if isinstance(o, TimeHistory)]
+    sets = [o for o in objects if isinstance(o, ShapeSet)]
+    if len(objects) != 2 or len(histories) != 1 or len(sets) != 1:
+        return False
+    if sets[0].num_shapes == 0 or sets[0].is_complex:
+        return False
+    return 'force' in histories[0].ordinate_dim or any(
+        dim == 'modal_force' for dim in histories[0].ordinate_dim)
+
+
 _SELECTION_APPLIES: tuple = (
+    ('compute_modal_responses', lambda p, o: _forces_and_modes(o)),
     ('transform', lambda p, o: _pair_reads(p, o, 'physical')),
     ('expand', lambda p, o: _pair_reads(p, o, 'modal')),
     ('project_onto_basis', _two_sets_on_two_geometries),
@@ -5946,7 +6113,7 @@ _JOURNALED_VERBS = (
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
-    'generate_signal',
+    'generate_signal', 'compute_modal_responses',
     'plan_instrumentation',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry',
     'new_channel_table', 'add_channels', 'add_plane',

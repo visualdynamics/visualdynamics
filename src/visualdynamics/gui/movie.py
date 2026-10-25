@@ -43,6 +43,21 @@ AHEAD = 4
 #: milliseconds without a word from the encoder before the movie fails
 STALL_MS = 10_000
 
+#: the average bits a movie is encoded at, per pixel per frame. Qt's
+#: quality setting asks for a constant quality, which the Mac's encoder
+#: (VideoToolbox) does not offer, so it fell back on its own rate: 0.6
+#: Mbit/s for a 1386 × 1552 view of a dense cone mesh, 0.01 bits a pixel,
+#: and the element edges smeared (Brandon, 2026-10-25). Asked for, the
+#: average is held loosely (measured on 2 s clips): the cone's frames
+#: came out at 4.2 Mbit/s against 7.7 asked and 0.3 unasked, a plate
+#: mode at 9.9 against 2.8 asked and 1.75 unasked, a synthetic mesh at
+#: 21 against 3.3 asked and 6.1 unasked. In this mode the encoder spends
+#: more on a simple scene at any figure (0.01 still gave the plate
+#: 4.4), and the constant-quality modes ignore a rate. 0.04 brought most
+#: of the cone's mesh back; Brandon chose 0.12, the larger files being
+#: fine.
+BITS_PER_PIXEL = 0.12
+
 
 class MovieUnavailable(RuntimeError):
     """Raised when this machine cannot write an H.264 movie (it has no
@@ -113,6 +128,55 @@ def _image(frame: np.ndarray) -> Any:
                   QImage.Format.Format_RGBA8888).copy()
 
 
+#: the most of the scene's height the plot under it takes in a movie
+STRIP_SHARE = 0.4
+
+
+def widget_frame(widget: Any, width: int, height: int) -> np.ndarray:
+    """`widget` drawn as an RGB array exactly `width` × `height` pixels:
+    scaled to fit, its shape kept, and the rest filled with the color
+    of its own corner, so a plot narrower than the frame sits centered
+    on its own background."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QImage
+
+    image = widget.grab().toImage().convertToFormat(
+        QImage.Format.Format_RGB888)
+    image = image.scaled(width, height, Qt.AspectRatioMode.KeepAspectRatio,
+                         Qt.TransformationMode.SmoothTransformation)
+    rows = np.frombuffer(image.constBits(), np.uint8,
+                         image.bytesPerLine() * image.height())
+    drawn = rows.reshape(image.height(), image.bytesPerLine())[
+        :, :3 * image.width()].reshape(image.height(), image.width(), 3)
+    out = np.empty((height, width, 3), np.uint8)
+    out[:] = drawn[0, 0]
+    top = (height - drawn.shape[0]) // 2
+    left = (width - drawn.shape[1]) // 2
+    out[top:top + drawn.shape[0], left:left + drawn.shape[1]] = drawn
+    return out
+
+
+def over_plot(frames: Iterable[np.ndarray], widget: Any,
+              share: float = STRIP_SHARE) -> Any:
+    """Each of `frames` with `widget` drawn under it, as the window
+    shows a record's plot under its animation: the plot, with its cursor
+    where the frame is, says where in the record each frame is.
+
+    The plot is grabbed fresh for every frame, so whatever moved it
+    (the cursor, an envelope's caption) is in that frame. It is as wide
+    as the scene and as tall as its shape allows, up to `share` of the
+    scene's height, and the stacked frame is kept to an even height for
+    the H.264 encoder.
+    """
+    for frame in frames:
+        frame = np.asarray(frame)[..., :3]
+        height, width = frame.shape[:2]
+        aspect = widget.height() / max(widget.width(), 1)
+        strip = min(int(share * height), round(width * aspect))
+        strip -= (height + strip) % 2
+        yield np.vstack([frame, widget_frame(widget, width, strip)])
+
+
 def write_movie(path: str | Path, frames: Iterable[np.ndarray],
                 fps: int = MOVIE_FPS) -> int:
     """Encode `frames` into an H.264 MP4 at `path`, overwriting it.
@@ -148,6 +212,15 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
         When the encoder reports an error or takes no frames for
         `STALL_MS` (10 s), the frames change size partway through, or the
         file read back is not H.264 holding every frame.
+
+    Notes
+    -----
+    The encoder is asked for an average of `BITS_PER_PIXEL` bits per pixel
+    per frame, 7.7 Mbit/s for a 1386 × 1552 view at 30 frames a second,
+    so a fine mesh's edges are kept. It takes the figure as a target
+    rather than a rule: a view it compresses well comes out under it
+    (about half a megabyte a second of video for a view that size of a
+    dense cone), and detail it cannot compress comes out over it.
     """
     # asked before Qt Multimedia is imported: where it cannot load, the
     # reason is the answer, not an ImportError
@@ -187,6 +260,9 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
     recorder.setVideoResolution(width, height)
     recorder.setVideoFrameRate(fps)
     recorder.setQuality(QMediaRecorder.Quality.HighQuality)
+    recorder.setEncodingMode(
+        QMediaRecorder.EncodingMode.AverageBitRateEncoding)
+    recorder.setVideoBitRate(round(BITS_PER_PIXEL * width * height * fps))
     recorder.setOutputLocation(QUrl.fromLocalFile(str(path)))
     recorder.setAutoStop(True)          # an empty frame ends the file
 

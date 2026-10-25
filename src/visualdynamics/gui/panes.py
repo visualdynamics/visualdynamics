@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..plot import background_brush
+from ..plot.log_axis import install as install_log_axis
 from ..theme import theme as resolve_theme
 from ..viz.geometry import annotate_scene
 from .amplitude_panel import AmplitudePanel
@@ -50,6 +51,7 @@ from .mate_panel import MatePanel
 from .merge_panel import MergePanel
 from .mesh_panel import MeshPanel
 from .mesh_solids_panel import MeshSolidsPanel
+from .modal_response_panel import ModalResponsePanel
 from .modes_panel import ModesPanel
 from .octave_panel import OctavePanel
 from .pattern_panel import PatternPanel
@@ -73,6 +75,10 @@ from .toolbars import fence, shows_anything, tidy
 from .transmissibility_panel import TransmissibilityPanel
 from .truncate_panel import TruncatePanel
 from .wavelet_panel import WaveletPanel
+
+# every plot in the window is drawn on a pane from here, so the log
+# axes' labels are fitted to their room from the first one on
+install_log_axis()
 
 
 def copy_act(pane: Any, what: str) -> tuple:
@@ -467,6 +473,10 @@ class DataPane(QWidget):
         # preview on the plot beside it (Generate Signal, on the bar)
         self.signal_panel: SignalPanel = SignalPanel()
         self.signal_panel.hide()
+        # the modal responses a history's forces drive through a shape
+        # set, previewed beside the plot (Compute Modal Responses)
+        self.modal_response_panel: ModalResponsePanel = ModalResponsePanel()
+        self.modal_response_panel.hide()
         plot_row = QHBoxLayout()
         plot_row.setContentsMargins(0, 0, 0, 0)
         plot_row.setSpacing(0)
@@ -485,6 +495,7 @@ class DataPane(QWidget):
         self.author_split.setStretchFactor(1, 0)
         plot_row.addWidget(self.author_split, 1)
         plot_row.addWidget(self.signal_panel)
+        plot_row.addWidget(self.modal_response_panel)
         plot_row.addWidget(self.averaging_panel)
         plot_row.addWidget(self.shock_panel)
         plot_row.addWidget(self.filter_panel)
@@ -860,9 +871,7 @@ class DataPane(QWidget):
         self.averaging_action: QAction = QAction(control_icon('averaging'),
                                         'Averaging', self)
         self.averaging_action.setCheckable(True)
-        self.averaging_action.setToolTip(
-            'Show the frames a PSD would be averaged over, and the '
-            'parameters that set them')
+        self.averaging_action.setToolTip('Averaging settings')
         self.averaging_action.triggered.connect(self._choose_averaging)
         toolbar.addAction(self.averaging_action)
         # the filter a record would be read through: the pass-band
@@ -895,9 +904,7 @@ class DataPane(QWidget):
         self.truncate_action: QAction = QAction(control_icon('truncate'),
                                                 'Truncate', self)
         self.truncate_action.setCheckable(True)
-        self.truncate_action.setToolTip(
-            'Show the stretch a record would be cut to — drag the '
-            'span; Apply Truncation in the pane makes the cut record')
+        self.truncate_action.setToolTip('Trim data')
         self.truncate_action.triggered.connect(self._choose_truncate)
         toolbar.addAction(self.truncate_action)
         # how Gaussian each channel of a record is, as a bar apiece:

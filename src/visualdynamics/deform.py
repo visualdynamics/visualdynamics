@@ -32,6 +32,7 @@ from .core.data import parse_dof
 if TYPE_CHECKING:                                    # pragma: no cover
     from .core.data import DataArray
     from .core.geometry import Geometry
+    from .core.shapes import ShapeSet
 
 AXES = {'X': 0, 'Y': 1, 'Z': 2}
 
@@ -664,3 +665,128 @@ class TimeDeflection(Deflection):
             largest = max(largest, float(
                 np.sqrt(np.einsum('ijk,ijk->ij', spread, spread)).max()))
         return largest
+
+
+class ModalTimeDeflection(Deflection):
+    """Modal coordinates played back through their shapes: the offsets
+    at sample k are the sum over modes of q_r[k] times mode r's node
+    displacements.
+
+    The physical response u = Φq is never formed. Each mode's node
+    displacements (`fields`, one row per mode) are built once, and a
+    frame is one vector-matrix product of the modes' values at that
+    sample with them: modes × moving nodes × 3 multiply-adds, and no
+    memory beyond the shapes themselves. For a model of a million DOFs
+    and fifty modes a frame takes about 7 ms, where expanding a record
+    of ten thousand samples first would take eighty gigabytes.
+    """
+
+    #: the most values (samples × modes × nodes × 3) `peak` and
+    #: `peak_magnitude` read exactly; past it they read the loudest frames
+    EXACT_BUDGET = 50_000_000
+
+    #: how many of the loudest frames are read past the budget
+    LOUDEST_FRAMES = 64
+
+    def __init__(self, geometry: Geometry, dofs: Sequence[str],
+                 shapes: ArrayLike, ordinate: ArrayLike) -> None:
+        """`dofs` are the set's DOFs, `shapes` its real shape values at
+        them, one row per mode used, and `ordinate` the modal
+        coordinates, one row per mode in the same order."""
+        rows, directions, used = dof_directions(geometry, dofs)
+        phi = np.asarray(np.real(np.asarray(shapes))[:, used], dtype=float)
+        self.rows, targets = _unique_rows(rows)
+        modes = phi.shape[0]
+        fields = np.zeros((modes, len(self.rows), 3))
+        # the no-repeated-node passes again, so building is a few
+        # vectorized adds over every mode at once and not a scatter
+        for group in _passes(targets):
+            fields[:, targets[group], :] += (phi[:, group, np.newaxis]
+                                             * directions[group])
+        self._fields = fields.reshape(modes, -1)
+        # sample-major, so one sample's modal values are contiguous
+        self._samples = np.ascontiguousarray(np.asarray(ordinate).real.T)
+        self._buffer = np.zeros((len(self.rows), 3))
+        self.num_frames: int = (self._samples.shape[0]
+                                if len(self.rows) else 0)
+
+    def offsets(self, parameter: float) -> np.ndarray:
+        """The offsets at sample index `parameter`."""
+        np.dot(self._samples[int(parameter)], self._fields,
+               out=self._buffer.reshape(-1))
+        return self._buffer
+
+    def _frames(self) -> np.ndarray:
+        """The samples `peak` and `peak_magnitude` read: all of them
+        while that is cheap, otherwise the loudest. A node's travel at
+        sample k is at most the sum over modes of |q_r[k]| times the
+        furthest mode r moves any node, so the frames where that bound
+        is largest, with each mode's own largest sample, are where the
+        furthest travel is found. An estimate past the budget, used for
+        the scale and the color range, not a reading."""
+        samples, modes = self._samples.shape
+        if samples * self._fields.size <= self.EXACT_BUDGET:
+            return np.arange(samples)
+        reach = np.sqrt((self._fields.reshape(modes, -1, 3) ** 2)
+                        .sum(axis=2)).max(axis=1)
+        bound = np.abs(self._samples) @ reach
+        count = min(self.LOUDEST_FRAMES, samples)
+        loudest = np.argpartition(bound, samples - count)[samples - count:]
+        own = np.abs(self._samples).argmax(axis=0)
+        return np.unique(np.concatenate([loudest, own]))
+
+    def _largest(self, measure) -> float:
+        if not len(self.rows) or not self.num_frames:
+            return 0.0
+        frames = self._frames()
+        chunk = max(1, int(4e6) // max(1, self._fields.shape[1]))
+        largest = 0.0
+        for start in range(0, len(frames), chunk):
+            block = self._samples[frames[start:start + chunk]] @ self._fields
+            largest = max(largest, measure(block))
+        return largest
+
+    @property
+    def peak(self) -> float:
+        """The largest single displacement component over the samples
+        read (`_frames`)."""
+        return self._largest(lambda block: float(np.abs(block).max()))
+
+    @property
+    def peak_magnitude(self) -> float:
+        """The furthest any node gets over the samples read
+        (`_frames`)."""
+        return self._largest(lambda block: float(np.sqrt(
+            (block.reshape(len(block), -1, 3) ** 2).sum(axis=2)).max()))
+
+
+def modal_deflection(geometry: Geometry, shapes: ShapeSet,
+                     data: DataArray, indices: Sequence[int]
+                     ) -> ModalTimeDeflection:
+    """The modal records among `indices` played through `shapes` on
+    `geometry`: each record at a modal coordinate `Mk` of the set moves
+    the geometry by mode k's shape, scaled by its value at each sample.
+
+    The records at other DOFs (a force beside the modal responses
+    computed from it) are not part of it, and a coordinate past the
+    set's last mode is not one of its modes. A complex set is refused:
+    its shapes are not real motion, and taking their real part would
+    show something no record says.
+    """
+    from .core.validate import modal_coordinate
+
+    if shapes.is_complex:
+        raise ValueError('a complex shape set cannot play modal '
+                         'coordinates as motion')
+    modes, kept = [], []
+    for i in indices:
+        k = modal_coordinate(data.response_dof[i])
+        if k is not None and k <= shapes.num_shapes:
+            modes.append(k - 1)
+            kept.append(i)
+    if not kept:
+        raise ValueError('no record is a modal coordinate of this set '
+                         f'(M1 … M{shapes.num_shapes})')
+    return ModalTimeDeflection(
+        geometry, shapes.coordinate, np.asarray(shapes.shape_matrix)[modes],
+        np.asarray(data.ordinate)[kept])

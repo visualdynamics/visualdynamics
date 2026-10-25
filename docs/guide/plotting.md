@@ -215,13 +215,17 @@ camera, deflection scale and speed. A mode shape is saved as whole
 cycles, at least six seconds of them, and the last frame stops one
 step short of the first so that a player set to loop shows no jump. A
 time history or an envelope is saved once through, at the speed it is
-playing.
+playing, with its plot under the 3-D view and the cursor on it where
+each frame is, so the video shows where in the record (or at which
+line) every moment of the animation is. A script's `movie=` for a time
+history or an envelope makes the same picture.
 
 The video is H.264, which plays with nothing extra installed on macOS,
-Windows, Linux, phones and in a browser, and gives small files for
-this kind of picture: six seconds of a plate mode at 1024 × 768 was
-1.4 MB. It is encoded through Qt by the operating system's own H.264
-encoder. Every Mac and Windows computer has one. A Linux computer has
+Windows, Linux, phones and in a browser. It is encoded at a rate set
+from the picture's size, enough to keep the edges of a fine mesh: six
+seconds of a plate mode at 1024 × 768 is about 10 MB, and a dense mesh
+on a large view about half a megabyte a second. It is encoded through
+Qt by the operating system's own H.264 encoder. Every Mac and Windows computer has one. A Linux computer has
 one only when its graphics driver provides it (VAAPI or NVENC), and
 where there is none the button is not shown. From a script, the same
 check is `visualdynamics.gui.movie.unavailable_reason()`, which returns

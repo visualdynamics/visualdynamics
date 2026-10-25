@@ -56,6 +56,8 @@ that is not an alpha.
 - [Generating reference signals](generating-signals.md): random,
   burst random, periodic random, an impulse or a pulse, and sine, made
   at the reference DOFs from a specification or a channel table
+- [Modal responses from forces](modal-responses.md): how each mode of
+  a shape set answers the forces in a time history, appended to it
 - [Taking a record to a lower sample rate](resample.md): the
   anti-alias filter first, the span and the dropped lines, and where
   content above the new Nyquist frequency folds

@@ -301,16 +301,52 @@ def test_periodic_random_draws_a_new_period_every_few():
 
 # ---- impulse and pulses -----------------------------------------------------
 
-def test_an_ideal_impulse_has_its_area_and_a_flat_spectrum():
+def test_an_impulse_is_a_half_sine_of_its_width_and_peak():
+    """Brandon, 2026-10-25: a half-sine whose width sets the band it
+    excites, not one sample flat to the Nyquist frequency."""
+    rate, width, peak = 20000.0, 0.002, 300.0
     history = signals.impulse_history(['1X+', '2Y+'], quantity='force',
-                                      duration=1.0, sample_rate=1000.0,
-                                      at=0.25, area=3.0)
+                                      duration=0.5, sample_rate=rate,
+                                      at=0.1, peak=peak, width=width)
     row = history.ordinate[0]
-    assert row.sum() / 1000.0 == pytest.approx(3.0)
-    assert np.flatnonzero(row).tolist() == [250]
-    assert np.allclose(np.abs(np.fft.rfft(row)), 3000.0)
+    t = np.arange(row.size) / rate - 0.1
+    inside = (t >= 0.0) & (t <= width)
+    assert np.allclose(row[inside], peak * np.sin(np.pi * t[inside] / width),
+                       atol=1e-9)
+    assert np.all(row[~inside] == 0.0)
+    # the sampled half-sine of N = 40 intervals sums to cot(π/2N), the
+    # continuous area 2PT/π less a part in (π²/12N²)
+    assert row.sum() == pytest.approx(peak / np.tan(np.pi / 80), rel=1e-9)
     assert np.array_equal(history.ordinate[0], history.ordinate[1])
     assert history.ordinate_dim == ['force', 'force']
+    assert history.comment[0] == 'impulse, 2 ms half-sine'
+
+
+def test_the_rolloff_points_are_the_half_sines():
+    """The −3 dB and −10 dB points solve |cos(πfT)/(1 − 4f²T²)| for
+    their levels, and the first zero is 1.5/T; the record's own spectrum,
+    finely sampled, falls by those amounts there."""
+    width = 0.001
+    down3, down10, zero = signals.impulse_rolloff(width)
+    ratio = signals._half_sine_ratio
+    assert ratio(down3 * width) == pytest.approx(10 ** (-3 / 20), rel=1e-9)
+    assert ratio(down10 * width) == pytest.approx(10 ** (-10 / 20), rel=1e-9)
+    assert (down3, down10, zero) == pytest.approx((593.51, 1019.37, 1500.0),
+                                                  abs=0.01)
+    history = signals.impulse_history('1X+', quantity='force', duration=0.2,
+                                      sample_rate=200000.0, width=width,
+                                      peak=50.0)
+    spectrum = signals.impulse_spectrum(history)
+    f, magnitude = spectrum.abscissa, np.abs(spectrum.ordinate[0])
+    assert spectrum.ordinate_dim == ['force*time']
+    assert magnitude[0] == pytest.approx(2 * 50.0 * width / np.pi, rel=1e-4)
+
+    def db(at):
+        return 20 * np.log10(np.interp(at, f, magnitude) / magnitude[0])
+
+    assert db(down3) == pytest.approx(-3.0, abs=0.01)
+    assert db(down10) == pytest.approx(-10.0, abs=0.01)
+    assert db(zero) < -50.0
 
 
 def test_a_classical_pulse_is_the_pulse_from_its_start():
@@ -330,7 +366,16 @@ def test_an_impulse_out_of_the_record_or_of_nothing_is_refused():
                                 sample_rate=100.0, at=1.0)
     with pytest.raises(ValueError, match='other than zero'):
         signals.impulse_history('1X+', quantity='force', duration=1.0,
-                                sample_rate=100.0, area=0.0)
+                                sample_rate=1000.0, peak=0.0, width=0.002)
+    with pytest.raises(ValueError, match='under two samples at 1000 Hz; '
+                                         'the narrowest is 2 ms'):
+        signals.impulse_history('1X+', quantity='force', duration=1.0,
+                                sample_rate=1000.0, width=0.0015)
+    signals.impulse_history('1X+', quantity='force', duration=1.0,
+                            sample_rate=1000.0, width=0.002)
+    with pytest.raises(ValueError, match='runs past the end of the record'):
+        signals.impulse_history('1X+', quantity='force', duration=1.0,
+                                sample_rate=1000.0, at=0.995, width=0.01)
 
 
 # ---- sine -------------------------------------------------------------------
@@ -597,3 +642,42 @@ def test_the_target_is_drawn_on_the_lines_it_was_read_at():
     assert np.isnan(target.ordinate[0][[10, 1700]]).all()
     pair = signals.target_at(_pair(), lines)
     assert pair.response_dof == ['1X+', '2X+'], 'the autospectra only'
+
+
+# ---- read the way it was made -----------------------------------------------
+
+def test_each_signal_carries_the_averaging_it_is_read_with():
+    """Brandon, 2026-10-25: 50 bursts opened as one average under Hann.
+    A signal made in frames is read in those frames."""
+    bursts = signals.burst_random_history(_flat(), bursts=50, sample_rate=FS,
+                                          frame_length=2048, seed=30)
+    a = bursts.averaging
+    assert (a.frame_length, a.overlap, a.window, a.frames) == \
+        (2048, 0.0, 'boxcar', 50)
+    periodic = signals.periodic_random_history(_flat(), periods=12,
+                                               sample_rate=FS,
+                                               frame_length=1024, seed=31)
+    a = periodic.averaging
+    assert (a.frame_length, a.overlap, a.window, a.frames) == \
+        (1024, 0.0, 'boxcar', 12)
+    stationary = signals.random_history(_flat(), duration=4.0, sample_rate=FS,
+                                        frame_length=4096, seed=32)
+    a = stationary.averaging
+    assert (a.frame_length, a.overlap, a.window) == (4096, 0.5, 'hann')
+    assert a.frames == 15, 'as many half-overlapped frames as fit'
+    tap = signals.impulse_history('1X+', quantity='force', duration=0.5,
+                                  sample_rate=FS)
+    a = tap.averaging
+    assert (a.frame_length, a.window, a.frames) == (4096, 'boxcar', 1)
+    assert signals.sine_history(_sweep(), sample_rate=FS).averaging is None
+
+
+def test_bursts_read_in_their_own_frames_are_the_target_times_the_share_on():
+    level, share = 2.0, 0.5
+    history = signals.burst_random_history(_flat(level=level), bursts=40,
+                                           sample_rate=FS, frame_length=4096,
+                                           burst=share, taper=0.0, seed=33)
+    psd = history.compute_psds()
+    inside = _inside(psd)
+    assert np.real(psd.ordinate[0, inside]).mean() == pytest.approx(
+        level * share, rel=0.03)

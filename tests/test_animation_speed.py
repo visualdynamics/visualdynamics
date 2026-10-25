@@ -232,3 +232,27 @@ def test_the_mode_and_scale_arrows_go_with_the_animation(shaking, window,
     pump()
     assert not any(a.isVisible() for a
                    in window._mode_actions + window._scale_actions)
+
+
+# ---- playback stops when the views are cleared ---------------------------
+
+
+@pytest.mark.parametrize('cleared', ['nothing', 'the project row'])
+def test_playback_stops_when_the_selection_clears_the_views(playing, pump,
+                                                            cleared):
+    """A drag in the tree passed through an empty selection, which clears
+    the plot and the scene; the timer kept playing and moved a cursor
+    whose plot was gone, raising 'Internal C++ object (InfiniteLine)
+    already deleted' on every frame (2026-10-25)."""
+    window = playing
+    window.set_playing(True)
+    window._advance()
+    window.tree.clearSelection()
+    if cleared == 'the project row':
+        window.test_item.setSelected(True)
+    window.render_current()
+    pump()
+    for _ in range(3):
+        window._advance()           # raised before: the cursor was deleted
+    assert window.animator is None and not window._playing
+    assert window._cursor is None

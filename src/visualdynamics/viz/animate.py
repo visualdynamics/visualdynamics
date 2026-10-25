@@ -12,6 +12,7 @@ functions play an animation in a window, or save a still or an MP4.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -318,15 +319,19 @@ def _scene(plotter: Any, build: Any, colors: Any,
 def _render_offscreen(geometry: Geometry, build: Any, *, colors: Any,
                       still: Any, parameters: Any,
                       screenshot: str | None, movie: str | None,
-                      caption: Any = None) -> Any:
+                      caption: Any = None, plot: Any = None) -> Any:
     """Every `animate_*`'s file output: the scene at `still` for
     `screenshot`, or stepped through `parameters` (`cycle_parameters`,
-    `sweep_parameters`) as an MP4 for `movie` — the path returned."""
+    `sweep_parameters`) as an MP4 for `movie` — the path returned. With
+    `plot`, a function that makes `(widget, move)` for a scene of a given
+    width, the movie carries that plot under the scene and `move(index)`
+    walks its cursor with the frames (`gui.movie.over_plot`)."""
     import pyvista as pv
 
     if screenshot is not None and movie is not None:
         raise ValueError('ask for a screenshot or a movie, not both')
     plotter = pv.Plotter(off_screen=True)
+    widget = None
     try:
         plotter.set_background(colors['scene_background'])
         _animator, step = _scene(plotter, build, colors, caption)
@@ -334,12 +339,57 @@ def _render_offscreen(geometry: Geometry, build: Any, *, colors: Any,
         if screenshot is not None:
             step(still)
             return plotter.screenshot(str(screenshot))
-        from ..gui.movie import write_movie
+        from ..gui.movie import over_plot, write_movie
 
-        write_movie(movie, movie_frames(plotter, step, parameters))
+        frames = movie_frames(plotter, step, parameters)
+        if plot is not None:
+            widget, move = plot(plotter.window_size[0])
+
+            def walked(parameter: Any) -> None:
+                step(parameter)
+                move(parameter)
+
+            frames = over_plot(movie_frames(plotter, walked, parameters),
+                               widget)
+        write_movie(movie, frames)
         return str(movie)
     finally:
+        if widget is not None:
+            widget.close()
         plotter.close()
+
+
+def _record_plot(data: Any, records: Sequence[int],
+                 unit_system: UnitSystem | None, theme: Any) -> Any:
+    """The `plot` a movie that walks a record carries under its scene, a
+    time history's samples or a PSD's lines: its records drawn as the
+    window draws them (`plot.build_plots`), with a cursor at the sample
+    or line each frame shows. A function of the scene's width, as
+    `_render_offscreen` asks for it."""
+    def make(width: int) -> tuple[Any, Any]:
+        import pyqtgraph as pg
+
+        from ..plot import _application, build_plots
+        from ..theme import theme as resolve_theme
+
+        app = _application()
+        widget = pg.GraphicsLayoutWidget()
+        widget.resize(int(width), int(0.35 * width))
+        build_plots(widget, [(None, data, list(records))],
+                    unit_system=unit_system, theme=theme)
+        abscissa = np.asarray(data.display_abscissa(unit_system
+                                                    or DEFAULT_SYSTEM))
+        cursor = pg.InfiniteLine(
+            pos=float(abscissa[0]), angle=90,
+            pen=pg.mkPen(resolve_theme(theme)['scene_highlight'], width=1))
+        widget.getItem(0, 0).addItem(cursor)
+        widget.show()
+        app.processEvents()
+
+        def move(index: Any) -> None:
+            cursor.setValue(float(abscissa[int(index)]))
+        return widget, move
+    return make
 
 
 def _play(geometry: Geometry, build: Any, *, colors: Any, title: str,
@@ -594,7 +644,8 @@ def animate_envelope(geometry: Geometry, data: Any,
         return _render_offscreen(
             geometry, build, colors=colors, still=line,
             parameters=sweep_parameters(len(abscissa), seconds),
-            screenshot=screenshot, movie=movie, caption=caption)
+            screenshot=screenshot, movie=movie, caption=caption,
+            plot=_record_plot(data, indices, unit_system, theme))
     return _play(geometry, build, colors=colors, title=caption(line),
                  show=show, caption=caption)
 
@@ -661,7 +712,7 @@ def animate_ods(geometry: Geometry, data: Any,
 
 
 def animate_time(geometry: Geometry, data: Any, records: Any = None, *,
-                 quantity: str | None = None,
+                 quantity: str | None = None, shapes: Any = None,
                  unit_system: UnitSystem | None = None,
                  scale: float = 1.0, colormap: bool = True,
                  seconds: float = SECONDS_PER_RECORD, theme: Any = None,
@@ -680,25 +731,41 @@ def animate_time(geometry: Geometry, data: Any, records: Any = None, *,
     record is saved once through as an MP4 (H.264) and the path is
     returned.
 
+    With `shapes`, a shape set, the records played are the modal
+    coordinates of that set (`M1` … `Mn`, such as the modal responses
+    computed from forces), and each moves the geometry by its mode's
+    shape scaled by its value at each sample (`deform.modal_deflection`):
+    the physical response is never formed, so a large model plays at the
+    cost of its modes rather than of a record per DOF. Several modes play
+    as their sum; a pick of some of them plays their contribution.
+
     Raises ValueError when no record measures the quantity, or none of
     the records is at a node of this geometry.
     """
+    from ..core.validate import modal_coordinate
     from ..deform import (
         TimeDeflection,
         animation_records,
         first_capture,
+        modal_deflection,
         quantity_records,
     )
     from ..theme import theme as resolve_theme
 
     captured, _note = first_capture(data, records)
+    if shapes is not None:
+        captured = [i for i in captured
+                    if modal_coordinate(data.response_dof[i]) is not None]
     of_kind, quantity, _left_out = quantity_records(data, captured, quantity)
     if not of_kind:
         raise ValueError(f'no records measure {quantity!r}')
     indices, _notes = animation_records(data, of_kind)
-    dofs = [data.response_dof[i] for i in indices]
     ordinate = np.asarray(data.ordinate)[list(indices)].real
-    deflection = TimeDeflection(geometry, dofs, ordinate)
+    if shapes is not None:
+        deflection = modal_deflection(geometry, shapes, data, indices)
+    else:
+        dofs = [data.response_dof[i] for i in indices]
+        deflection = TimeDeflection(geometry, dofs, ordinate)
     if not len(deflection.rows):
         raise ValueError('none of the records land on this geometry')
     colors = resolve_theme(theme)
@@ -710,7 +777,8 @@ def animate_time(geometry: Geometry, data: Any, records: Any = None, *,
             geometry, build, colors=colors,
             still=int(np.abs(ordinate).max(axis=0).argmax()),
             parameters=sweep_parameters(samples, seconds),
-            screenshot=screenshot, movie=movie)
+            screenshot=screenshot, movie=movie,
+            plot=_record_plot(data, indices, unit_system, theme))
     return _play(geometry, build, colors=colors, title='Time history',
                  show=show, per_second=samples / seconds, period=samples,
                  whole=True)

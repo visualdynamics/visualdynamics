@@ -19,9 +19,12 @@ importing data before its geometry does not mark everything red.
 
 A data object whose DOFs are all modal coordinates (`M1` ... `Mn`, see
 `validate.modal_coordinate`) names no node. It answers to a shape set,
-the one it was transformed through, and fits wherever there is a set
-with at least as many modes as it names: a set in its object group when
-it is in one, any set in the project otherwise.
+the one it was transformed or computed through, and fits wherever there
+is a set with at least as many modes as it names: a set in its object
+group when it is in one, any set in the project otherwise. A time
+history can hold both kinds of record, forces with the modal responses
+computed from them appended: its physical records answer to the
+geometry and its modal records to the shape sets, each by its own rule.
 
 Not checked here:
 
@@ -51,9 +54,11 @@ MAX_LISTED = 6  # DOFs named in a message before it summarizes
 class Issue:
     """Why one object does not fit the geometry or shape set it answers to.
 
-    `kind` is 'dofs-not-in-geometry' or 'modes-not-in-set'. `missing_dofs`
-    lists the DOFs at fault, and `sub_items` the indices of the records,
-    shapes or channels that name them.
+    `kind` is 'dofs-not-in-geometry', 'modes-not-in-set' (an object of
+    modal coordinates alone), or 'modes-beyond-set' (modal records beside
+    physical ones, the physical ones fitting). `missing_dofs` lists the
+    DOFs at fault, and `sub_items` the indices of the records, shapes or
+    channels that name them.
     """
 
     name: str
@@ -169,28 +174,39 @@ def modal_object(obj: Any) -> int | None:
     return max(indices)
 
 
+def modal_records(obj: Any) -> list[int]:
+    """The records of a data object at modal coordinates; empty for
+    anything else."""
+    from .core.data import DataArray
+
+    if not isinstance(obj, DataArray):
+        return []
+    return [i for i, dof in enumerate(obj.response_dof) if _index(dof)]
+
+
 def check_modal(name: str, obj: Any, companions: Mapping[str, Any]
                 ) -> Issue | None:
     """The Issue for a modal object against the shape sets among its
     companions, or None when one of them has every mode it names.
 
     The Issue's kind is 'modes-not-in-set', and its `sub_items` are the
-    records that name a mode beyond the largest set.
+    records that name a mode beyond the largest set. A mixed object's
+    physical records name no mode and are never among them.
     """
     from .core.shapes import ShapeSet
 
-    highest = modal_object(obj)
+    records = range(obj.num_records)
+    highest = max(_index(obj.response_dof[i]) for i in records)
     sets = {other: value for other, value in companions.items()
             if isinstance(value, ShapeSet) and other != name}
     if any(value.num_shapes >= highest for value in sets.values()):
         return None
-    beyond = [i for i, dof in enumerate(obj.response_dof)
-              if _index(dof) > max((v.num_shapes for v in sets.values()),
-                                   default=0)]
+    beyond = [i for i in records
+              if _index(obj.response_dof[i])
+              > max((v.num_shapes for v in sets.values()), default=0)]
     if not sets:
         message = (f'modal coordinates up to M{highest}, and no shape set '
-                   'to answer to — link the set they were transformed '
-                   'through')
+                   'to answer to — link the set they belong to')
     else:
         most = max(sets.items(), key=lambda item: item[1].num_shapes)
         message = (f'modal coordinates up to M{highest}, but shape set '
@@ -219,7 +235,9 @@ def blocks_a_link(issue: Issue | None) -> bool:
 
     What blocks is a modal object with no shape set that has as many
     modes as it names, since it has nothing to be drawn against in any
-    geometry. (`Project.link` refuses two geometries in one group before
+    geometry. A time history holding modal records beside physical ones
+    does not block: its physical records are drawn, and the shortfall of
+    its modal ones is reported ('modes-beyond-set'). (`Project.link` refuses two geometries in one group before
     this is called.)
 
     Parameters
@@ -230,15 +248,15 @@ def blocks_a_link(issue: Issue | None) -> bool:
     Returns
     -------
     bool
-        True for a 'modes-not-in-set' issue, False for None or a
-        'dofs-not-in-geometry' issue.
+        True for a 'modes-not-in-set' issue, False for None or any
+        other kind.
     """
     # Missing nodes stopped blocking after a real report failed on them
     # twice in two days (Brandon, 2026-09-20 and 2026-09-21), the second
     # time on an object whose channels were all virtual. That is why the
     # first attempt, refusing only when nothing overlapped, was not a
     # line that could be drawn either.
-    return issue is not None and issue.kind != 'dofs-not-in-geometry'
+    return issue is not None and issue.kind == 'modes-not-in-set'
 
 
 def check_object(name: str, obj: Any, geometry: Geometry | None,
@@ -261,7 +279,8 @@ def check_object(name: str, obj: Any, geometry: Geometry | None,
         return None
     if modal_object(obj) is not None:
         return check_modal(name, obj, companions or {})
-    if geometry is None:
+    modal = modal_records(obj)
+    if geometry is None and not modal:
         return None
 
     if isinstance(obj, ShapeSet):
@@ -277,8 +296,14 @@ def check_object(name: str, obj: Any, geometry: Geometry | None,
             sub_items=list(range(obj.num_shapes)))
 
     if isinstance(obj, DataArray):
+        # modal records beside physical ones (Brandon, 2026-10-25: forces
+        # with their modal responses appended went red, every M record
+        # read as a node the geometry lacked): each kind by its own rule
+        skipped = set(modal)
         missing, flagged = [], []
         for i in range(obj.num_records):
+            if geometry is None or i in skipped:
+                continue
             dofs = [obj.response_dof[i]]
             if obj.reference_dof is not None:
                 dofs.append(obj.reference_dof[i])
@@ -286,14 +311,21 @@ def check_object(name: str, obj: Any, geometry: Geometry | None,
             if gone:
                 flagged.append(i)
                 missing.extend(d for d in gone if d not in missing)
-        if not flagged:
+        short = check_modal(name, obj, companions or {}) if modal else None
+        if not flagged and short is None:
             return None
-        return Issue(
-            name=name, kind='dofs-not-in-geometry',
-            message=(f'{len(flagged)} of {obj.num_records} records reference '
-                     f'DOFs not in geometry {geometry_name!r}: '
-                     f'{_listed(missing)}'),
-            missing_dofs=missing, sub_items=flagged)
+        said, kind = [], 'modes-beyond-set'
+        if flagged:
+            kind = 'dofs-not-in-geometry'
+            said.append(f'{len(flagged)} of {obj.num_records} records '
+                        f'reference DOFs not in geometry {geometry_name!r}: '
+                        f'{_listed(missing)}')
+        if short is not None:
+            said.append(short.message)
+            missing += short.missing_dofs
+            flagged = sorted(flagged + short.sub_items)
+        return Issue(name=name, kind=kind, message='; '.join(said),
+                     missing_dofs=missing, sub_items=flagged)
 
     if isinstance(obj, ChannelTable):
         dofs = obj.dof_strings()
@@ -374,11 +406,12 @@ def check_compatibility(objects: Mapping[str, Any],
     for name, obj in objects.items():
         if modal_object(obj) is not None:
             issue = check_modal(name, obj, companions(name))
-        elif geometry_name is None:
+        elif geometry_name is None and not modal_records(obj):
             continue
         else:
             against = home(name)
-            issue = check_object(name, obj, geometries.get(against), against)
+            issue = check_object(name, obj, geometries.get(against), against,
+                                 companions=companions(name))
         if issue is not None:
             report.issues[name] = issue
     return report

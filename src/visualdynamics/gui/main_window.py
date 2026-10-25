@@ -115,12 +115,14 @@ from ..core.sine import (
     SineSweepSpecification,
 )
 from ..core.solids import SECTIONS
+from ..core.validate import modal_coordinate
 from ..deform import (
     EnvelopeDeflection,
     OdsDeflection,
     ShapeDeflection,
     TimeDeflection,
     animation_records,
+    modal_deflection,
 )
 from ..io.escdf_objects import SUFFIX as ESCDF_SUFFIX
 from ..io.escdf_objects import SUFFIXES as ESCDF_SUFFIXES
@@ -1333,6 +1335,14 @@ class MainWindow(QMainWindow):
         self._signal_settings: dict[str, Any] = {}
         self.data_pane.signal_panel.changed.connect(self._signal_edited)
         self.data_pane.signal_panel.apply_asked.connect(self._signal_apply)
+        #: the Compute Modal Responses pane while it is open: what it is
+        #: open on (history, set, modes, records) and the quantity shown
+        self._modaling: dict | None = None
+        self._modal_quantity: str = 'acceleration'
+        self.data_pane.modal_response_panel.changed.connect(
+            self._modal_quantity_chosen)
+        self.data_pane.modal_response_panel.apply_asked.connect(
+            self._modal_apply)
         #: the replication fit last read, as (record, its samples, the
         #: inputs, the fit): a cutoff column picked only changes the
         #: case drawn, and reading the fit again was 0.23 s of filters
@@ -2666,10 +2676,22 @@ class MainWindow(QMainWindow):
             quantities = self._response_quantities(*self._dof_series[0][1:])
         else:
             quantities = []
-        self._fill_dofs_combo([(quantity.title(), quantity)
+        # a box with no choice yet opens on what an animation shows by
+        # itself, the most common quantity (`deform.quantity_records`),
+        # not the first by name: sixteen modal responses beside one
+        # force opened on the force (2026-10-25)
+        common = None
+        if animating:
+            from ..deform import first_capture, quantity_records
+
+            data, records = self._dof_series[0][1:]
+            _of_kind, common, _left = quantity_records(
+                data, first_capture(data, records)[0])
+        self._fill_dofs_combo([(quantity.replace('_', ' ').title(), quantity)
                                for quantity in quantities],
                               'Which quantity the geometry moves by and the '
-                              'plot shows, and whose DOFs the arrows mark')
+                              'plot shows, and whose DOFs the arrows mark',
+                              default=common)
         self.dofs_combo_action.setVisible(
             len(quantities) > (0 if arrows else 1))
 
@@ -2693,15 +2715,17 @@ class MainWindow(QMainWindow):
         self.dofs_combo_action.setVisible(self.dofs_action.isChecked()
                                           and len(roles) > 1)
 
-    def _fill_dofs_combo(self, choices, tooltip):
+    def _fill_dofs_combo(self, choices, tooltip, default=None):
         """Put `(label, value)` choices in the DOF drop-down, keeping the
-        current choice when it is still among them."""
-        self._fill_combo(self.dofs_combo, choices, tooltip)
+        current choice when it is still among them, and otherwise
+        `default` when it is."""
+        self._fill_combo(self.dofs_combo, choices, tooltip, default)
 
     @staticmethod
-    def _fill_combo(combo, choices, tooltip):
+    def _fill_combo(combo, choices, tooltip, default=None):
         """Put `(label, value)` choices in `combo`, quietly, keeping the
-        current choice when it is still among them."""
+        current choice when it is still among them, and otherwise
+        `default` when it is."""
         previous = combo.currentData()
         values = [value for _label, value in choices]
         combo.blockSignals(True)
@@ -2710,6 +2734,8 @@ class MainWindow(QMainWindow):
             combo.addItem(label, value)
         if previous in values:
             combo.setCurrentIndex(values.index(previous))
+        elif default in values:
+            combo.setCurrentIndex(values.index(default))
         combo.setToolTip(tooltip)
         combo.blockSignals(False)
 
@@ -4425,10 +4451,12 @@ class MainWindow(QMainWindow):
         ('fit_modes', 'Fit Modal Model', 'edit', 'start_modal_fit'),
         ('generate_signal', 'Generate Signal', 'generate_signal',
          'generate_signal_act'),
-        ('transform', 'Transform to Modal Responses', 'transform',
-         'transform_selection'),
+        ('compute_modal_responses', 'Compute Modal Responses',
+         'modal_response', 'modal_response_act'),
+        ('transform', 'Transform to Modal Coordinates', 'transform',
+         'transform_act'),
         ('expand', 'Expand to Physical Responses', 'expand',
-         'transform_selection'),
+         'expand_act'),
         ('project_onto_basis', 'Project onto Basis DOFs', 'project',
          'project_onto_basis'),
         ('merge', 'Merge into One', 'merge', 'merge_selected'),
@@ -4586,6 +4614,16 @@ class MainWindow(QMainWindow):
                  applicable[verb])
                 for verb, label, icon, handler in self.ACTS
                 if verb in applicable and verb not in elsewhere]
+        if (not any(act[0] == 'compute_modal_responses' for act in acts)
+                and self._modal_candidates() is not None):
+            # modes picked in a set's grid are not objects, so the pair
+            # table never sees them; the act reads the picks itself
+            acts += [(verb, label, icon, getattr(self, handler),
+                      ('Compute how each picked mode answers the forces '
+                       'in the time history, and append the modal '
+                       'responses'))
+                     for verb, label, icon, handler in self.ACTS
+                     if verb == 'compute_modal_responses']
         if len(names) == 1 and names[0] in self._stale:
             acts.insert(0, ('refresh', 'Recompute', 'refresh',
                             self.refresh_selected,
@@ -4653,14 +4691,17 @@ class MainWindow(QMainWindow):
         rule a script's `movie=` uses). Each frame is drawn the way the
         window draws it, so the caption an envelope writes for each line
         is in every frame, and playback is put back where it was
-        afterwards. With `path`, no dialog is shown.
+        afterwards. A record or a sweep of lines is saved with its plot
+        under the scene, the cursor where the frame is (`movie.over_plot`),
+        so the movie says where in the record each frame is. With `path`,
+        no dialog is shown.
         """
         from ..viz.animate import (
             cycle_parameters,
             movie_frames,
             sweep_parameters,
         )
-        from .movie import write_movie
+        from .movie import over_plot, write_movie
 
         if self.animator is None or self.scene.plotter is None:
             return None
@@ -4693,9 +4734,14 @@ class MainWindow(QMainWindow):
         # off: say so, rather than look hung
         self._show_status(f'Saving {os.path.basename(path)}…')
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        frames = movie_frames(self.scene.plotter, step, parameters)
+        if not self._shape_mode and self.data_pane.graphics.isVisible():
+            # the plot and its cursor under the scene (Brandon,
+            # 2026-10-25: so the user can see the slider and know where
+            # in time the animation is)
+            frames = over_plot(frames, self.data_pane.graphics)
         try:
-            count = write_movie(path, movie_frames(self.scene.plotter, step,
-                                                   parameters))
+            count = write_movie(path, frames)
         except RuntimeError as error:      # MovieUnavailable among them
             self._show_status(str(error))
             return None
@@ -9473,7 +9519,13 @@ class MainWindow(QMainWindow):
         put in it — so nothing was taking it down. Deleting every object
         in a project left its report on screen, still editable, backed by
         an object no longer in the project.
+
+        The animation stops with them: its geometry and its plot cursor
+        are what is being cleared. Left playing, the timer moved a cursor
+        whose plot was gone and raised on every frame (2026-10-25, a drag
+        in the tree passing through an empty selection).
         """
+        self._clear_animator()
         self.scene.clear()
         self.scene.offer_modes(False)
         self.data_pane.clear()
@@ -9702,12 +9754,15 @@ class MainWindow(QMainWindow):
         # few, so the table is where the rest are still accounted for
         replicating = bool(series) and self._replication_found(series)
         signaling = self._signal_door()
-        authoring = (None if signaling is not None
+        modaling = self._modal_door()
+        authoring = (None if signaling is not None or modaling is not None
                      else self._authoring(shapes, geometries, series, channels))
         # no 3-D view in edit mode (Brandon, 2026-09-06): every editing
         # gesture is on the flat plot, so the stage stands down while
         # the sheet is open and comes back when it closes
-        self.data_pane.flat_only = authoring is not None or signaling is not None
+        self.data_pane.flat_only = (authoring is not None
+                                    or signaling is not None
+                                    or modaling is not None)
         # a lone set's transformation is drawn on its geometry, which
         # comes up above the tables (Brandon, 2026-10-23)
         self._values_on = (self._values_geometry(shapes[0][0], shapes[0][1])
@@ -9715,7 +9770,8 @@ class MainWindow(QMainWindow):
         self._show_views(three_d=bool(geometries) or self._values_on is not None,
                          plots=bool(series) or bool(picture_sets)
                          or bool(sine_specs) or bool(sine_levels)
-                         or authoring is not None or signaling is not None,
+                         or authoring is not None or signaling is not None
+                         or modaling is not None,
                          table=bool(channels) or shape_table or comparing
                          or bool(reports) or bool(matches)
                          or levels is not None
@@ -9797,6 +9853,8 @@ class MainWindow(QMainWindow):
                 parts.append(self._shape_summary(shapes, geometries))
         if signaling is not None:
             parts.append(self._render_signal())
+        if modaling is not None:
+            parts.append(self._render_modal())
         if authoring is not None:
             parts.append(self._render_author(authoring))
             if authoring[0] == 'table':
@@ -9872,6 +9930,16 @@ class MainWindow(QMainWindow):
             return self._deflect_shape(geometry, shapes, showing=name)
         if series and not shapes:
             return self._deflect_series(geometry, series, showing=name)
+        if (len(series) == 1 and len({id(obj) for _n, obj, _d in shapes}) == 1
+                and isinstance(series[0][1], TimeHistory)
+                and any(modal_coordinate(dof) is not None
+                        for dof in series[0][1].response_dof)):
+            # a time history of modal coordinates, its shape set and a
+            # geometry: the coordinates played through the set (Brandon,
+            # 2026-10-25). Only that: an FRF beside its set keeps the
+            # static view and the synthesis overlay it had
+            return self._deflect_series(geometry, series, showing=name,
+                                        shapes=shapes[0][1])
         return None
 
     def _size_tree_once(self):
@@ -10654,12 +10722,14 @@ class MainWindow(QMainWindow):
     def _render_signal(self) -> str:
         """The pane's settings beside a preview: a short stretch of the
         signal, its PSD over the target for the random kinds, its trace
-        for the others."""
+        and its spectrum for an impulse, its trace for the others."""
         from ..core.averaging import Averaging
         from ..core.signals import (
             KINDS,
             RANDOM_KINDS,
             frame_used,
+            impulse_rolloff,
+            impulse_spectrum,
             kinds_for,
             preview,
             target_at,
@@ -10695,12 +10765,20 @@ class MainWindow(QMainWindow):
         unit = self.unit_system.label_text(short.ordinate_dim[0])
         shown = float(self.unit_system.from_si(rms, short.ordinate_dim[0]))
         samples = self._signal_samples(obj, settings, short)
+        rolloff = None
+        if settings.kind == 'impulse':
+            # the ideal half-sine's points; the plot is the sampled one
+            nyquist = settings.sample_rate / 2.0
+            rolloff = tuple(f'{f:.4g} Hz' if f <= nyquist
+                            else 'above Nyquist'
+                            for f in impulse_rolloff(settings.width))
         panel.show_reading(
             samples=samples,
             spacing=(settings.sample_rate / frame) if frame else None,
             rms=f'{shown:.4g} {unit}',
             note=(f'Previewing {short.ordinate.shape[1]:,} of {samples:,} '
-                  'samples' if samples > short.ordinate.shape[1] else ''))
+                  'samples' if samples > short.ordinate.shape[1] else ''),
+            rolloff=rolloff)
         if settings.kind in RANDOM_KINDS:
             length = int(min(frame or 4096, short.ordinate.shape[1] // 4))
             length -= length % 2
@@ -10717,6 +10795,11 @@ class MainWindow(QMainWindow):
             series = [(f'{what.capitalize()} preview', drawn, None),
                       (name if not typed else f'{name} target',
                        target_at(target, drawn.abscissa), None)]
+        elif settings.kind == 'impulse':
+            # what it excites, beside what it is (Brandon, 2026-10-25:
+            # see the rolloff to see what frequency content is excited)
+            series = [('Impulse preview', short, None),
+                      ('Impulse spectrum', impulse_spectrum(short), None)]
         else:
             series = [(f'{what.capitalize()} preview', short, None)]
         status = self._render_series(series)
@@ -10795,6 +10878,170 @@ class MainWindow(QMainWindow):
         self._show_status(f'{added}: {settings.describe()}'
                           + (f', seed {seed}' if seed is not None else '')
                           + f', from {name}')
+
+    # ---- modal responses: a model answering a record's forces ------------
+
+    def _modal_candidates(self):
+        """(history, set, modes, records) when the selection is one time
+        history with a force channel (whole, or its channels picked) and
+        one real shape set (whole for every mode, or modes picked in its
+        grid), a geometry allowed beside them; None otherwise."""
+        histories, sets, modes, picks = [], [], {}, {}
+        for kind, name, obj, detail in self.selected_references():
+            if isinstance(obj, TimeHistory) and kind in ('object', 'record'):
+                if name not in histories:
+                    histories.append(name)
+                if kind == 'record':
+                    picks.setdefault(name, []).append(detail)
+                else:
+                    picks[name] = None
+            elif isinstance(obj, ShapeSet) and kind in ('object', 'mode'):
+                if name not in sets:
+                    sets.append(name)
+                if kind == 'mode':
+                    modes.setdefault(name, []).append(detail)
+                else:
+                    modes[name] = None
+            elif isinstance(obj, Geometry) and kind == 'object':
+                continue
+            else:
+                return None
+        if len(histories) != 1 or len(sets) != 1:
+            return None
+        history, shapes = self.objects[histories[0]], self.objects[sets[0]]
+        if shapes.num_shapes == 0 or shapes.is_complex:
+            return None
+        if not ('force' in history.ordinate_dim
+                or 'modal_force' in history.ordinate_dim):
+            return None
+        picked_modes = modes.get(sets[0])
+        records = picks.get(histories[0])
+        return (histories[0], sets[0],
+                None if picked_modes is None else sorted(set(picked_modes)),
+                None if records is None else sorted(set(records)))
+
+    def modal_response_act(self) -> None:
+        """Open Compute Modal Responses on the selected time history and
+        shape set (its picked modes, or all), or put it away when it is
+        open on them. The pane previews the responses; Compute appends
+        them (`Project.compute_modal_responses`)."""
+        candidates = self._modal_candidates()
+        if candidates is None:
+            self._show_status('Select a time history with force channels and '
+                              'a shape set (or some of its modes) together')
+            return
+        if self._modaling is not None and self._modaling['key'] == candidates:
+            self.close_modal_pane()
+            return
+        self._author_wanted = False
+        self._signaling = None
+        self.data_pane.signal_panel.hide()
+        history, shapes, modes, records = candidates
+        self._modaling = {'key': candidates, 'history': history,
+                          'shapes': shapes, 'modes': modes,
+                          'records': records}
+        self.render_current()
+
+    def close_modal_pane(self) -> None:
+        """Put the Compute Modal Responses pane away."""
+        self._modaling = None
+        self.data_pane.modal_response_panel.hide()
+        self.render_current()
+
+    def _modal_door(self):
+        """The pane's state while it is open and the selection is still
+        what it was opened on; otherwise None, and the pane put away."""
+        if self._modaling is None:
+            return None
+        if self._modal_candidates() != self._modaling['key']:
+            self._modaling = None
+            self.data_pane.modal_response_panel.hide()
+            return None
+        return self._modaling
+
+    def _render_modal(self) -> str:
+        """The pane beside a preview: the modal responses over the start
+        of the record."""
+        from ..core.modal_response import PREVIEW_SAMPLES, preview_responses
+
+        state = self._modaling
+        name, set_name = state['history'], state['shapes']
+        history, shapes = self.objects[name], self.objects[set_name]
+        modes = (list(range(shapes.num_shapes)) if state['modes'] is None
+                 else state['modes'])
+        panel = self.data_pane.modal_response_panel
+        panel.show_settings(self._modal_quantity)
+        panel.show()
+        forces = [i for i in (state['records'] or range(history.num_records))
+                  if history.ordinate_dim[i] in ('force', 'modal_force')]
+        top = float(np.max(shapes.frequency[modes]))
+        samples = history.ordinate.shape[1]
+        try:
+            rate = float(history.sample_rate)
+            short = preview_responses(history, shapes, modes=modes,
+                                      quantity=self._modal_quantity,
+                                      records=state['records'],
+                                      label=set_name)
+        except ValueError as why:
+            panel.show_reading(note=f'Cannot compute: {why}')
+            self.data_pane.clear()
+            return f'{name} through {set_name}: {why}'
+        above = int(np.sum(shapes.frequency[modes] >= rate / 2.0))
+        notes = []
+        if samples > PREVIEW_SAMPLES:
+            notes.append(f'Previewing the first {PREVIEW_SAMPLES:,} of '
+                         f'{samples:,} samples')
+        if above:
+            notes.append(f'{above} mode{"s" * (above != 1)} at or above the '
+                         f'Nyquist frequency, {rate / 2:g} Hz')
+        panel.show_reading(
+            modes=(f'{len(modes)} of {shapes.num_shapes}'),
+            forces=str(len(forces)), samples=f'{samples:,}',
+            highest=f'{top:.4g} Hz', note='; '.join(notes))
+        status = self._render_series([(f'{name} modal {self._modal_quantity}',
+                                       short, None)])
+        said = (f'{name} through {set_name}: modal {self._modal_quantity} of '
+                f'{len(modes)} mode{"s" * (len(modes) != 1)} from '
+                f'{len(forces)} force channel{"s" * (len(forces) != 1)}')
+        return said + (f' | {status}' if status else '')
+
+    def _modal_quantity_chosen(self, quantity: str) -> None:
+        self._modal_quantity = quantity
+        if self._modaling is not None:
+            self.render_current()
+
+    def _modal_apply(self, quantity: str) -> None:
+        """Compute: the project's verb on what the pane is open on, the
+        picks passed only when there are some, so the journal's line is
+        what a script would write."""
+        if self._modaling is None:
+            return
+        state = self._modaling
+        name = state['history']
+        extra = {}
+        if quantity != 'acceleration':
+            extra['quantity'] = quantity
+        if state['modes'] is not None:
+            extra['modes'] = state['modes']
+        if state['records'] is not None:
+            extra['records'] = state['records']
+        try:
+            self.project.compute_modal_responses(name, state['shapes'],
+                                                 **extra)
+        except (ValueError, TypeError) as why:
+            self._show_status(f'{name}: {why}')
+            return
+        count = (self.objects[state['shapes']].num_shapes
+                 if state['modes'] is None else len(state['modes']))
+        item = self._item_for_object(name)
+        if item is not None:
+            self._refresh_item(item, self.objects[name])
+        self._modaling = None
+        self.data_pane.modal_response_panel.hide()
+        self.show_object(name)
+        self._show_status(f'{name}: modal {quantity} of {count} '
+                          f'mode{"s" * (count != 1)} through '
+                          f'{state["shapes"]} appended')
 
     # ---- writing a specification at a set's modal coordinates ------------
 
@@ -11344,7 +11591,7 @@ class MainWindow(QMainWindow):
         self._show_status(f'{name}: rigid body modes '
                           f'{self._describe_rigid(geometry, properties)}')
 
-    def _deflect_series(self, geometry, series, showing=None):
+    def _deflect_series(self, geometry, series, showing=None, shapes=None):
         name, data, records = series[0]
         if len(series) > 1:
             return None          # one object on the geometry at a time
@@ -11376,6 +11623,12 @@ class MainWindow(QMainWindow):
         if data.abscissa_dim != 'time':
             return None
         of_kind, notes = self._quantity_records(data, records)
+        if of_kind and all(modal_coordinate(data.response_dof[i]) is not None
+                           for i in of_kind):
+            return self._deflect_modal(geometry, name, data, of_kind, notes,
+                                       shapes, showing=showing)
+        if shapes is not None:
+            return None
         indices, more = animation_records(data, of_kind)
         notes += more
         dofs = [data.response_dof[i] for i in indices]
@@ -11397,6 +11650,37 @@ class MainWindow(QMainWindow):
                                   for i in indices}))
         return (f'{name} — deflection proportional to {units}; '
                 f'drag the cursor or press Play{fit}{notes}')
+
+    def _deflect_modal(self, geometry, name, data, of_kind, notes, shapes,
+                       showing=None):
+        """Modal coordinates played on a geometry through their shape
+        set: each frame is the modes' shapes scaled by their values at
+        that sample and summed, the physical response never formed
+        (`deform.modal_deflection`). The set is the one selected with
+        them, or the one they came from (`Project.modal_basis`)."""
+        if shapes is None:
+            basis = self.project.modal_basis(name, of_kind)
+            if basis is None:
+                return (f'{name}: its records are modal coordinates — '
+                        'select their shape set too, to play them')
+            shapes = self.objects[basis]
+        indices, more = animation_records(data, of_kind)
+        try:
+            deflection = modal_deflection(geometry, shapes, data, indices)
+        except ValueError as refusal:
+            return f'{name}: {refusal}'
+        if not len(deflection.rows):
+            return f'{name}: the shape set has no DOF on this geometry'
+        self._shape_mode = False
+        self._build_animator(geometry, deflection, showing=showing)
+        self._show_animation_controls(True)
+        self.play_action.setEnabled(True)
+        count = len(indices)
+        units = ', '.join(sorted({data.ordinate_unit[i] or 'unknown units'
+                                  for i in indices}))
+        return (f'{name} — {count} mode shape{"s" if count != 1 else ""} '
+                f'scaled by {units} and summed; drag the cursor or press '
+                f'Play{notes}{more}')
 
     def _animated_series(self, series):
         """`series` with only the animated quantity's records, for the
@@ -14285,17 +14569,32 @@ class MainWindow(QMainWindow):
         if len(histories) != 1 or len(sets) != 1:
             return None
         history = histories[0]
-        direction = reads_as(self.objects[history], self.objects[sets[0]])
+        records = picks.get(history)
+        records = None if records is None else sorted(set(records))
+        # the pick decides the way when there is one: modal records
+        # picked in a history that holds forces too expand
+        direction = reads_as(self.objects[history], self.objects[sets[0]],
+                             records)
         if direction is None:
             return None
-        records = picks.get(history)
-        return history, sets[0], direction, (
-            None if records is None else sorted(set(records)))
+        return history, sets[0], direction, records
 
-    def transform_selection(self) -> None:
+    def transform_act(self) -> None:
+        """The bar's Transform to Modal Coordinates."""
+        self.transform_selection('physical')
+
+    def expand_act(self) -> None:
+        """The bar's Expand to Physical Responses."""
+        self.transform_selection('modal')
+
+    def transform_selection(self, direction: str | None = None) -> None:
         """Transform the selected data through the selected shape set,
         modal responses from physical or physical from modal, and add the
         result to the project with the verb a script calls.
+
+        `direction` is the way the act asked for: 'physical' transforms,
+        'modal' expands; left out, the way the selection reads. A
+        history of forces with modal responses appended offers both.
 
         A transform has no settings, so there is no pane and no preview,
         as with Integrate. What was done is said in the status bar and
@@ -14307,7 +14606,8 @@ class MainWindow(QMainWindow):
                               'together to transform one through the '
                               'other')
             return
-        history, shapes, direction, records = candidates
+        history, shapes, read, records = candidates
+        direction = direction or read
         # the pick only when there is one, so the journal's line is the
         # one a script would write for the whole object
         picked = {} if records is None else {'records': records}

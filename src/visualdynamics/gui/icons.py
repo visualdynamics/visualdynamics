@@ -1160,6 +1160,21 @@ def _draw_new_channel_table(painter, color):
     _plus(painter, 50, 50)
 
 
+def _draw_modal_response(painter, color):
+    """A decaying ring above a bar of modes: each mode answering the
+    force."""
+    import math
+
+    points = [(8 + 3 * i, 24 - 12 * math.exp(-i / 6.0)
+               * math.sin(i * 1.3)) for i in range(17)]
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPolyline([QPointF(x, y) for x, y in points])
+    for k, height in enumerate((14, 9, 6, 4)):
+        painter.drawLine(QPointF(14 + 10 * k, 56), QPointF(14 + 10 * k,
+                                                           56 - height))
+
+
 def _draw_generate_signal(painter, color):
     """A ragged random trace running out of a plus: a signal made, not
     measured."""
@@ -2408,6 +2423,7 @@ def control_icon(name: str) -> QIcon:
      'add': _draw_add, 'new_geometry': _draw_new_geometry,
      'new_channel_table': _draw_new_channel_table,
      'generate_signal': _draw_generate_signal,
+     'modal_response': _draw_modal_response,
      'mac': _draw_mac, 'shape_values': _draw_shape_values,
      'new_specification': _draw_new_specification,
      'add_channel': _draw_add_channel,

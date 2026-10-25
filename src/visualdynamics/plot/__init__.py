@@ -2181,6 +2181,11 @@ def _application():
     """
     from PySide6.QtWidgets import QApplication
 
+    from .log_axis import install
+
+    # every plot a script draws needs this application first, so the log
+    # axes' labels are fitted to their room here as in the window
+    install()
     return QApplication.instance() or QApplication([])
 
 

@@ -334,6 +334,9 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_signal': ('core.signals.preview, then plot_data of its '
                            'PSD over the target, or plot_series of its trace; '
                            'Project.generate_signal makes it'),
+        '_render_modal': ('core.modal_response.preview_responses, then '
+                          'plot_series; Project.compute_modal_responses '
+                          'appends them'),
         '_render_author': ('core.author.ModalSpecificationDraft.preview, '
                            'then plot_data; its areas and running rms '
                            'plot_breakpoints'),

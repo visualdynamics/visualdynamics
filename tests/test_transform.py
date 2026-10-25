@@ -352,7 +352,7 @@ def _project():
 def test_the_verbs_name_link_and_journal():
     project = _project()
     name = project.transform('Run', 'Modes')
-    assert name == 'Run Modal Responses'
+    assert name == 'Run Modal Coordinates'
     assert project.provenance[name] == {
         'verb': 'transform', 'source': 'Run',
         'params': {'shapes': 'Modes'},
@@ -372,7 +372,7 @@ def test_the_verbs_name_link_and_journal():
         'the expansion lands back in the geometry\'s group'
     assert np.allclose(project[back].ordinate, project['Run'].ordinate)
     assert project.journal[-1] == \
-        "project.expand('Run Modal Responses', 'Modes')"
+        "project.expand('Run Modal Coordinates', 'Modes')"
     with pytest.raises(TypeError, match='not a shape set'):
         project.transform('Run', 'Plate')
 
@@ -784,3 +784,16 @@ def test_the_importer_reads_a_specifications_cross_terms_when_real(tmp_path):
     pairs = _by_pair(full)
     assert np.allclose(np.real(full.ordinate[pairs[('101Z+', '104Z+')]]),
                        0.5 * np.real(full.ordinate[pairs[('101Z+', '101Z+')]]))
+
+
+def test_a_result_saved_under_the_old_name_expands_to_the_same_name():
+    """Transforms were named '… Modal Responses' until the act became
+    Transform to Modal Coordinates; a project saved then still expands
+    to '… Physical Responses'."""
+    project = _project()
+    made = project.transform('Run', 'Modes')
+    assert made == 'Run Modal Coordinates'
+    project.add('Old Modal Responses', project[made])
+    assert project.expand('Old Modal Responses', 'Modes') == \
+        'Old Physical Responses'
+    assert project.expand(made, 'Modes') == 'Run Physical Responses'

@@ -47,19 +47,39 @@ window at the frame's length, every line is exactly the target's and
 nothing leaks between them. Realization draws a new frame every so
 many periods; All keeps one frame throughout (pseudo-random).
 
-An impulse is one sample whose integral is the Area, and its
-spectrum is flat to the Nyquist frequency. A classical pulse is a
-half-sine, a terminal-peak sawtooth or a trapezoid, at its Peak and
-Duration, starting at Starts.
+An impulse is a half-sine of a given Peak and Width, starting at
+Starts, the shape of the force a hammer tip makes. Its width sets the
+band it excites. The spectrum of a half-sine of width T is flat at low
+frequency, falls 3 dB by 0.59/T and 10 dB by 1.02/T, and reaches its
+first zero at 1.5/T, so a 1 ms impulse excites up to about 1 kHz and a
+0.25 ms impulse up to about 4 kHz. The pane gives the three frequencies
+for the width typed, and the plot draws the impulse's spectrum under
+its trace, as the record holds it: the magnitude of its Fourier
+transform, in the quantity times seconds (N·s for a force), whose level
+at low frequency is the impulse's area, 2·peak·width/π. The width has to
+span at least two samples. A classical pulse is a half-sine, a
+terminal-peak sawtooth or a trapezoid, at its Peak and Duration,
+starting at Starts.
 
 Sine follows a sine specification's tone: its frequency at the
 tone's rates, dwells included, and its amplitude and phase between
 breakpoints as the controller follows them.
 
+## Read the way it was made
+
+A generated signal carries the analysis settings it was made for, and
+its averaging opens on them. Random is read in frames of the length it was drawn at, under a
+Hann window, overlapped by half. Burst random is read in one rectangular
+frame per burst, and periodic random in one per period, with no
+overlap: 50 bursts are 50 averages, each leakage-free. An impulse or a
+pulse is the whole record in one rectangular frame. A sine has no
+frames of its own and opens with the usual defaults.
+
 ## Preview, then Generate
 
 The plot previews the signal as its settings change: for the random
-kinds, the preview's PSD over the target; for the others, its trace.
+kinds, the preview's PSD over the target; for an impulse, its trace and
+its spectrum; for the others, its trace.
 The preview is a short stretch of the signal, up to 131,072 samples
 per DOF, so that it answers while a number is being typed. The rows
 under the settings give the samples the full signal holds, its line
@@ -88,9 +108,11 @@ same settings and seed.
                                      seed=1)
     tap = project.generate_signal('Channel Table', 'impulse',
                                   duration=2.0, sample_rate=10240.0,
-                                  at=0.1, area=1.0)
+                                  at=0.1, peak=500.0, width=0.0005)
 
 The settings are the fields of `core.signals.SignalSettings`, and the
 generators behind each kind (`random_history`, `burst_random_history`,
 `periodic_random_history`, `impulse_history`, `sine_history`) can be
 called on their own, with `flat_spectrum` for a target typed in.
+`impulse_rolloff(width)` gives an impulse's −3 dB, −10 dB and first-zero
+frequencies, and `impulse_spectrum(history)` its spectrum.

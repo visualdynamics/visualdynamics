@@ -80,11 +80,14 @@ def test_a_channel_table_makes_an_impulse_at_its_references():
     project = visualdynamics.Project()
     project.add('Channels', _table())
     name = project.generate_signal('Channels', 'impulse', duration=1.0,
-                                   sample_rate=1000.0, at=0.1, area=5.0)
+                                   sample_rate=10000.0, at=0.1, peak=5.0,
+                                   width=0.004)
     made = project[name]
     assert made.response_dof == ['1X+', '2Y+'], 'the reference channels only'
     assert made.ordinate_dim == ['force', 'force']
-    assert made.ordinate[0].sum() / 1000.0 == pytest.approx(5.0)
+    # the sampled half-sine of N = 40 intervals sums to cot(π/2N)
+    assert made.ordinate[0].sum() == pytest.approx(
+        5.0 / np.tan(np.pi / 80), rel=1e-9)
     pulse = project.generate_signal('Channels', 'pulse', duration=0.1,
                                     sample_rate=20000.0, peak=100.0,
                                     pulse_duration=0.005)
@@ -231,8 +234,10 @@ def test_the_pane_stands_down_when_the_selection_moves(window, pump):
     assert not panel.isVisible(), 'the act again puts it away'
 
 
-def test_a_channel_table_offers_an_impulse_and_previews_its_trace(window,
-                                                                   pump):
+def test_a_channel_table_offers_an_impulse_and_previews_its_rolloff(window,
+                                                                     pump):
+    """The impulse's width sets its band; the pane reads where it rolls
+    off and the plot draws its trace and its spectrum."""
     window.add_object('Channels', _table())
     pump()
     panel = _open(window, pump, 'Channels')
@@ -241,7 +246,54 @@ def test_a_channel_table_offers_an_impulse_and_previews_its_trace(window,
     panel.kind_box.setCurrentIndex(panel.kind_box.findData('impulse'))
     pump()
     assert 'at 1X+, 2Y+' in window.statusBar().currentMessage()
-    assert panel._editors['area'].isVisibleTo(panel)
+    for shown in ('peak', 'width', 'at', 'duration'):
+        assert panel._editors[shown].isVisibleTo(panel), shown
+    assert not panel._editors['shape'].isVisibleTo(panel)
+    assert 'area' not in panel._editors
+    assert panel._derived['down3'][1].text() == '593.5 Hz'
+    assert panel._derived['down10'][1].text() == '1019 Hz'
+    assert panel._derived['zero'][1].text() == '1500 Hz'
+    keys = [getattr(window.data_pane.graphics.getItem(row, 0), 'series_key',
+                    None) for row in range(6)]
+    drawn = [key[1] for key in keys if key]
+    assert drawn == ['force', 'force*time'], 'the trace, then its spectrum'
+    panel._editors['width'].setValue(0.25)
+    pump()
+    assert panel.note.text() == ('an impulse 0.25 ms wide is under two '
+                                 'samples at 5120 Hz; the narrowest is '
+                                 '0.3906 ms')
+    panel._editors['width'].setValue(0.4)
+    pump()
+    assert panel._derived['down3'][1].text() == '1484 Hz'
+    assert panel._derived['down10'][1].text() == '2548 Hz'
+    assert panel._derived['zero'][1].text() == 'above Nyquist', \
+        '3750 Hz past a 2560 Hz Nyquist'
     panel.kind_box.setCurrentIndex(panel.kind_box.findData('random'))
     pump()
     assert panel._editors['level'].isVisibleTo(panel), 'a typed target'
+
+
+def test_a_generated_burst_opens_in_its_own_frames(window, pump, tmp_path):
+    """The analysis settings shown on a generated burst are its bursts:
+    50 rectangular frames, not one Hann frame of the whole record, and a
+    save keeps them."""
+    window.add_object('Target', _target())
+    pump()
+    added = window.project.generate_signal('Target', 'burst', bursts=50,
+                                           frame_length=4096,
+                                           sample_rate=8192.0, seed=3)
+    window.show_object(added)
+    pump()
+    window.data_pane.averaging_action.trigger()
+    pump()
+    panel = window.data_pane.averaging_panel
+    assert panel.isVisible()
+    assert panel.frames_box.value() == 50
+    assert panel.length_box.value() == 4096
+    assert panel.window_box.currentData() == 'boxcar'
+    assert panel.overlap_box.value() == 0.0
+    path = tmp_path / 'signals.vdyn'
+    window.project.save(path)
+    reopened = visualdynamics.Project.open(path)
+    a = reopened[added].averaging
+    assert (a.frame_length, a.window, a.frames) == (4096, 'boxcar', 50)

@@ -252,8 +252,8 @@ a grid pick unless the modifier is held.
 
 The acts a selection can take are on the bar as soon as the selection
 allows them, decided by the same rules as the readings: a record and a
-shape set offer *Transform to Modal Responses* (or *Expand to Physical
-Responses* for modal data), two shape sets on two geometries offer
+shape set offer *Transform to Modal Coordinates* (or *Expand to
+Physical Responses* for modal data), two shape sets on two geometries offer
 *Project onto Basis DOFs*, and objects of one type that can be merged
 offer *Merge into One* ([Projects, links, and the
 Basis](projects.md#merging)).

@@ -81,13 +81,13 @@ def test_a_lone_object_offers_its_own_acts_on_the_plotsbar_acts(window, pump):
 def test_a_combination_offers_only_what_it_can_take_together(window, pump):
     _populate(window, pump)
     _select(window, pump, 'Run', 'Modes')
-    assert bar_acts(window.data_pane) == ['Transform to Modal Responses', 'Copy'], \
+    assert bar_acts(window.data_pane) == ['Transform to Modal Coordinates', 'Copy'], \
         'not Integrate: that applies to one member alone'
     window.data_pane._acts['actions']['transform'].trigger()
     pump()
-    assert 'Run Modal Responses' in window.project, \
+    assert 'Run Modal Coordinates' in window.project, \
         'the button runs the same verb the API has'
-    _select(window, pump, 'Run Modal Responses', 'Modes')
+    _select(window, pump, 'Run Modal Coordinates', 'Modes')
     assert bar_acts(window.data_pane) == ['Expand to Physical Responses', 'Copy']
 
 

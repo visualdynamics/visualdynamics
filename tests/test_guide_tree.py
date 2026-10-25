@@ -45,7 +45,7 @@ def test_every_pairing_the_window_implements_is_on_the_page():
                     'time history + transient specification',
                     'sine levels + sine sweep specification',
                     'operating deflection shape', 'envelope', 'principal shape',
-                    'DOF arrows', 'Transform to Modal Responses',
+                    'DOF arrows', 'Transform to Modal Coordinates',
                     'Merge into One'):
         assert reading.replace('\\n', '\n') in text, f'{reading}: not on the page'
 

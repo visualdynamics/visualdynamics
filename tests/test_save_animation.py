@@ -139,3 +139,132 @@ def test_no_qt_multimedia_offers_no_movie_and_breaks_nothing(shaking,
     finally:
         movie._unloadable.cache_clear()
         movie._mp4_codecs.cache_clear()
+
+
+# ---- the plot under a record's movie ------------------------------------
+
+
+def _captured(window, monkeypatch, tmp_path, count=6):
+    """The frames a save would encode, kept rather than written, from
+    `count` steps."""
+    from visualdynamics.viz import animate
+
+    kept = []
+
+    def keep(path, frames, *args, **kwargs):
+        kept.extend(np.array(frame) for frame in frames)
+        open(path, 'wb').close()       # the save reports the file's size
+        return len(kept)
+
+    monkeypatch.setattr(movie, 'write_movie', keep)
+    monkeypatch.setattr(animate, 'sweep_parameters',
+                        lambda n, *a, **k: np.linspace(0, n - 1, count)
+                        .astype(int))
+    monkeypatch.setattr(animate, 'cycle_parameters',
+                        lambda *a, **k: np.linspace(0.0, 6.0, count))
+    window.save_animation(str(tmp_path / 'kept.mp4'))
+    return kept
+
+
+def test_a_record_is_saved_with_its_plot_and_cursor_under_it(
+        playing, monkeypatch, tmp_path):
+    """Brandon, 2026-10-25: the plot of the time history under the
+    scene, so the movie says where in time each frame is."""
+    scene = np.asarray(playing.scene.plotter.screenshot(return_img=True))
+    kept = _captured(playing, monkeypatch, tmp_path)
+    height, width = scene.shape[:2]
+    assert all(frame.shape == kept[0].shape for frame in kept)
+    total, wide, channels = kept[0].shape
+    assert (wide, channels) == (width, 3)
+    strip = total - height
+    assert 0 < strip <= 0.4 * height, 'the plot, at most 40 % of the scene'
+    assert total % 2 == 0, 'an even height for the encoder'
+    strips = [frame[height:] for frame in kept]
+    assert not np.array_equal(strips[0], strips[-1]), 'the cursor moves'
+    moved = np.flatnonzero(np.any(strips[0] != strips[-1], axis=(0, 2)))
+    assert moved.size < 0.2 * width, 'only the cursor, not the plot'
+
+
+def test_a_mode_shape_movie_has_no_plot(shaking, monkeypatch, tmp_path):
+    scene = np.asarray(shaking.scene.plotter.screenshot(return_img=True))
+    kept = _captured(shaking, monkeypatch, tmp_path)
+    assert kept[0].shape[:2] == scene.shape[:2]
+
+
+def test_a_scripts_record_movie_carries_its_plot_too(qt_app, monkeypatch,
+                                                     tmp_path):
+    """Anything the window saves a script can save (principle 4): the
+    record's plot under the scene, its cursor walking with the frames."""
+    from conftest import plate_geometry_and_shapes
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.viz import animate
+
+    geometry = plate_geometry_and_shapes()[0]
+    dofs = [f'{int(node)}Z+' for node in geometry.node_id[:20]]
+    t = np.arange(2048) / 512.0
+    record = TimeHistory(t, np.sin(2 * np.pi * 3 * t)[None, :].repeat(20, 0),
+                         response_dof=dofs, ordinate_dim='acceleration')
+    kept = []
+
+    def keep(path, frames, *args, **kwargs):
+        kept.extend(np.array(frame) for frame in frames)
+        return len(kept)
+
+    monkeypatch.setattr(movie, 'write_movie', keep)
+    monkeypatch.setattr(animate, 'sweep_parameters',
+                        lambda n, *a, **k: np.linspace(0, n - 1, 5)
+                        .astype(int))
+    record.animate(geometry, movie=str(tmp_path / 'record.mp4'))
+    scene_height = 768                           # pyvista's default window
+    total = kept[0].shape[0]
+    assert scene_height < total <= 1.4 * scene_height
+    strips = [frame[scene_height:] for frame in kept]
+    assert not np.array_equal(strips[0], strips[-1]), 'the cursor moves'
+
+
+def test_an_operating_shape_saves_without_the_plot(window, pump, monkeypatch,
+                                                   tmp_path):
+    """An FRF's operating deflection shape sweeps its phase at the line
+    the cursor picked: the plot is up, but it says nothing about where
+    in the movie a frame is, so it is not carried."""
+    from conftest import fixture_path, select_objects
+
+    import visualdynamics
+
+    window.add_object('Plate', visualdynamics.import_file(
+        fixture_path('plate', 'geometry.npz'), length_unit='m'))
+    window.add_object('FRF', visualdynamics.import_file(
+        fixture_path('plate', 'frfs.npz')))
+    pump()
+    select_objects(window, pump, 'FRF', 'Plate')
+    assert window._shape_mode and window.data_pane.graphics.isVisible()
+    scene = np.asarray(window.scene.plotter.screenshot(return_img=True))
+    kept = _captured(window, monkeypatch, tmp_path)
+    assert kept[0].shape[:2] == scene.shape[:2]
+
+
+def test_a_scripts_envelope_movie_carries_its_plot_too(qt_app, monkeypatch,
+                                                       tmp_path):
+    from conftest import fixture_path
+
+    import visualdynamics
+    from visualdynamics.viz import animate
+
+    geometry = visualdynamics.import_file(fixture_path('plate',
+                                                       'geometry.npz'),
+                                          length_unit='m')
+    psd = visualdynamics.import_file(fixture_path('plate', 'psd.npz'))
+    kept = []
+
+    def keep(path, frames, *args, **kwargs):
+        kept.extend(np.array(frame) for frame in frames)
+        return len(kept)
+
+    monkeypatch.setattr(movie, 'write_movie', keep)
+    monkeypatch.setattr(animate, 'sweep_parameters',
+                        lambda n, *a, **k: np.linspace(0, n - 1, 4)
+                        .astype(int))
+    psd.animate(geometry, movie=str(tmp_path / 'envelope.mp4'))
+    assert kept[0].shape[0] > 768, 'the PSD under the scene'
+    assert not np.array_equal(kept[0][768:], kept[-1][768:])

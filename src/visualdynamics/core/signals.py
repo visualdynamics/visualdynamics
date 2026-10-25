@@ -27,6 +27,21 @@ conj(X_a)·X_b (`TimeHistory.compute_cpsds`), so the matrix factored is
 the conjugate of the one stored. Uncorrelated DOFs are the diagonal
 matrix, the same rule.
 
+Each record carries the averaging it is meant to be read with, so the
+analysis settings opened on it match it: random in frames of the length
+it was drawn at, under a Hann window, overlapped by half; burst random in
+one rectangular frame per burst, and periodic random in one per period,
+so each is one leakage-free average; an impulse or a pulse as the whole
+record in one rectangular frame. A sine has none of its own.
+
+An impulse is a half-sine of a chosen width, the force a hammer tip
+makes: a pulse with a finite width has a finite bandwidth, where a
+single sample is flat to the Nyquist frequency whatever the sample rate.
+Its spectrum, |F(f)| = (2PT/π)·|cos(πfT)/(1 - 4f²T²)| for a peak P and
+a width T, is flat at low frequency and falls 3 dB by 0.59/T, 10 dB by
+1.02/T, and to its first zero at 1.5/T (`impulse_rolloff`), so the width
+is chosen for the band the impulse should excite.
+
 A specification is read between its breakpoints as it is everywhere in
 the package (`author.read_at_lines`: the magnitude log-log, the phase
 linearly), or per bin when it holds a controller's lines, and is zero
@@ -51,7 +66,7 @@ import numpy as np
 
 from ..units import UNKNOWN
 from .classical_pulse import ClassicalPulse
-from .data import Psd, Specification, TimeHistory
+from .data import Psd, Specification, Spectrum, TimeHistory
 from .sine import SineSweepSpecification
 
 #: what follows a density's quantity, which the signal's quantity is
@@ -230,13 +245,26 @@ def _frames(factors: np.ndarray, frame_length: int, sample_rate: float,
 
 
 def _history(rows: np.ndarray, sample_rate: float, dofs: list[str],
-             quantities: list[str], comment: str) -> TimeHistory:
+             quantities: list[str], comment: str, *,
+             frame: int | None = None, overlap: float = 0.0,
+             window: str = 'boxcar') -> TimeHistory:
+    """The record, with the averaging it was made to be read with: frames
+    of `frame` samples (the whole record when None), `overlap` and
+    `window`, as many as fit. A signal made in frames is read in the same
+    frames, so the analysis settings a user opens on it are the ones that
+    match it and not a single frame of the whole record."""
     from ..units import SI
+    from .averaging import Averaging
 
     time = np.arange(rows.shape[1]) / sample_rate
-    return TimeHistory(time, rows, response_dof=dofs, ordinate_dim=quantities,
-                       ordinate_unit=[SI.units.get(q) for q in quantities],
-                       comment=[comment] * len(dofs))
+    history = TimeHistory(time, rows, response_dof=dofs,
+                          ordinate_dim=quantities,
+                          ordinate_unit=[SI.units.get(q) for q in quantities],
+                          comment=[comment] * len(dofs))
+    history.averaging = Averaging(
+        frame_length=int(frame or rows.shape[1]), overlap=overlap,
+        window=window).filled(rows.shape[1], sample_rate)
+    return history
 
 
 def _samples(duration: float, sample_rate: float) -> int:
@@ -309,8 +337,10 @@ def random_history(spectrum: Psd, *, duration: float, sample_rate: float,
             out[:, m * hop:m * hop + n] += window * frame
     # the first half frame has one window over it, not two; start where
     # every sample has its two
+    # read as it was drawn: frames of its own length under a Hann window,
+    # overlapped by half
     return _history(out[:, hop:hop + total], sample_rate, wanted, quantities,
-                    'random')
+                    'random', frame=n, overlap=0.5, window='hann')
 
 
 def burst_random_history(spectrum: Psd, *, bursts: int, sample_rate: float,
@@ -383,8 +413,10 @@ def burst_random_history(spectrum: Psd, *, bursts: int, sample_rate: float,
                          min(FRAMES_AT_ONCE, int(bursts) - first), rng)
         for m, frame in enumerate(frames, start=first):
             rows[:, m * n:(m + 1) * n] = frame * gate
+    # one rectangular frame per burst: the burst and its quiet tail are
+    # whole in each, so nothing leaks and each burst is one average
     return _history(rows, sample_rate, wanted, quantities,
-                    f'burst random, {burst:.0%} on')
+                    f'burst random, {burst:.0%} on', frame=n)
 
 
 def periodic_random_history(spectrum: Psd, *, periods: int,
@@ -443,20 +475,19 @@ def periodic_random_history(spectrum: Psd, *, periods: int,
     rows = rows.transpose(1, 0, 2).reshape(len(wanted), -1)
     kind = ('pseudo-random' if repeats >= periods
             else f'periodic random, {repeats} periods each')
-    return _history(rows, sample_rate, wanted, quantities, kind)
+    # one rectangular frame per period, leakage-free
+    return _history(rows, sample_rate, wanted, quantities, kind, frame=n)
 
 
 def impulse_history(dofs: str | Sequence[str], *, quantity: str,
                     duration: float, sample_rate: float, at: float = 0.0,
-                    area: float = 1.0,
+                    peak: float = 1.0, width: float = 1e-3,
                     pulse: ClassicalPulse | None = None) -> TimeHistory:
     """An impulse, or a classical pulse, at the same instant at every DOF.
 
-    With no `pulse`, an ideal impulse: one sample of `area`·`sample_rate`
-    at `at`, so that its integral is `area` (in the quantity's SI unit
-    times seconds, newton-seconds for a force) and its spectrum is flat
-    to the Nyquist frequency. With a `pulse`, its shape, peak and
-    duration from `at` (`ClassicalPulse.at`).
+    With no `pulse`, an impulse: a half-sine of `peak` and `width` from
+    `at`, whose spectrum rolls off as `impulse_rolloff` gives. With a
+    `pulse`, its shape, peak and duration from `at` (`ClassicalPulse.at`).
 
     Parameters
     ----------
@@ -470,10 +501,13 @@ def impulse_history(dofs: str | Sequence[str], *, quantity: str,
         Samples per second.
     at : float, default 0.0
         When the impulse or the pulse starts, in seconds.
-    area : float, default 1.0
-        The ideal impulse's integral, in SI; not used with a pulse.
+    peak : float, default 1.0
+        The impulse's peak, signed, in SI; not used with a pulse.
+    width : float, default 1e-3
+        The impulse's width, the half-sine's half cycle, in seconds; not
+        used with a pulse. At least two samples.
     pulse : ClassicalPulse, optional
-        A half-sine, sawtooth or trapezoid instead of an ideal impulse.
+        A half-sine, sawtooth or trapezoid instead of the impulse.
 
     Returns
     -------
@@ -483,8 +517,10 @@ def impulse_history(dofs: str | Sequence[str], *, quantity: str,
     Raises
     ------
     ValueError
-        If the start is outside the record, the area is not a number
-        other than zero, or the duration is shorter than two samples.
+        If the start is outside the record or the impulse or pulse runs
+        past its end, the peak is not a number other than zero, the
+        impulse is narrower than two samples, or the duration is shorter
+        than two samples.
     """
     dofs = [dofs] if isinstance(dofs, str) else list(dofs)
     if not dofs:
@@ -494,18 +530,75 @@ def impulse_history(dofs: str | Sequence[str], *, quantity: str,
     if not 0 <= start < total:
         raise ValueError(f'an impulse at {at:g} s is outside the record of '
                          f'{total / sample_rate:g} s')
-    row = np.zeros(total)
     if pulse is None:
-        if not np.isfinite(area) or area == 0.0:
-            raise ValueError(f'the impulse\'s area ({area:g}) has to be a '
-                             'number other than zero')
-        row[start] = area * sample_rate
-        what = 'impulse'
+        # a half-sine, not one sample (Brandon, 2026-10-25): its width
+        # sets the band it excites, where a single sample's spectrum is
+        # flat to whatever the Nyquist frequency happens to be
+        if not width * sample_rate >= 2.0:
+            raise ValueError(f'an impulse {1e3 * width:.4g} ms wide is under '
+                             f'two samples at {sample_rate:g} Hz; the '
+                             f'narrowest is {2e3 / sample_rate:.4g} ms')
+        shape = ClassicalPulse('half-sine', peak, width)
+        what = f'impulse, {1e3 * width:.4g} ms half-sine'
     else:
-        row = pulse.at(np.arange(total) / sample_rate - start / sample_rate)
-        what = pulse.describe()
+        shape, what = pulse, pulse.describe()
+    if start + shape.extent * sample_rate > total:
+        raise ValueError(f'the {what} from {at:g} s runs past the end of '
+                         f'the record at {total / sample_rate:g} s')
+    row = shape.at(np.arange(total) / sample_rate - start / sample_rate)
     return _history(np.tile(row, (len(dofs), 1)), sample_rate, dofs,
                     [quantity] * len(dofs), what)
+
+
+def _half_sine_ratio(x: float) -> float:
+    """|F(f)|/F(0) of a half-sine at f·width = x."""
+    if abs(1.0 - 4.0 * x * x) < 1e-9:
+        return np.pi / 4.0                    # the removable point, x = 1/2
+    return abs(np.cos(np.pi * x) / (1.0 - 4.0 * x * x))
+
+
+def impulse_rolloff(width: float) -> tuple[float, float, float]:
+    """Where a half-sine impulse `width` seconds wide rolls off: the
+    frequencies, in Hz, at which its spectrum is 3 dB and 10 dB below its
+    level at low frequency, and its first zero, 1.5/`width`.
+
+    The ratio |cos(πfT)/(1 - 4f²T²)| falls monotonically to its first
+    zero, so each level is solved for once on that span. The rule of
+    thumb that a hammer excites up to about one over its contact time is
+    the 10 dB point, 1.02/T.
+    """
+    from scipy.optimize import brentq
+
+    if not width > 0.0:
+        raise ValueError(f'the width ({width:g} s) has to be above zero')
+    points = [brentq(lambda x, db=db: _half_sine_ratio(x) - 10 ** (-db / 20),
+                     1e-9, 1.5 - 1e-9) for db in (3.0, 10.0)]
+    return points[0] / width, points[1] / width, 1.5 / width
+
+
+#: the fewest lines an impulse's spectrum is drawn on
+SPECTRUM_LINES = 2 ** 14
+
+
+def impulse_spectrum(history: TimeHistory, record: int = 0) -> Spectrum:
+    """The magnitude of a record's Fourier transform, |X(f)| = |Σ x_n
+    e^(-i2πf n Δt)|·Δt, in the record's quantity times seconds (N·s for
+    a force): what a transient puts into each frequency, flat at its
+    integral at low frequency.
+
+    The record is zero-padded to at least `SPECTRUM_LINES` lines, so a
+    short impulse is drawn as a smooth curve and its rolloff and zeros
+    can be read off it. Read from the samples, so it is what the record
+    holds, sampling included.
+    """
+    dt = float(np.median(np.diff(history.abscissa)))
+    row = np.asarray(history.ordinate[record], dtype=float)
+    n = max(2 * SPECTRUM_LINES, 1 << int(np.ceil(np.log2(max(row.size, 2)))))
+    magnitude = np.abs(np.fft.rfft(row, n)) * dt
+    return Spectrum(np.fft.rfftfreq(n, dt), magnitude[np.newaxis, :],
+                    response_dof=[history.response_dof[record]],
+                    ordinate_dim=[f'{history.ordinate_dim[record]}*time'],
+                    comment=['Fourier transform magnitude'])
 
 
 def sine_history(specification: SineSweepSpecification, *,
@@ -566,8 +659,12 @@ def sine_history(specification: SineSweepSpecification, *,
         shift = np.interp(t, corners, phase[:, c])
         rows[c] = size * np.cos(argument + shift)
     quantity = specification.ordinate_dim
-    return _history(rows, sample_rate, list(specification.response_dof),
-                    [quantity] * rows.shape[0], f'sine, {chosen.name}')
+    history = _history(rows, sample_rate, list(specification.response_dof),
+                       [quantity] * rows.shape[0], f'sine, {chosen.name}')
+    # a sweep is read by tracking, not in frames: the record's own
+    # default, as any other recording
+    history.averaging = None
+    return history
 
 
 def flat_spectrum(dofs: str | Sequence[str], *, quantity: str,
@@ -664,10 +761,10 @@ class SignalSettings:
     repeats: int | None = None
     #: an impulse or a pulse: when it starts, in seconds
     at: float = 0.0
-    #: an ideal impulse's integral, in SI
-    area: float = 1.0
-    #: a classical pulse: its shape, its signed peak in SI, its duration
-    #: and its edge, in seconds
+    #: an impulse's width, the half-sine's half cycle, in seconds
+    width: float = 1e-3
+    #: a classical pulse: its shape, its signed peak in SI (an impulse's
+    #: peak too), its duration and its edge, in seconds
     shape: str = 'half-sine'
     peak: float = 1.0
     pulse_duration: float = 0.011
@@ -796,7 +893,7 @@ def generate(source: Any, settings: SignalSettings) -> TimeHistory:
             return impulse_history(dofs, quantity=quantity,
                                    duration=s.duration,
                                    sample_rate=s.sample_rate, at=s.at,
-                                   area=s.area)
+                                   peak=s.peak, width=s.width)
         if s.kind == 'pulse':
             pulse = ClassicalPulse(s.shape, s.peak, s.pulse_duration, s.edge)
             return impulse_history(dofs, quantity=quantity,

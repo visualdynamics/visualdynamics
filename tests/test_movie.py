@@ -285,3 +285,36 @@ def test_a_movie_that_came_out_short_is_an_error(h264, tmp_path,
     monkeypatch.setattr(movie, 'mp4_reading', lambda path: (b'avc1', 3))
     with pytest.raises(RuntimeError, match='3 of 12 frames'):
         movie.write_movie(tmp_path / 'short.mp4', frames(12))
+
+
+def test_a_movie_asks_for_its_bits_per_pixel(h264, tmp_path, monkeypatch):
+    """Asked only for 'high quality', the Mac's encoder used its own rate,
+    0.3 Mbit/s on a view of a dense cone mesh, and the mesh's edges
+    smeared (2026-10-25). The rate is asked for: an average of
+    `BITS_PER_PIXEL` a pixel a frame. What the encoder delivers is pinned
+    by what it is asked, not by the file's size: it holds the average
+    loosely, under it on a view it compresses well (4.2 against 7.7 Mbit/s
+    on the cone) and over it on detail it cannot (21 against 3.3 on a
+    synthetic mesh), so a size check would test the encoder."""
+    from PySide6.QtMultimedia import QMediaRecorder
+
+    asked = {}
+    rate, mode = QMediaRecorder.setVideoBitRate, QMediaRecorder.setEncodingMode
+
+    def keep_rate(recorder, value):
+        asked['rate'] = value
+        rate(recorder, value)
+
+    def keep_mode(recorder, value):
+        asked['mode'] = value
+        mode(recorder, value)
+
+    monkeypatch.setattr(QMediaRecorder, 'setVideoBitRate', keep_rate)
+    monkeypatch.setattr(QMediaRecorder, 'setEncodingMode', keep_mode)
+    path = tmp_path / 'asked.mp4'
+    assert movie.write_movie(path, frames(30, 480, 640)) == 30
+    assert mp4_reading(path) == (b'avc1', 30), 'encoded in that mode'
+    assert asked == {
+        'rate': round(movie.BITS_PER_PIXEL * 640 * 480 * movie.MOVIE_FPS),
+        'mode': QMediaRecorder.EncodingMode.AverageBitRateEncoding}
+    assert movie.BITS_PER_PIXEL == 0.12

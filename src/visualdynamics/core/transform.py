@@ -151,7 +151,8 @@ def _is_modal(dof: str, shapes: ShapeSet) -> bool:
     return index is not None and index <= shapes.num_shapes
 
 
-def reads_as(data: DataArray, shapes: ShapeSet) -> str | None:
+def reads_as(data: DataArray, shapes: ShapeSet,
+             records: Sequence[int] | None = None) -> str | None:
     """Which way a transform of `data` through `shapes` would go.
 
     `'physical'` when any of the data's DOFs is on the set's
@@ -165,6 +166,8 @@ def reads_as(data: DataArray, shapes: ShapeSet) -> str | None:
         The object to read.
     shapes : ShapeSet
         The set to read it against.
+    records : sequence of int, optional
+        Read only these records' DOFs; every record's when omitted.
 
     Returns
     -------
@@ -174,12 +177,71 @@ def reads_as(data: DataArray, shapes: ShapeSet) -> str | None:
     if _cannot(data) is not None:
         return None
     lookup = shapes._dof_lookup()
-    dofs = list(data.response_dof) + list(data.reference_dof or [])
+    if records is None:
+        dofs = list(data.response_dof) + list(data.reference_dof or [])
+    else:
+        picked = _picked(data, records)
+        dofs = [data.response_dof[i] for i in picked] + (
+            [] if data.reference_dof is None
+            else [data.reference_dof[i] for i in picked])
     if any(_split_sign(dof)[0] in lookup for dof in dofs):
         return 'physical'
     if any(_is_modal(dof, shapes) for dof in dofs):
         return 'modal'
     return None
+
+
+def modal_records(data: DataArray, shapes: ShapeSet) -> list[int]:
+    """The records of `data` at the set's modal DOFs.
+
+    A time history can hold physical channels and modal coordinates
+    side by side: the forces of a test, and the modal responses
+    computed from them and appended (`Project.compute_modal_responses`).
+    Such a record reads as physical as a whole; these are the records
+    an expansion of it reads. Only records that stand alone (a time
+    history, a spectrum) are counted: a density's or an FRF's records
+    are terms of a matrix and are expanded together or not at all.
+
+    Parameters
+    ----------
+    data : DataArray
+        The object to read.
+    shapes : ShapeSet
+        The set to read it against.
+
+    Returns
+    -------
+    list of int
+        The record indices, in order; empty when there are none, or
+        when the kind of data does not transform this way.
+    """
+    from .data import Frf, Psd
+
+    if _cannot(data) is not None or isinstance(data, (Psd, Frf)):
+        return []
+    return [i for i, dof in enumerate(data.response_dof)
+            if _is_modal(dof, shapes)]
+
+
+def expands(data: DataArray, shapes: ShapeSet) -> bool:
+    """Whether `to_physical` can expand `data` through `shapes`: it
+    reads as modal, or it holds modal records beside physical ones
+    (`modal_records`).
+
+    Parameters
+    ----------
+    data : DataArray
+        The object to read.
+    shapes : ShapeSet
+        The set to read it against.
+
+    Returns
+    -------
+    bool
+        True when there is something modal to expand.
+    """
+    return (reads_as(data, shapes) == 'modal'
+            or bool(modal_records(data, shapes)))
 
 
 @dataclass
@@ -916,7 +978,8 @@ def to_physical(data: DataArray, shapes: ShapeSet,
         The set the record was transformed through.
     records : sequence of int, optional
         Which modal records to expand, the modes picked in the tree.
-        All of them when omitted.
+        All of them when omitted; in a record that holds physical
+        channels too (`modal_records`), all of its modal records.
 
     Returns
     -------
@@ -939,9 +1002,16 @@ def to_physical(data: DataArray, shapes: ShapeSet,
         raise ValueError(refusal)
     _check_set(shapes)
     names = modal_dofs(shapes)
-    if reads_as(data, shapes) != 'modal':
-        raise ValueError('the record\'s DOFs are not modal coordinates '
-                         f'of this set ({names[0]} … {names[-1]})')
+    if records is None and reads_as(data, shapes) == 'physical':
+        # forces with the modal responses they drive appended (Brandon,
+        # 2026-10-25): the whole record reads physical, and what there
+        # is to expand is its modal records
+        records = modal_records(data, shapes) or None
+    if reads_as(data, shapes, records) != 'modal':
+        which = ('the record\'s DOFs are not' if records is None
+                 else 'the records picked are not all')
+        raise ValueError(f'{which} modal coordinates of this set '
+                         f'({names[0]} … {names[-1]})')
     report = TransformReport()
     if isinstance(data, Psd):
         result = _matrix_to_physical(data, shapes, records, report)

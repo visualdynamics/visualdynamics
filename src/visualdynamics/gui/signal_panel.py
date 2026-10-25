@@ -10,7 +10,8 @@ only the rows the kind reads are shown (principle 3).
 
 This is select, see, set, apply (principle 13): the plot previews a
 short stretch of the signal, its PSD over the target for the random
-kinds and its trace for the others; Generate runs the project's
+kinds, its trace and its spectrum for an impulse, and its trace for the
+others; Generate runs the project's
 `generate_signal` with the settings shown, the seed included, so the
 record can be made again. The panel makes nothing itself: it shows the
 settings in display units and emits them in SI as a `SignalSettings`.
@@ -44,7 +45,7 @@ ROWS: dict[str, tuple[str, ...]] = {
     'burst': ('rate', 'frame', 'bursts', 'burst', 'taper', 'seed',
               'correlated'),
     'periodic': ('rate', 'frame', 'periods', 'repeats', 'seed', 'correlated'),
-    'impulse': ('rate', 'duration', 'at', 'area'),
+    'impulse': ('rate', 'duration', 'at', 'peak', 'width'),
     'pulse': ('rate', 'duration', 'at', 'shape', 'peak', 'pulse', 'edge'),
     'sine': ('rate', 'tone'),
 }
@@ -139,11 +140,14 @@ class SignalPanel(QWidget):
                                 tip='The density across the band'),
             'at': number_box(0.0, 1e5, value=0.0, decimals=4, suffix=' s',
                              tip='When the impulse or the pulse starts'),
-            'area': number_box(-1e12, 1e12, value=1.0, decimals=6,
-                               tip="The impulse's integral"),
+            'width': number_box(0.001, 1e5, value=1.0, decimals=3,
+                                suffix=' ms',
+                                tip="The impulse's width, a half-sine's half "
+                                    'cycle: the narrower, the higher the '
+                                    'frequencies it excites'),
             'shape': self.shape_box,
             'peak': number_box(-1e12, 1e12, value=1.0, decimals=4,
-                               tip="The pulse's peak, signed"),
+                               tip='The peak, signed'),
             'pulse': number_box(0.001, 1e5, value=11.0, decimals=3,
                                 suffix=' ms', tip="The pulse's duration"),
             'edge': number_box(0.0, 1e5, value=0.0, decimals=3, suffix=' ms',
@@ -165,9 +169,9 @@ class SignalPanel(QWidget):
             ('high', 'To', editors['high']),
             ('level', 'Level', editors['level']),
             ('at', 'Starts', editors['at']),
-            ('area', 'Area', editors['area']),
             ('shape', 'Shape', self.shape_box),
             ('peak', 'Peak', editors['peak']),
+            ('width', 'Width', editors['width']),
             ('pulse', 'Duration', editors['pulse']),
             ('edge', 'Edge', editors['edge']),
             ('tone', 'Tone', self.tone_box),
@@ -178,16 +182,19 @@ class SignalPanel(QWidget):
         add_rule(grid, rows)
         self._derived = add_derived(grid, [('samples', 'Samples'),
                                            ('lines', 'Line spacing'),
-                                           ('rms', 'Preview rms')], rows + 1)
+                                           ('rms', 'Preview rms'),
+                                           ('down3', '−3 dB at'),
+                                           ('down10', '−10 dB at'),
+                                           ('zero', 'First zero')], rows + 1)
         self.note: QLabel = QLabel('')
         self.note.setWordWrap(True)
-        grid.addWidget(self.note, rows + 4, 0, 1, 2)
+        grid.addWidget(self.note, rows + 7, 0, 1, 2)
         self.apply_button: QPushButton = QPushButton('Generate')
         self.apply_button.setToolTip('Make the signal shown, as a time '
                                      'history beside its source')
         self.apply_button.clicked.connect(self._apply)
-        grid.addWidget(self.apply_button, rows + 5, 0, 1, 2)
-        grid.setRowStretch(rows + 6, 1)
+        grid.addWidget(self.apply_button, rows + 8, 0, 1, 2)
+        grid.setRowStretch(rows + 9, 1)
         for editor in self._editors.values():
             if isinstance(editor, QComboBox):
                 editor.currentIndexChanged.connect(self._edited)
@@ -241,21 +248,17 @@ class SignalPanel(QWidget):
         e['high'].setValue(float(s.band[1]))
         e['level'].setValue(self._shown(s.level, self._density()))
         e['at'].setValue(s.at)
-        e['area'].setValue(self._shown(s.area, self._area_dim()))
+        e['width'].setValue(1e3 * s.width)
         self.shape_box.setCurrentIndex(max(0, self.shape_box.findData(s.shape)))
         e['peak'].setValue(self._shown(s.peak, self._quantity))
         e['pulse'].setValue(1e3 * s.pulse_duration)
         e['edge'].setValue(1e3 * (s.edge or 0.0))
         for key, dim in (('level', self._density()),
-                         ('area', self._area_dim()),
                          ('peak', self._quantity)):
             e[key].setSuffix(f' {self._label(dim)}' if dim else '')
 
     def _density(self) -> str:
         return f'{self._quantity}**2/frequency' if self._quantity else ''
-
-    def _area_dim(self) -> str:
-        return f'{self._quantity}*time' if self._quantity else ''
 
     def _label(self, dim: str) -> str:
         if self._unit_system is None or not dim:
@@ -299,11 +302,16 @@ class SignalPanel(QWidget):
 
     def show_reading(self, samples: int | None = None,
                      spacing: float | None = None,
-                     rms: str | None = None, note: str = '') -> None:
-        """The derived rows and the note under them, after a preview."""
+                     rms: str | None = None, note: str = '',
+                     rolloff: tuple[str, str, str] | None = None) -> None:
+        """The derived rows and the note under them, after a preview.
+        `rolloff` is an impulse's −3 dB, −10 dB and first-zero
+        frequencies, as text."""
+        down3, down10, zero = rolloff or ('—', '—', '—')
         values = {'samples': '—' if samples is None else f'{samples:,}',
                   'lines': '—' if spacing is None else f'{spacing:.4g} Hz',
-                  'rms': rms or '—'}
+                  'rms': rms or '—', 'down3': down3, 'down10': down10,
+                  'zero': zero}
         for key, (name, value) in self._derived.items():
             value.setText(values[key])
             shown = values[key] != '—'
@@ -337,7 +345,7 @@ class SignalPanel(QWidget):
             band=(float(e['low'].value()), float(e['high'].value())),
             level=self._si(float(e['level'].value()), self._density()),
             at=float(e['at'].value()),
-            area=self._si(float(e['area'].value()), self._area_dim()),
+            width=1e-3 * float(e['width'].value()),
             shape=self.shape_box.currentData() or 'half-sine',
             peak=self._si(float(e['peak'].value()), self._quantity),
             pulse_duration=1e-3 * float(e['pulse'].value()),

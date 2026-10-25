@@ -2,7 +2,7 @@
 
 A transform has no settings, so it is an act and not a reading
 (Brandon, 2026-09-04): with one time history and one shape set
-selected together, the plot's bar offers Transform to Modal Responses
+selected together, the plot's bar offers Transform to Modal Coordinates
 — or Expand to Physical Responses, when the record reads as modal —
 and pressing it runs the project verb, shows what it made and puts
 the account on the status line. No toggle, no pane, no preview, and
@@ -53,14 +53,14 @@ def _bar_acts(window):
 def test_the_bar_offers_the_transform_to_the_pair(window, pump, qt_app):
     _populate(window, pump)
     _select(window, pump, 'Run', 'Modes')
-    assert 'Transform to Modal Responses' in _bar_acts(window)
+    assert 'Transform to Modal Coordinates' in _bar_acts(window)
     for name in ('Run', 'Modes'):
         entries = [e.replace('&', '') for e in menu_entries(
             window, qt_app, window._item_for_object(name))]
         assert not any('Transform' in e for e in entries), \
             'the right-click carries no acts'
     _select(window, pump, 'Run', 'Modes', 'Plate')
-    assert 'Transform to Modal Responses' in _bar_acts(window), \
+    assert 'Transform to Modal Coordinates' in _bar_acts(window), \
         'the geometry may come along'
     _select(window, pump, 'Run')
     assert not any('Transform' in a for a in _bar_acts(window))
@@ -73,14 +73,14 @@ def test_the_entry_makes_the_object_and_shows_it(window, pump):
     _select(window, pump, 'Run', 'Modes')
     window.transform_selection()
     pump()
-    assert 'Run Modal Responses' in window.project
-    made = window.project['Run Modal Responses']
+    assert 'Run Modal Coordinates' in window.project
+    made = window.project['Run Modal Coordinates']
     assert made.response_dof == ['M1', 'M2', 'M3', 'M4', 'M5', 'M6']
     assert made.ordinate_dim[3] == 'angular_acceleration'
     assert window.project.journal[-1] == \
         "project.transform('Run', 'Modes')"
     assert window.statusBar().currentMessage().startswith(
-        'Run Modal Responses: 15 DOFs shared')
+        'Run Modal Coordinates: 15 DOFs shared')
     assert 'through Modes' in window.statusBar().currentMessage()
     assert window.current_object() is made, 'the act shows what it made'
     assert not hasattr(window.data_pane, 'transform_action'), \
@@ -99,14 +99,14 @@ def test_a_refusal_lands_on_the_status_line(window, pump):
     window.transform_selection()
     pump()
     assert 'resolve only 3 of 6 modes' in window.statusBar().currentMessage()
-    assert 'Zs Modal Responses' not in window.project
+    assert 'Zs Modal Coordinates' not in window.project
 
 
 def test_the_entry_turns_round_for_a_modal_record(window, pump):
     _populate(window, pump)
     window.project.transform('Run', 'Modes')
-    window.show_object('Run Modal Responses')
-    _select(window, pump, 'Run Modal Responses', 'Modes')
+    window.show_object('Run Modal Coordinates')
+    _select(window, pump, 'Run Modal Coordinates', 'Modes')
     assert 'Expand to Physical Responses' in _bar_acts(window)
     window.transform_selection()
     pump()
@@ -116,7 +116,7 @@ def test_the_entry_turns_round_for_a_modal_record(window, pump):
         if 'Plate' in group['members']), \
         'the expansion lands with the geometry it animates on'
     assert window.project.journal[-1] == \
-        "project.expand('Run Modal Responses', 'Modes')"
+        "project.expand('Run Modal Coordinates', 'Modes')"
     assert np.allclose(window.project['Run Physical Responses'].ordinate,
                        window.project['Run'].ordinate, atol=1e-10)
     assert window.statusBar().currentMessage().startswith(
@@ -147,14 +147,14 @@ def test_a_picked_mode_expands_its_contribution_alone(window, pump):
     mode's contribution, named for it (Brandon, 2026-09-04)."""
     _populate(window, pump)
     window.project.transform('Run', 'Modes')
-    window.show_object('Run Modal Responses')
+    window.show_object('Run Modal Coordinates')
     pump()
     window.tree.clearSelection()
     window._item_for_object('Modes').setSelected(True)
-    item = window._item_for_object('Run Modal Responses')
+    item = window._item_for_object('Run Modal Coordinates')
     item.setExpanded(True)
     pump()
-    _pick(window, 'Run Modal Responses', [5])
+    _pick(window, 'Run Modal Coordinates', [5])
     pump()
     picked = [(kind, detail) for kind, _name, _obj, detail
               in window.selected_references() if kind == 'record']
@@ -166,12 +166,12 @@ def test_a_picked_mode_expands_its_contribution_alone(window, pump):
     assert 'Run Physical Responses (M6)' in window.project
     made = window.project['Run Physical Responses (M6)']
     rigid = window.project['Modes']
-    q6 = window.project['Run Modal Responses'].ordinate[5]
+    q6 = window.project['Run Modal Coordinates'].ordinate[5]
     assert np.allclose(made.ordinate, np.outer(rigid.shape_matrix[5], q6),
                        atol=1e-10)
     assert made.comment[0] == 'acceleration from modes M6'
     assert window.project.journal[-1] == \
-        "project.expand('Run Modal Responses', 'Modes', records=[5])"
+        "project.expand('Run Modal Coordinates', 'Modes', records=[5])"
     assert 'Run Physical Responses (M6)' in next(
         group['members'] for group in window.project.object_groups
         if 'Plate' in group['members'])
@@ -186,10 +186,10 @@ def test_picked_channels_transform_alone(window, pump):
     pump()
     _pick(window, 'Run', range(1, 15))
     pump()
-    assert 'Transform to Modal Responses' in _bar_acts(window)
+    assert 'Transform to Modal Coordinates' in _bar_acts(window)
     window.transform_selection()
     pump()
-    made = window.project['Run Modal Responses']
+    made = window.project['Run Modal Coordinates']
     assert len(made.transform_report.shared['acceleration']) == 14
     assert window.project.journal[-1] == (
         "project.transform('Run', 'Modes', records=[1, 2, 3, 4, 5, 6, 7, "

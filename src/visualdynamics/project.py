@@ -5302,7 +5302,10 @@ class Project(dict):
         none : bool, default False
             Write the section's own wording for nothing to report, in
             one step ('deviations' and 'discussion' only): "No
-            deviations. No anomalies. No nonconformances."
+            deviations. No anomalies. No nonconformances." With the
+            report feature `findings` on and findings entered, the
+            deviations' None says "none" only of each kind with
+            nothing entered (`visualdynamics.report.findings.none`).
         by : str, optional
             Who made the interpretation ('discussion' only); an empty
             string clears it.
@@ -5320,9 +5323,19 @@ class Project(dict):
         TypeError
             When `name` is not a report, or a value is not a string.
         """
+        from .report import findings
+        from .report.features import enabled
         from .report.skeleton import write
 
-        write(self._report(name), section, text, none=none, by=by)
+        report = self._report(name)
+        if (none and text is None and by is None
+                and section == findings.SECTION
+                and findings.FEATURE in enabled(report)):
+            # the register's None: "none" only of the kinds with nothing
+            # entered, so it cannot contradict a finding
+            findings.none(report)
+            return
+        write(report, section, text, none=none, by=by)
 
     def report_check_block(self, name: str, check: str, *,
                            source: str | None = None,
@@ -5389,8 +5402,13 @@ class Project(dict):
 
         A line names the section and why: not yet written; nothing in
         it (Instrumentation or Results with nothing generated or
-        written); or a discussion that does not say by whom. An empty
-        list means every section of the skeleton says something.
+        written); or a discussion that does not say by whom. With the
+        report feature `findings` on, section 9 is read off the
+        register: a kind neither entered nor set to None, a kind both
+        entered and said to be none, and each finding's blank parts,
+        such as '9. Deviations, Anomalies and Nonconformances: D-1:
+        cause not yet written'. An empty list means every section of
+        the skeleton says something.
 
         Parameters
         ----------
@@ -5413,10 +5431,183 @@ class Project(dict):
         TypeError
             When `name` is not a report.
         """
+        from .report import findings
         from .report.skeleton import check
 
-        return [str(owed) for owed in check(
-            self._report(name), self, self.object_groups)]
+        report = self._report(name)
+        return [str(owed) for owed in findings.check(
+            report, check(report, self, self.object_groups))]
+
+    def report_finding(self, name: str, number: str | None = None, *,
+                       kind: str | None = None, run: str | None = None,
+                       channel: str | None = None,
+                       band: Sequence[float] | None = None,
+                       fact: str | None = None, cause: str | None = None,
+                       effect: str | None = None,
+                       approval: str | None = None,
+                       status: str | None = None, accept: bool = False,
+                       discard: bool = False,
+                       remove: bool = False) -> str:
+        """Enter, change or remove a finding in a report's findings
+        register (report feature `findings`; the report editor's pane
+        on section 9).
+
+        A finding is a deviation, an anomaly or a nonconformance,
+        numbered by kind (D-1, A-1, NC-1) and written in four parts:
+        the fact, the cause, the effect, and the approval (of a
+        deviation) or disposition (of an anomaly or nonconformance).
+        Section 9 of the report draws each one, and the summary lists
+        them by number. A blank part is drawn as owed, and
+        `report_check` lists it.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        number : str, optional
+            The finding to change. Without it a finding of `kind` is
+            entered under the next number of its kind.
+        kind : str, optional
+            'deviation', 'anomaly' or 'nonconformance', for a new
+            finding only: a finding's kind is its number's.
+        run, channel : str, optional
+            The run and the channel the finding concerns.
+        band : (float, float), optional
+            The band it concerns, low and high in Hz; an empty
+            sequence clears it.
+        fact, cause, effect, approval : str, optional
+            The four parts, in the author's words.
+        status : str, optional
+            'open', 'closed' or '' (not stated).
+        accept : bool, default False
+            Make the fact draft offered on the finding its fact
+            (`draft_finding_fact`); with `fact`, as edited.
+        discard : bool, default False
+            Drop the fact draft offered on the finding.
+        remove : bool, default False
+            Take the finding out of the register. Its number is not
+            given again.
+
+        Returns
+        -------
+        str
+            The finding's number.
+
+        Raises
+        ------
+        ValueError
+            When the report does not have the feature enabled; for a
+            kind on an existing finding or none for a new one, an
+            unknown number, a band that is not two ordered frequencies,
+            a status other than open or closed, `accept` with no draft
+            waiting, `discard` with none, more than one of `accept`,
+            `discard` and `remove`, or `remove` with fields. Nothing is
+            changed.
+        TypeError
+            When `name` is not a report, or a text field is not a
+            string.
+        """
+        from .report import findings
+
+        report = self._report(name)
+        fields = {'run': run, 'channel': channel, 'band': band,
+                  'fact': fact, 'cause': cause, 'effect': effect,
+                  'approval': approval, 'status': status}
+        given = {key: value for key, value in fields.items()
+                 if value is not None}
+        if sum((accept, discard, remove)) > 1:
+            raise ValueError('accept, discard and remove are one at a time')
+        if number is None:
+            if accept or discard or remove:
+                raise ValueError('name the finding to accept, discard or '
+                                 'remove')
+            if kind is None:
+                raise ValueError('a new finding needs its kind: deviation, '
+                                 'anomaly or nonconformance')
+            return findings.add(report, kind, **given)
+        if kind is not None:
+            raise ValueError(f"{number}: a finding's kind is its number's; "
+                             'enter it again under the other kind')
+        if remove:
+            if given:
+                raise ValueError(f'{number}: remove takes no fields')
+            findings.remove(report, number)
+            return number
+        if accept:
+            # the accepted fact, as offered or as edited, then the rest
+            findings.accept(report, number, given.pop('fact', None))
+        elif discard:
+            findings.discard(report, number)
+        if given:
+            findings.edit(report, number, **given)
+        elif not accept and not discard:
+            findings.find(report, number)
+        return number
+
+    def draft_finding_fact(self, name: str, number: str, measured: str,
+                           specification: str, channel: str | None = None,
+                           *, band: Sequence[float] | None = None,
+                           limits: str = 'abort',
+                           progress: Any = None
+                           ) -> str:
+        """Offer a finding a draft of its fact, read off a comparison the
+        project holds.
+
+        The draft names the channel, each stretch where `measured`
+        went outside `specification`'s `limits` (its band, its side,
+        how far beyond at worst in dB, how many lines), the record and
+        the time history it was computed from, and what was not
+        judged. It is read on the same cells, at the same scale, as the
+        comparison figure (`visualdynamics.core.findings.excursions`).
+        The draft fills nothing: the author accepts it, edits it or
+        discards it (`report_finding(..., accept=True)`). Only the
+        fact is ever offered; a channel inside its limits gives no
+        draft.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        number : str
+            The finding.
+        measured, specification : str
+            The measured spectrum and the specification it is compared
+            with.
+        channel : str, optional
+            The channel, such as '2Y+'; the finding's own when omitted.
+        band : (float, float), optional
+            The band to read, in Hz; the finding's own when omitted,
+            and the whole comparison when it has none.
+        limits : str, default 'abort'
+            'abort' or 'warning'.
+        progress : callable, optional
+            Accepted so the app can run the reading on its worker; not
+            called.
+
+        Returns
+        -------
+        str
+            The draft offered.
+
+        Raises
+        ------
+        ValueError
+            When the report does not have the feature enabled; for an
+            unknown finding, a name that is not a spectrum or a
+            specification of the project, a channel they do not share,
+            no channel, a pair of limits the specification does not
+            carry, a comparison refused (different quantities, units on
+            one side only), nothing judged in the band, an all-zero
+            channel, and a channel inside its limits wherever it was
+            judged. Nothing is changed.
+        TypeError
+            When `name` is not a report.
+        """
+        from .report import findings
+
+        return findings.draft_from_comparison(
+            self._report(name), number, self, measured, specification,
+            channel, band=band, pair=limits, provenance=self.provenance).text
 
     def report_test_date(self, name: str, start: str | None,
                          end: str | None = None) -> None:
@@ -7887,6 +8078,7 @@ _JOURNALED_VERBS = (
     'report_identity', 'export_report_pdf', 'issue_report', 'amend_report',
     'set_run_identity', 'report_runs', 'report_chronology',
     'accept_chronology',
+    'report_finding', 'draft_finding_fact',
     'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:

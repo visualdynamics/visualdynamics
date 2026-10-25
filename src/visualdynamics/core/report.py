@@ -48,7 +48,10 @@ class Report:
         (a text block carrying 'section' holds the author's words for
         one section of the skeleton, and 'by' who interpreted, in the
         discussion; it is drawn only while the report feature
-        `skeleton_sections` is on: `visualdynamics.report.skeleton`)
+        `skeleton_sections` is on: `visualdynamics.report.skeleton`.
+        The deviations section's block may also carry 'findings', the
+        findings register, drawn only while the report feature
+        `findings` is on: `visualdynamics.report.findings`)
       {'kind': 'plot',  'source': name,
                         'mode': curves|cmif|mac|map|stage|scalogram|
                                 pair|ratio|overlay,

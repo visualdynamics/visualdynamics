@@ -18986,6 +18986,14 @@ class MainWindow(QMainWindow):
             self.report_editor.checks_preparer = self._prepare_report_checks
             # drafting a chronology reads every run's record: the worker
             self.report_editor.run_long = self._run_long
+            # a finding's fact draft, read off a measurement on the
+            # worker (a few tenths of a second), journaled as the verb
+            self.report_editor.fact_drafter = (
+                lambda report, number, measured, specification, **how:
+                self._run_long('Reading the fact off the measurement…',
+                               self.project.draft_finding_fact,
+                               self.project.name_of(report), number,
+                               measured, specification, **how))
             self._table_layout.insertWidget(1, self.report_editor, 1)
         # the report has the pane to itself. Hiding the table and the
         # MAC is not enough: the splitter holding them keeps its share of

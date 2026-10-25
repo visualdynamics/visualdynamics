@@ -40,6 +40,8 @@ from typing import Any
 # P25 (responses against prediction, `report/prediction.py`) draws its
 # figures and table under the skeleton's Results, and the data index
 # (`report/data_index.py`) prints under its Record and Data Package.
+# P21 (the findings register, `report/findings.py`) fills the
+# skeleton's deviations section.
 
 #: the groups the selection tool lays the features out in, in order
 GROUPS = ('Structure', 'Results', 'Records', 'Issue control', 'Figures')
@@ -112,7 +114,7 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 
 
 #: every report feature, in the order the selection tool shows them
-#: within their groups. `skeleton_sections`, `run_sections`,
+#: within their groups. `skeleton_sections`, `run_sections`, `findings`,
 #: `check_blocks`, `prediction`, `data_index`, `calibration_in_date`,
 #: `report_identity`, `record_captions`, `plot_conventions` and its option
 #: `shared_decades` are built; the rest are the road map.
@@ -140,10 +142,12 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         requires=('multi_point', 'chance'), available=False),
     ReportFeature(
         'findings', 'Findings register', 'Results',
-        'Deviations, anomalies and nonconformances in four parts: fact, '
-        'cause, effect and approval. The fact is filled from the '
+        'Deviations, anomalies and nonconformances entered in a register, '
+        'numbered, each in four parts: fact, cause, effect and approval. '
+        'Section 9 draws them and the summary lists them by number; a '
+        'blank part is owed. The fact can be offered as a draft from a '
         'measurement; the rest are typed.',
-        available=False),
+        requires=('skeleton_sections',)),
     ReportFeature(
         'check_blocks', 'Check blocks', 'Results',
         'A block for each check the report can make (time statistics, '

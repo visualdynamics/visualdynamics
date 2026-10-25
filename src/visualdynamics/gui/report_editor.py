@@ -321,6 +321,19 @@ class ReportEditor(QWidget):
         #: the window's worker for a verb that takes a while, called as
         #: `run_long(status, verb, *args)`; None runs it here
         self.run_long: Callable[..., Any] | None = None
+        #: the findings register under section 9, while that section is
+        #: in the pane and the report has the register on; the finding
+        #: it shows, and the words of the last change it refused
+        self.findings_pane: Any = None
+        self.finding_selected: str | None = None
+        self._finding_note: str = ''
+        #: how a fact draft is read off a measurement: the window sets
+        #: the project's verb on its worker (the reading takes a few
+        #: tenths of a second), so it is journaled and the window stays
+        #: alive; on its own the editor reads it here. Called as
+        #: `fact_drafter(report, number, measured, specification,
+        #: limits=)`.
+        self.fact_drafter: Callable[..., Any] | None = None
         self.field_boxes: dict[str, QComboBox] = {}
         self._loading_pane = False
         self._text_timer: QTimer = QTimer(self)
@@ -499,6 +512,9 @@ class ReportEditor(QWidget):
         editor does this itself once typing has paused for
         `TEXT_DEBOUNCE_MS`, and tests call it directly."""
         self._text_timer.stop()
+        if self.findings_pane is not None:
+            # the register's parts typed and not yet entered
+            self.findings_pane.flush()
         if (self.text_editor is None or self.report is None
                 or self.selected is None
                 or not 0 <= self.selected < self.report.num_blocks):
@@ -546,6 +562,7 @@ class ReportEditor(QWidget):
         self.identity_edits, self.identity_notes = {}, None
         self.amend_button = self.identity_box = None
         self.runs_panel = self.chronology_panel = None
+        self.findings_pane = None
         self.field_boxes = {}
         body = QWidget()
         form = QFormLayout(body)
@@ -790,6 +807,8 @@ class ReportEditor(QWidget):
             form.addRow(self.calibration_note)
         if found is not None and found.key == 'chronology':
             self._chronology_panel(form, block)
+        if found is not None:
+            self._findings_pane(form, found.key)
 
     def _calibrating(self) -> bool:
         from ..report.calibration import FEATURE
@@ -1034,6 +1053,83 @@ class ReportEditor(QWidget):
         self._runs_message = ''
         self.chronology_panel.requested.connect(self._operate)
         form.addRow(self.chronology_panel)
+
+    def _findings_pane(self, form, key: str) -> None:
+        """The findings register under section 9's words, while the
+        report has it on (`report.findings`)."""
+        from ..core.data import Psd, Specification
+        from ..report import findings
+        from ..report.features import enabled
+        from .findings_pane import FindingsPane
+
+        if key != findings.SECTION or findings.FEATURE not in enabled(
+                self.report):
+            return
+        note, self._finding_note = self._finding_note, ''
+        try:
+            entries = findings.register(self.report)
+        except (TypeError, ValueError) as unread:
+            entries, note = [], f'The register could not be read: {unread}'
+        objects = self.objects() if self.objects else {}
+        self.findings_pane = FindingsPane(
+            entries, self.finding_selected,
+            measured=[name for name, obj in objects.items()
+                      if isinstance(obj, Psd)],
+            specifications=[name for name, obj in objects.items()
+                            if isinstance(obj, Specification)],
+            message=note)
+        self.findings_pane.requested.connect(
+            lambda change: self._operate({'op': 'finding', **change}))
+        form.addRow(self.findings_pane)
+
+    def _finding(self, operation) -> bool | None:
+        """Make one change the findings pane asked for, through
+        `report.findings`. Returns whether the pane is built again, or
+        None when the report did not change (a selection, or a refusal,
+        whose words the pane is built again to show)."""
+        from ..report import findings
+
+        report = self.report
+        action = operation.get('action')
+        number = operation.get('number')
+        if action == 'select':
+            self.finding_selected = number
+            self._show_selection()
+            return None
+        try:
+            if action == 'add':
+                self.finding_selected = findings.add(report,
+                                                     operation.get('kind'))
+            elif action == 'remove':
+                findings.remove(report, number)
+                self.finding_selected = None
+            elif action == 'edit':
+                findings.edit(report, number, **operation.get('fields', {}))
+            elif action == 'accept':
+                findings.accept(report, number)
+            elif action == 'discard':
+                findings.discard(report, number)
+            elif action == 'draft':
+                limits = operation.get('limits') or 'abort'
+                if self.fact_drafter is not None:
+                    self.fact_drafter(report, number,
+                                      operation.get('measured'),
+                                      operation.get('specification'),
+                                      limits=limits)
+                else:
+                    objects = self.objects() if self.objects else {}
+                    findings.draft_from_comparison(
+                        report, number, objects, operation.get('measured'),
+                        operation.get('specification'), pair=limits,
+                        provenance=getattr(objects, 'provenance', None))
+            else:
+                return None
+        except (TypeError, ValueError) as refused:
+            self._finding_note = str(refused)
+            self._show_selection()
+            return None
+        # a field typed keeps the pane, and the cursor in it, where it is
+        return action != 'edit'
 
     def _combo(self, form, field, label, current, options):
         box = QComboBox()
@@ -1415,13 +1511,24 @@ class ReportEditor(QWidget):
             if (not 0 <= index < report.num_blocks
                     or 'section' not in report.blocks[index]):
                 return
+            from ..report import findings
+            from ..report.features import enabled
             from ..report.skeleton import write
 
+            key = report.blocks[index]['section']
             try:
-                write(report, report.blocks[index]['section'],
-                      none=bool(operation.get('none')),
-                      by=operation.get('by'))
-            except (TypeError, ValueError):
+                if (operation.get('none') and key == findings.SECTION
+                        and findings.FEATURE in enabled(report)):
+                    # the register's None: only the kinds with nothing
+                    # entered, so it cannot contradict a finding
+                    findings.none(report)
+                else:
+                    write(report, key, none=bool(operation.get('none')),
+                          by=operation.get('by'))
+            except (TypeError, ValueError) as refused:
+                if self.findings_pane is not None:
+                    self._finding_note = str(refused)
+                    self._show_selection()
                 return
             # the pane shows the words None wrote
             reselect = bool(operation.get('none'))
@@ -1444,6 +1551,11 @@ class ReportEditor(QWidget):
                 return
             if self.calibration_note is not None:
                 self.calibration_note.setText('')
+        elif op == 'finding':
+            changed = self._finding(operation)
+            if changed is None:
+                return
+            reselect = changed
         elif op == 'field':
             index = int(operation.get('at', -1))
             if 0 <= index < report.num_blocks:

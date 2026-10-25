@@ -308,7 +308,8 @@ def issue_ready(report: Any, objects: Mapping[str, Any] | None = None,
     Refused: the feature not enabled; a report already issued (a change
     is an amendment); a field the identification needs not entered;
     and, with skeleton sections on and `objects` given, a section still
-    owed.
+    owed (section 9 read off the findings register while that feature
+    is on, as `Project.report_check` reads it).
 
     Raises
     ------
@@ -333,9 +334,10 @@ def issue_ready(report: Any, objects: Mapping[str, Any] | None = None,
     from .skeleton import FEATURE as SKELETON
 
     if objects is not None and SKELETON in enabled(report):
+        from .findings import check as register_check
         from .skeleton import check
 
-        owed = check(report, objects, object_groups)
+        owed = register_check(report, check(report, objects, object_groups))
         if owed:
             raise ValueError(f'{_name(held)} cannot be issued while it owes '
                              f'{len(owed)} section{"s" * (len(owed) != 1)}: '

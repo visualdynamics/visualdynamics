@@ -2995,6 +2995,19 @@ div.drafted strong { display: block; color: var(--faint);
   letter-spacing: .06em; margin-bottom: .4rem; }
 """
 
+#: the findings register's entries in section 9 and its line in the
+#: summary (feature `findings`). Drawn as text by the renderer
+#: (`report.findings.draw`), so style only; a blank part uses the
+#: skeleton's owed style, which the feature needs.
+_FINDINGS_CSS = """
+div.finding { margin: .9rem 0; padding-left: .7rem;
+  border-left: 3px solid var(--line); white-space: normal; }
+div.finding p { margin: .2rem 0; }
+.finding-where, .finding-drafted { color: var(--faint); }
+.finding-drafted { font-style: italic; }
+.finding-none, .findings-summary { white-space: normal; }
+"""
+
 #: page code by feature: (splices into `_JS`, functions added, CSS added)
 FEATURE_PAGE = {
     'skeleton_sections': ((), '', _SKELETON_CSS),
@@ -3002,6 +3015,7 @@ FEATURE_PAGE = {
     'check_blocks': ((), '', _CHECK_CSS),
     'report_identity': (_PRINT_SPLICES, _PRINT_JS, _IDENTITY_CSS),
     'run_sections': ((), '', _RUNS_CSS),
+    'findings': ((), '', _FINDINGS_CSS),
     'plot_conventions': (_STYLE_SPLICES, _STYLE_JS, _STYLE_CSS),
     'shared_decades': (_WINDOW_SPLICES, _WINDOW_JS, ''),
 }

@@ -356,6 +356,13 @@ def _report_payload(report, objects, unit_system=None, edit=False,
                 tables += 1
                 built['label'] = f'Table {tables}'
             payload['blocks'].append(built)
+    #: the findings register: section 9 and the summary's line of
+    #: findings, drawn into the skeleton's heads
+    registered = None
+    if 'findings' in active:
+        from .findings import prepare as prepare_findings
+
+        registered = prepare_findings(payload['blocks'], report)
     if conventions:
         apply_conventions(payload, kinded,
                           shared='shared_decades' in active)
@@ -411,6 +418,10 @@ def _report_payload(report, objects, unit_system=None, edit=False,
                 'kind': 'text',
                 'html': f'<p class="endmark">'
                         f'{html_escape.escape(end_mark(report))}</p>'})
+    if registered is not None:
+        from .findings import draw as draw_findings
+
+        draw_findings(registered)
     return payload
 
 

@@ -206,6 +206,83 @@ Any other source of files adds its entries the same way, naming itself
 in `source`, so a project keeps a single index. `project.export_report` checks the index before it
 writes, as Export does.
 
+## Check blocks
+
+**Check blocks** (group Results) puts the checks Visual Dynamics reads
+into the report. Each check the report can make becomes a block under a
+**Checks** heading at the close of the results (under 8. Results when
+skeleton sections are on): the check's title, its verdict in a word,
+what it found in the reading's own words, the criterion it was judged
+against, a table with a row per channel (or mode, pass or segment) and
+its figures. The numbers are the reading's own: each check calls the
+same function its view in the app and a script call.
+
+| Check | What it reads | Made |
+|---|---|---|
+| Time statistics | a random test's record: mean, rms, skewness, kurtosis over the record and frame by frame, crest factor, each against its band; the histogram against the Gaussian and the kurtosis frame by frame for each channel outside a band, or for the channel furthest from Gaussian when none is | from the report |
+| Shock validity | a shock record: each acceleration channel integrated raw over each shock window, and whether its velocity returns to rest; the velocity drawn | from the report |
+| SRS points rule | each measured shock response spectrum against its requirement's band, point by point; the distance from the requirement drawn against the band | from the report |
+| Classical pulse | a shock record against the envelope of its nominal pulse, with its peak, duration, edges and velocity change | from its own block |
+| Sine distortion | each tone of a sine record: the record less the tracked tones against the tones, at every line; the distortion drawn along the sweep | from the report, one block per tone |
+| Sweep rate | each pass of the sweep through a mode's half-power band against the rule's rate; the sweep drawn through the bands | from the report with a shape set, or from its own block with the modes the plan names |
+| Signature shifts | two signatures before and after the test, mode by mode against frequency and amplitude limits; the two drawn over each other | from its own block |
+| Replication segments | a replicated record judged segment by segment, beside the whole-record rms error | from its own block |
+
+A check is made **from the report** when the report already draws
+every object it reads, so a random report carries the time statistics
+of its record, a shock report the velocity check and the points rule,
+and a sine report the distortion of each tone; the time statistics are
+not made for a shock, transient or sine report, whose records are not
+meant to be Gaussian. MIL-STD-810H (2019), Method 514.8, paragraph
+4.2.2.1, asks for a drive that departs from a Gaussian distribution to
+be documented with its time history, its skewness and kurtosis, and its
+probability density: the time statistics block carries the last three
+beside the time histories the report already draws.
+
+A check that needs a fact no object holds is made from a block of its
+own, which carries what it reads and its settings and is saved with the
+report and its template:
+
+```python
+project.report_features('Report', enable=['check_blocks'])
+project.report_check_block('Report', 'pulse', shape='half-sine',
+                           peak=490.3, duration=0.011)
+project.report_check_block('Report', 'sweep_rate',
+                           modes=[[22.0, 40.0], [180.0, 20.0]])
+project.report_check_block('Report', 'signature', source='Survey before',
+                           measured='Survey after')
+project.report_check_block('Report', 'segments', segments=[
+    [6.0, 30.0, 'stationary', 'rough road'],
+    [31.9, 32.7, 'shock', 'pothole']])
+```
+
+The settings are the keyword arguments of the check's reading (the
+pulse's peak in SI); a check made from the report, given a block of its
+own, is made from the block, so its settings hold
+(`kurtosis_band=[2.9, 3.1]` for the time statistics). The call refuses,
+changing nothing, an unknown check, a field or setting the check does
+not take, and a required setting left out. In the editor, clicking a
+check's own block shows what it reads and its settings; Remove takes it
+away.
+
+**What judged nothing says so.** A check reads **Passed** only when it
+judged every channel and each was inside its criterion. **Flagged**
+means at least one was outside. A channel the check cannot read, such
+as a dead or constant channel, is a row reading *not judged* with the
+cause, and the check reads **Partly judged** when the others passed, or
+**Not judged** when none could be read. A reading that refuses its
+input (a shock record holding a sample that is not a number, two spectra at
+different Q, two signatures of different quantities) gives the
+reading's own reason in place of a verdict.
+
+**When the readings are made.** Some readings take a while (the
+distortion check rebuilds every tone on every channel), so the app
+makes them with a progress bar and Cancel before it draws the page, and
+keeps them until what they read or their settings change. A check whose
+reading was canceled reads Not judged, and is read again the next time
+the page is drawn. A script that renders or exports the report makes
+them as it renders.
+
 ## Calibration in date
 
 **Calibration in date** (group Records) answers the first thing a
@@ -412,7 +489,6 @@ and are grayed out until each is built:
 | Runs and chronology | Structure | run identity, a results section per run, and the runs in time order with duration at level |
 | Requirement and results | Results | the requirement in words and a met or not met row per criterion; the pass/fail box labeled a screening without one |
 | Findings register | Results | deviations, anomalies and nonconformances in four parts, the fact filled from the measurement |
-| Check blocks | Results | a table for each check the project holds, a row per channel against its criterion |
 | Cross-axis and limit channels | Results | cross-axis against its limit, and where limit channels held the control down |
 | Control-channel uncertainty | Results | each control channel's uncertainty against one third of the tolerance |
 | Identity and issue | Issue control | number, revision, status and page n of N on every page, a paginated PDF, and amendments |

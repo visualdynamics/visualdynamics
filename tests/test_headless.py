@@ -331,6 +331,9 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_specifications': 'compliance.specification_rms',
         '_render_fit': 'Project.fit_modes',
         '_render_fit_mac': 'plot_mac',
+        '_render_signal': ('core.signals.preview, then plot_data of its '
+                           'PSD over the target, or plot_series of its trace; '
+                           'Project.generate_signal makes it'),
         '_render_author': ('core.author.ModalSpecificationDraft.preview, '
                            'then plot_data; its areas and running rms '
                            'plot_breakpoints'),

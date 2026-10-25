@@ -1325,6 +1325,14 @@ class MainWindow(QMainWindow):
         self.table_bar.addAction(self.author_action)
         self.author_action.setVisible(False)
         self._author_wanted: bool = False
+        #: the Generate Signal pane while it is open: the object it is
+        #: open on and the settings shown; None while it is shut
+        self._signaling: dict | None = None
+        #: the settings last shown for each source, so reopening the
+        #: pane on an object starts where it was left
+        self._signal_settings: dict[str, Any] = {}
+        self.data_pane.signal_panel.changed.connect(self._signal_edited)
+        self.data_pane.signal_panel.apply_asked.connect(self._signal_apply)
         #: the replication fit last read, as (record, its samples, the
         #: inputs, the fit): a cutoff column picked only changes the
         #: case drawn, and reading the fit again was 0.23 s of filters
@@ -4415,6 +4423,8 @@ class MainWindow(QMainWindow):
         ('extract_sine', 'Extract Sine Levels', 'sine',
          'extract_sine_levels'),
         ('fit_modes', 'Fit Modal Model', 'edit', 'start_modal_fit'),
+        ('generate_signal', 'Generate Signal', 'generate_signal',
+         'generate_signal_act'),
         ('transform', 'Transform to Modal Responses', 'transform',
          'transform_selection'),
         ('expand', 'Expand to Physical Responses', 'expand',
@@ -9691,11 +9701,13 @@ class MainWindow(QMainWindow):
         # far it is from what was asked. The plot draws one channel or a
         # few, so the table is where the rest are still accounted for
         replicating = bool(series) and self._replication_found(series)
-        authoring = self._authoring(shapes, geometries, series, channels)
+        signaling = self._signal_door()
+        authoring = (None if signaling is not None
+                     else self._authoring(shapes, geometries, series, channels))
         # no 3-D view in edit mode (Brandon, 2026-09-06): every editing
         # gesture is on the flat plot, so the stage stands down while
         # the sheet is open and comes back when it closes
-        self.data_pane.flat_only = authoring is not None
+        self.data_pane.flat_only = authoring is not None or signaling is not None
         # a lone set's transformation is drawn on its geometry, which
         # comes up above the tables (Brandon, 2026-10-23)
         self._values_on = (self._values_geometry(shapes[0][0], shapes[0][1])
@@ -9703,7 +9715,7 @@ class MainWindow(QMainWindow):
         self._show_views(three_d=bool(geometries) or self._values_on is not None,
                          plots=bool(series) or bool(picture_sets)
                          or bool(sine_specs) or bool(sine_levels)
-                         or authoring is not None,
+                         or authoring is not None or signaling is not None,
                          table=bool(channels) or shape_table or comparing
                          or bool(reports) or bool(matches)
                          or levels is not None
@@ -9783,6 +9795,8 @@ class MainWindow(QMainWindow):
                 parts.append(summary)
             else:
                 parts.append(self._shape_summary(shapes, geometries))
+        if signaling is not None:
+            parts.append(self._render_signal())
         if authoring is not None:
             parts.append(self._render_author(authoring))
             if authoring[0] == 'table':
@@ -10589,10 +10603,206 @@ class MainWindow(QMainWindow):
         return (f'{shape_name}: {shape_set.mode_label(chosen)}{note} '
                 f'— press Play{fit}')
 
+    # ---- generating a signal from a spectrum, a tone or a table -----------
+
+    def generate_signal_act(self) -> None:
+        """Open Generate Signal on the selected object, or put it away
+        when it is open on it already. The pane previews the signal as
+        its settings change, and its button makes it
+        (`Project.generate_signal`)."""
+        from ..core.signals import kinds_for, suggested
+
+        name = self._sole_selected_name()
+        obj = self.objects.get(name) if name is not None else None
+        if obj is None or not kinds_for(obj):
+            self._show_status('Select a spectrum, a sine specification or a '
+                              'channel table to generate a signal from')
+            return
+        if self._signaling is not None and self._signaling['source'] == name:
+            self.close_signal_pane()
+            return
+        self._author_wanted = False
+        self._signaling = {'source': name, 'settings': self._signal_settings.get(
+            name) or suggested(obj)}
+        self.render_current()
+
+    def close_signal_pane(self) -> None:
+        """Put the Generate Signal pane away, keeping what it showed."""
+        self._signaling = None
+        self.data_pane.signal_panel.hide()
+        self.render_current()
+
+    def _sole_selected_name(self) -> str | None:
+        names = list(dict.fromkeys(
+            name for kind, name, _obj, _detail in self.selected_references()
+            if kind in ('object', 'record')))
+        return names[0] if len(names) == 1 else None
+
+    def _signal_door(self):
+        """The source the pane is open on while it is open and that
+        object is still the one selected; otherwise None, and the pane
+        put away (it stands down when the selection moves on)."""
+        if self._signaling is None:
+            return None
+        if (self._sole_selected_name() != self._signaling['source']
+                or self._signaling['source'] not in self.objects):
+            self._signaling = None
+            self.data_pane.signal_panel.hide()
+            return None
+        return self._signaling['source']
+
+    def _render_signal(self) -> str:
+        """The pane's settings beside a preview: a short stretch of the
+        signal, its PSD over the target for the random kinds, its trace
+        for the others."""
+        from ..core.averaging import Averaging
+        from ..core.signals import (
+            KINDS,
+            RANDOM_KINDS,
+            frame_used,
+            kinds_for,
+            preview,
+            target_at,
+            target_of,
+        )
+        from ..core.sine import SineSweepSpecification
+
+        name = self._signaling['source']
+        obj = self.objects[name]
+        settings = self._signaling['settings']
+        panel = self.data_pane.signal_panel
+        typed = isinstance(obj, ChannelTable)
+        quantity = self._signal_quantity(obj, settings)
+        cross = (isinstance(obj, Psd)
+                 and not all(obj.is_autospectrum(i)
+                             for i in range(obj.num_records)))
+        tones = (tuple(t.name for t in obj.tones)
+                 if isinstance(obj, SineSweepSpecification) else ())
+        panel.show_source(kinds_for(obj), settings, self.unit_system,
+                          quantity=quantity, typed=typed, cross_terms=cross,
+                          tones=tones)
+        panel.show()
+        what = KINDS.get(settings.kind, settings.kind).lower()
+        try:
+            short = preview(obj, settings)
+            frame = frame_used(obj, settings)
+            target = target_of(obj, settings)
+        except ValueError as why:
+            panel.show_reading(note=str(why))
+            self.data_pane.clear()
+            return f'{name}: {why}'
+        rms = float(np.sqrt(np.mean(short.ordinate[0] ** 2)))
+        unit = self.unit_system.label_text(short.ordinate_dim[0])
+        shown = float(self.unit_system.from_si(rms, short.ordinate_dim[0]))
+        samples = self._signal_samples(obj, settings, short)
+        panel.show_reading(
+            samples=samples,
+            spacing=(settings.sample_rate / frame) if frame else None,
+            rms=f'{shown:.4g} {unit}',
+            note=(f'Previewing {short.ordinate.shape[1]:,} of {samples:,} '
+                  'samples' if samples > short.ordinate.shape[1] else ''))
+        if settings.kind in RANDOM_KINDS:
+            length = int(min(frame or 4096, short.ordinate.shape[1] // 4))
+            length -= length % 2
+            short.averaging = Averaging(frame_length=max(length, 4),
+                                        overlap=0.5, window='hann').filled(
+                short.ordinate.shape[1], settings.sample_rate)
+            drawn = short.compute_psds()
+            # the target read on the preview's lines as the generator
+            # read it, a plain PSD: a specification beside a measurement
+            # is drawn as a comparison of two project objects, and its
+            # breakpoints as the steps of a PSD's lines, neither of which
+            # is what the signal was drawn to
+            # the preview first, so the target is drawn over its scatter
+            series = [(f'{what.capitalize()} preview', drawn, None),
+                      (name if not typed else f'{name} target',
+                       target_at(target, drawn.abscissa), None)]
+        else:
+            series = [(f'{what.capitalize()} preview', short, None)]
+        status = self._render_series(series)
+        said = (f'{name}: Generate Signal, {settings.describe()} at '
+                f'{", ".join(short.response_dof[:4])}'
+                f'{", …" if len(short.response_dof) > 4 else ""}')
+        return said + (f' | {status}' if status else '')
+
+    def _signal_quantity(self, obj, settings) -> str:
+        """What the signal from `obj` measures, for the pane's units;
+        '' when the object does not say."""
+        from ..core.signals import _quantity
+        from ..core.sine import SineSweepSpecification
+
+        if isinstance(obj, SineSweepSpecification):
+            return obj.ordinate_dim
+        if isinstance(obj, ChannelTable):
+            types = {t for t, role in zip(obj.types(), obj.roles(), strict=True)
+                     if role == 'reference' and t}
+            return types.pop() if len(types) == 1 else ''
+        try:
+            return _quantity(obj.ordinate_dim[0])
+        except ValueError:
+            return ''
+
+    @staticmethod
+    def _signal_samples(obj, settings, short) -> int:
+        """How many samples the signal made on Generate holds."""
+        from ..core.signals import DEFAULT_FRAME
+
+        frame = settings.frame_length or DEFAULT_FRAME
+        if settings.kind == 'burst':
+            return int(settings.bursts * frame)
+        if settings.kind == 'periodic':
+            return int(settings.periods * frame)
+        if settings.kind == 'sine':
+            tone = next((t for t in obj.tones if t.name == settings.tone),
+                        obj.tones[0])
+            return len(tone.argument(1.0 / settings.sample_rate))
+        return round(settings.duration * settings.sample_rate)
+
+    def _signal_edited(self, settings) -> None:
+        if self._signaling is None:
+            return
+        self._signaling['settings'] = settings
+        self._signal_settings[self._signaling['source']] = settings
+        self.render_current()
+
+    def _signal_apply(self, settings) -> None:
+        """Generate: the project's verb with the settings shown, only
+        the ones that differ from the defaults written, so the journal
+        line reads as what was chosen."""
+        from ..core.signals import SignalSettings
+
+        if self._signaling is None:
+            return
+        from dataclasses import replace
+
+        name = self._signaling['source']
+        if settings.seed is None and settings.kind in ('random', 'burst',
+                                                       'periodic'):
+            # drawn here rather than in the verb, so that the journal's
+            # line carries it and replays the same record
+            settings = replace(settings, seed=int(
+                np.random.SeedSequence().generate_state(1)[0]))
+        defaults = SignalSettings().to_dict()
+        chosen = {key: value for key, value in settings.to_dict().items()
+                  if key != 'kind' and value != defaults[key]}
+        try:
+            added = self.project.generate_signal(name, settings.kind, **chosen)
+        except ValueError as why:
+            self._show_status(f'{name}: {why}')
+            return
+        seed = self.project.provenance[added]['params'].get('seed')
+        self.show_object(added)
+        self._show_status(f'{added}: {settings.describe()}'
+                          + (f', seed {seed}' if seed is not None else '')
+                          + f', from {name}')
+
     # ---- writing a specification at a set's modal coordinates ------------
 
     def _author_toggled(self, checked):
         self._author_wanted = bool(checked)
+        if checked and self._signaling is not None:
+            self._signaling = None
+            self.data_pane.signal_panel.hide()
         if not checked:
             self.data_pane.author_panel.hide()
         self.render_current()

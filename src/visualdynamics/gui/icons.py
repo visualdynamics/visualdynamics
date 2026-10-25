@@ -1160,6 +1160,19 @@ def _draw_new_channel_table(painter, color):
     _plus(painter, 50, 50)
 
 
+def _draw_generate_signal(painter, color):
+    """A ragged random trace running out of a plus: a signal made, not
+    measured."""
+    import random
+
+    draw = random.Random(4)
+    points = [(8 + 3 * i, 30 + draw.uniform(-12, 12)) for i in range(15)]
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPolyline([QPointF(x, y) for x, y in points])
+    _plus(painter, 50, 50)
+
+
 def _draw_add_channel(painter, color):
     """A header and one row, with a plus on the row: a channel added to
     the table."""
@@ -2394,6 +2407,7 @@ def control_icon(name: str) -> QIcon:
      'up': _draw_up, 'down': _draw_down,
      'add': _draw_add, 'new_geometry': _draw_new_geometry,
      'new_channel_table': _draw_new_channel_table,
+     'generate_signal': _draw_generate_signal,
      'mac': _draw_mac, 'shape_values': _draw_shape_values,
      'new_specification': _draw_new_specification,
      'add_channel': _draw_add_channel,

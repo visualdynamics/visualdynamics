@@ -61,6 +61,7 @@ from .rms_check_panel import RmsCheckPanel
 from .segments_panel import SegmentsPanel
 from .settings_panel import PANEL_WIDTH
 from .shock_panel import ShockPanel
+from .signal_panel import SignalPanel
 from .signature_panel import SignaturePanel
 from .sine_panel import SinePanel
 from .srs_tolerance_panel import SrsTolerancePanel
@@ -462,6 +463,10 @@ class DataPane(QWidget):
         # is on the table bar, where a lone shape set's readings are
         self.author_panel: AuthorPanel = AuthorPanel()
         self.author_panel.hide()
+        # a signal being generated from the object selected, its
+        # preview on the plot beside it (Generate Signal, on the bar)
+        self.signal_panel: SignalPanel = SignalPanel()
+        self.signal_panel.hide()
         plot_row = QHBoxLayout()
         plot_row.setContentsMargins(0, 0, 0, 0)
         plot_row.setSpacing(0)
@@ -479,6 +484,7 @@ class DataPane(QWidget):
         self.author_split.setStretchFactor(0, 1)
         self.author_split.setStretchFactor(1, 0)
         plot_row.addWidget(self.author_split, 1)
+        plot_row.addWidget(self.signal_panel)
         plot_row.addWidget(self.averaging_panel)
         plot_row.addWidget(self.shock_panel)
         plot_row.addWidget(self.filter_panel)

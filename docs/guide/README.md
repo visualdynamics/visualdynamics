@@ -53,6 +53,9 @@ that is not an alpha.
   playable costs
 - [Will a pulse fit on the shaker](stroke.md): a pulse integrated raw
   against the shaker's shock stroke, velocity and force
+- [Generating reference signals](generating-signals.md): random,
+  burst random, periodic random, an impulse or a pulse, and sine, made
+  at the reference DOFs from a specification or a channel table
 - [Taking a record to a lower sample rate](resample.md): the
   anti-alias filter first, the span and the dropped lines, and where
   content above the new Nyquist frequency folds

@@ -2415,6 +2415,72 @@ class Project(dict):
             name or f'{source} Rigid Body Modes',
             recipe=('generate_rigid_body_modes', {}))
 
+    def generate_signal(self, source: Any, kind: str = 'random', *,
+                        name: str | None = None, **settings: Any) -> str:
+        """Generate a reference signal from a spectrum, a sine
+        specification or a channel table (Generate Signal), as a time
+        history in the source's group.
+
+        A spectrum gives random, burst random or periodic random at its
+        DOFs, drawn to it; a sine specification gives its tone; a channel
+        table gives any of those but sine at its reference channels, the
+        random kinds to a typed flat `band` and `level`, or an impulse or
+        a classical pulse (`core.signals`). The settings are recorded
+        with the result, and the random seed with them (one is drawn
+        when none is given), so Recompute makes the same record again.
+
+        Parameters
+        ----------
+        source : str or object
+            The spectrum, sine specification or channel table, by name
+            or as the object itself.
+        kind : str, default 'random'
+            One of `core.signals.KINDS`: 'random', 'burst', 'periodic',
+            'impulse', 'pulse' or 'sine'.
+        name : str, optional
+            What to call the result. Defaults to the source's name and
+            the kind.
+        **settings
+            The fields of `core.signals.SignalSettings`: `duration`,
+            `sample_rate`, `frame_length`, `seed`, `correlated`, `dofs`,
+            `bursts`, `burst`, `taper`, `periods`, `repeats`, `at`,
+            `area`, `shape`, `peak`, `pulse_duration`, `edge`, `band`,
+            `level` and `tone`.
+
+        Returns
+        -------
+        str
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
+
+        Raises
+        ------
+        TypeError
+            If a setting is not one `SignalSettings` has.
+        ValueError
+            If the kind is not one the source makes, or as the signal's
+            generator refuses (a band at or above the Nyquist frequency,
+            units not declared, no reference channel).
+        """
+        from dataclasses import replace
+
+        from .core.signals import KINDS, SignalSettings, generate
+
+        source = self.name_of(source)
+        if settings.get('dofs') is not None:
+            settings['dofs'] = tuple(settings['dofs'])
+        if settings.get('band') is not None:
+            settings['band'] = tuple(float(v) for v in settings['band'])
+        chosen = SignalSettings(kind=kind, **settings)
+        if chosen.seed is None:
+            # drawn here and kept, so the record can be made again
+            chosen = replace(chosen, seed=int(
+                np.random.SeedSequence().generate_state(1)[0]))
+        made = generate(self[source], chosen)
+        return self._derive(source, made,
+                            name or f'{source} {KINDS.get(kind, kind)}',
+                            recipe=('generate_signal', chosen.to_dict()))
+
     def merge_coincident_nodes(self, source: Any,
                                tolerance: float | None = None,
                                groups: Sequence[int] | None = None,
@@ -5074,6 +5140,9 @@ class Project(dict):
         # displacement system, changes the shapes as surely as a moved
         # reference point does
         'generate_rigid_body_modes': 'rigid',
+        # what the signal is drawn from: the spectrum's levels, the
+        # tone's schedule, the table's reference channels
+        'generate_signal': 'signal',
         # the record and the set both: a refitted set badges the modal
         # responses made through it
         'transform': 'pair', 'expand': 'pair'}
@@ -5144,6 +5213,8 @@ class Project(dict):
             shocks = getattr(obj, 'shocks', None) or ()
             return ('shocks', tuple((float(s.start), float(s.duration))
                                     for s in shocks))
+        if reads == 'signal':
+            return ('signal', _signal_source_digest(obj))
         if reads == 'rigid':
             import hashlib
 
@@ -5636,6 +5707,45 @@ def _differentiable(project, obj):
 #: with no acceleration cannot integrate; FRFs need drive channels),
 #: never its deep ones — a predicate that re-ran the verb to answer
 #: would make asking as expensive as doing.
+def _makes_signals(obj: Any) -> bool:
+    """Whether a signal can be generated from `obj` (`generate_signal`)."""
+    from .core.signals import kinds_for
+
+    return bool(kinds_for(obj))
+
+
+def _generated_again(source: Any, params: Mapping[str, Any]) -> Any:
+    """A generated signal made again from its recorded settings."""
+    from .core.signals import SignalSettings, generate
+
+    return generate(source, SignalSettings.from_dict(params))
+
+
+def _signal_source_digest(obj: Any) -> str:
+    """What a generated signal reads from its source, as a digest: a
+    spectrum's lines and levels, a sine specification's tones, a channel
+    table's channels, roles and types."""
+    import hashlib
+
+    from .core.sine import SineSweepSpecification
+
+    digest = hashlib.blake2b(digest_size=16)
+    if isinstance(obj, SineSweepSpecification):
+        for tone in obj.tones:
+            for array in (tone.frequency, tone.amplitude, tone.segment_rate):
+                digest.update(np.ascontiguousarray(array).tobytes())
+        digest.update(','.join(obj.response_dof).encode())
+    elif isinstance(obj, ChannelTable):
+        digest.update('|'.join(obj.dof_strings()).encode())
+        digest.update('|'.join(obj.roles()).encode())
+        digest.update('|'.join(obj.types()).encode())
+    else:
+        digest.update(np.ascontiguousarray(obj.abscissa).tobytes())
+        digest.update(np.ascontiguousarray(obj.ordinate).tobytes())
+        digest.update(','.join(obj.ordinate_dim).encode())
+    return digest.hexdigest()
+
+
 _VERB_APPLIES: tuple = (
     ('integrate', _integrable),
     ('differentiate', _differentiable),
@@ -5667,6 +5777,7 @@ _VERB_APPLIES: tuple = (
     ('transform', lambda p, o: _reads_as(p, o, 'physical')),
     ('expand', lambda p, o: _reads_as(p, o, 'modal')),
     ('generate_rigid_body_modes', lambda p, o: isinstance(o, Geometry)),
+    ('generate_signal', lambda p, o: _makes_signals(o)),
     # a geometry is a model once its element groups say what they are made of
     ('solve_modes', lambda p, o: (isinstance(o, Geometry)
                                   and bool(o.group_properties))),
@@ -5835,6 +5946,7 @@ _JOURNALED_VERBS = (
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
+    'generate_signal',
     'plan_instrumentation',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry',
     'new_channel_table', 'add_channels', 'add_plane',
@@ -5893,6 +6005,7 @@ _RECOMPUTE = {
         k.get('drift_corner', _default_drift())),
     'differentiate': lambda p, s, k: p[s].differentiate(),
     'generate_rigid_body_modes': lambda p, s, k: _rigid_shapes(p[s]),
+    'generate_signal': lambda p, s, k: _generated_again(p[s], k),
     'transform': lambda p, s, k: _through(p, s, k, 'to_modal'),
     'expand': lambda p, s, k: _through(p, s, k, 'to_physical'),
     'author_specification': lambda p, s, k: _authored(p, s, k),

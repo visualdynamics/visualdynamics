@@ -23,7 +23,8 @@ from visualdynamics.core.report import Report
 from visualdynamics.report import features as rf
 from visualdynamics.report import page, plot_conventions, render_html
 
-LIVE = ('skeleton_sections', 'plot_conventions', 'shared_decades')
+LIVE = ('skeleton_sections', 'calibration_in_date', 'plot_conventions',
+        'shared_decades')
 #: the plot conventions and their option
 CONVENTIONS = ('plot_conventions', 'shared_decades')
 
@@ -196,7 +197,7 @@ def test_the_presets_enable_what_they_can_and_say_what_they_skipped():
     assert selection.enabled == LIVE
     skipped = [key for key in rf.PRESETS['test_report'].features
                if key not in LIVE]
-    assert len(selection.notes) == len(skipped) == 8
+    assert len(selection.notes) == len(skipped) == 7
     assert selection.notes[1] == ('Test report: Findings register skipped, '
                                   'not yet available')
     flash = rf.configure(report, preset='flash_report')

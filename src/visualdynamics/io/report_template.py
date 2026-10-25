@@ -32,6 +32,10 @@ if TYPE_CHECKING:                                    # pragma: no cover
 SUFFIX = '.vdreport'
 MARKER = 'visualdynamics_report_template'
 
+#: what a block keeps that belongs to one test, not to the template:
+#: the test dates of `report.calibration` (`START`, `END`)
+_TEST_ONLY = ('test_date', 'test_end')
+
 
 def handles(obj: Any) -> bool:
     from ..core.report import Report
@@ -58,11 +62,15 @@ def save(report: Report, path: str | os.PathLike, unit_system: Any = None,
 
     `unit_system` is accepted because every exporter takes it, and is not
     used: a template holds no values, only what to draw and how to bind
-    it.
+    it. So the test dates a channel table block keeps
+    (`report.calibration`) are left out: the next test is judged against
+    its own date, never the last one's.
     """
     out = {MARKER: 1, 'title': report.title, 'marking': report.marking,
            'marking_color': report.marking_color,
-           'blocks': [dict(block) for block in report.blocks]}
+           'blocks': [{key: value for key, value in block.items()
+                       if key not in _TEST_ONLY}
+                      for block in report.blocks]}
     if report.features:
         # only when there are any: a template with none is the file it
         # always was, and opens in a version that has no features

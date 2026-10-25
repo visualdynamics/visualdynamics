@@ -193,6 +193,8 @@ def _report_payload(report, objects, unit_system=None, edit=False,
 
     active = enabled_features(report)
     conventions = 'plot_conventions' in active
+    # calibration in date: the channel table against the test date
+    calibration = 'calibration_in_date' in active
     # skeleton sections: the page laid out on the sections a test
     # report needs, the author's own blocks held back to head them
     skeleton = 'skeleton_sections' in active
@@ -232,6 +234,11 @@ def _report_payload(report, objects, unit_system=None, edit=False,
             built = {'kind': 'unbound',
                      'was': block.get('kind', 'block'),
                      'empty': resolvable}
+        if (calibration and isinstance(built, dict)
+                and built['kind'] == 'table'):
+            from .calibration import apply as apply_calibration
+
+            built = apply_calibration(built, block, objects, object_groups)
         # one block can answer with several figures — a stage with
         # more channels than it holds legibly continues into the next
         # one. They share the block's index, so the editor edits the

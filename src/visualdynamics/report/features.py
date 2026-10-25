@@ -109,8 +109,9 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 
 
 #: every report feature, in the order the selection tool shows them
-#: within their groups. `skeleton_sections`, `plot_conventions` and its
-#: option `shared_decades` are built; the rest are the road map.
+#: within their groups. `skeleton_sections`, `calibration_in_date`,
+#: `plot_conventions` and its option `shared_decades` are built; the
+#: rest are the road map.
 FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'skeleton_sections', 'Skeleton sections', 'Structure',
@@ -170,8 +171,10 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'calibration_in_date', 'Calibration in date', 'Records',
         "Whether each channel's sensor was in calibration on the test "
-        'date, with any channel out of date flagged.',
-        available=False),
+        'date: a column in the channel table, any channel out of date '
+        'flagged and named with by how much, and a channel with no date '
+        'said to be unchecked. The equipment list is offered to the '
+        'setup and method section.'),
     ReportFeature(
         'report_identity', 'Identity and issue', 'Issue control',
         'Report number, revision and status on every page with page n '

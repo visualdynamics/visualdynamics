@@ -266,6 +266,19 @@ class ReportEditor(QWidget):
         #: field, while such a block is in the pane
         self.none_button: QPushButton | None = None
         self.by_edit: QLineEdit | None = None
+        #: the test dates on a channel table's pane, the Setup and
+        #: Method pane's Insert Calibration Status button, and the line
+        #: under them that says what was refused, while calibration in
+        #: date is on (`report.calibration`)
+        self.date_edit: QLineEdit | None = None
+        self.end_edit: QLineEdit | None = None
+        self.calibration_button: QPushButton | None = None
+        self.calibration_note: QLabel | None = None
+        #: how the test dates are set: the window sets the project's
+        #: verb, so the change is journaled; on its own the editor
+        #: calls `report.calibration.set_dates`. Called as
+        #: `calibration_dater(report, start, end)`.
+        self.calibration_dater: Callable[..., Any] | None = None
         self.field_boxes: dict[str, QComboBox] = {}
         self._loading_pane = False
         self._text_timer: QTimer = QTimer(self)
@@ -460,6 +473,8 @@ class ReportEditor(QWidget):
         self.title_edit = self.marking_edit = self.color_box = None
         self.features_panel = None
         self.none_button = self.by_edit = None
+        self.date_edit = self.end_edit = None
+        self.calibration_button = self.calibration_note = None
         self.field_boxes = {}
         body = QWidget()
         form = QFormLayout(body)
@@ -569,6 +584,7 @@ class ReportEditor(QWidget):
                         block.get('caption', '') != self.caption_edit.text()))
                 form.addRow('Caption', self.caption_edit)
                 self._record_caption_rows(form, block, objects, object_groups)
+                self._dates_pane(form, block, objects, object_groups)
         finally:
             self._loading_pane = False
         self.pane.setWidget(body)
@@ -645,6 +661,81 @@ class ReportEditor(QWidget):
                      'by': self.by_edit.text()},
                     str(block.get('by', '')) != self.by_edit.text().strip()))
             form.addRow('Interpretation, by', self.by_edit)
+        if (found is not None and found.key == 'setup'
+                and self._calibrating()):
+            # the section is the author's: the program offers what it
+            # can prove, and the author keeps it, changes it or not
+            self.calibration_button = QPushButton('Insert Calibration Status')
+            self.calibration_button.setToolTip(
+                'Inserts the sensors and their calibration status on the '
+                'test date, from the channel table, at the cursor')
+            self.calibration_button.clicked.connect(self._offer_calibration)
+            form.addRow(self.calibration_button)
+            self.calibration_note = QLabel('')
+            self.calibration_note.setWordWrap(True)
+            form.addRow(self.calibration_note)
+
+    def _calibrating(self) -> bool:
+        from ..report.calibration import FEATURE
+        from ..report.features import enabled
+
+        return self.report is not None and FEATURE in enabled(self.report)
+
+    def _dates_pane(self, form, block, objects, object_groups) -> None:
+        """With calibration in date on, a channel table's pane carries
+        the test's first and last day, which each sensor's calibration
+        is judged against."""
+        from ..report.calibration import END, START, channel_table_of
+
+        if (not self._calibrating()
+                or channel_table_of(block, objects, object_groups) is None):
+            return
+        self.date_edit = QLineEdit(str(block.get(START, '')))
+        self.date_edit.setPlaceholderText('YYYY-MM-DD')
+        self.end_edit = QLineEdit(str(block.get(END, '')))
+        self.end_edit.setPlaceholderText('the first day (YYYY-MM-DD)')
+        for edit in (self.date_edit, self.end_edit):
+            edit.editingFinished.connect(self._dates_edited)
+        form.addRow('Test date', self.date_edit)
+        form.addRow('Last test day', self.end_edit)
+        self.calibration_note = QLabel('')
+        self.calibration_note.setWordWrap(True)
+        form.addRow(self.calibration_note)
+
+    def _dates_edited(self) -> None:
+        from ..report.calibration import END, START
+
+        if (self._loading_pane or self.date_edit is None
+                or self.selected is None):
+            return
+        block = self.report.blocks[self.selected]
+        start = self.date_edit.text().strip()
+        end = self.end_edit.text().strip()
+        if (start, end) == (str(block.get(START, '')),
+                            str(block.get(END, ''))):
+            return
+        self._operate({'op': 'test_date', 'start': start, 'end': end})
+
+    def _offer_calibration(self) -> None:
+        """Insert the equipment list with its calibration status at the
+        cursor of the Setup and Method editor, for the author to keep,
+        change or delete; or say why there is none."""
+        from ..report.calibration import draft
+
+        if self.text_editor is None or self.report is None:
+            return
+        objects = self.objects() if self.objects else {}
+        object_groups = self.object_groups() if self.object_groups else None
+        try:
+            text = draft(self.report, objects, object_groups)
+        except (TypeError, ValueError) as refused:
+            if self.calibration_note is not None:
+                self.calibration_note.setText(str(refused))
+            return
+        if self.calibration_note is not None:
+            self.calibration_note.setText('')
+        self.text_editor.insertPlainText(text)
+        self.flush_text()
 
     def _combo(self, form, field, label, current, options):
         box = QComboBox()
@@ -1001,6 +1092,25 @@ class ReportEditor(QWidget):
                 return
             # the pane shows the words None wrote
             reselect = bool(operation.get('none'))
+        elif op == 'test_date':
+            # through the one function a script calls, which refuses
+            from ..report.calibration import set_dates
+
+            def dater(report, start, end):
+                objects = self.objects() if self.objects else {}
+                groups = self.object_groups() if self.object_groups else None
+                return set_dates(report, objects, groups, start, end)
+
+            try:
+                (self.calibration_dater or dater)(
+                    report, operation.get('start') or None,
+                    operation.get('end') or None)
+            except (TypeError, ValueError) as refused:
+                if self.calibration_note is not None:
+                    self.calibration_note.setText(str(refused))
+                return
+            if self.calibration_note is not None:
+                self.calibration_note.setText('')
         elif op == 'field':
             index = int(operation.get('at', -1))
             if 0 <= index < report.num_blocks:

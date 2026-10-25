@@ -18234,6 +18234,10 @@ class MainWindow(QMainWindow):
             self.report_editor.features_changer = (
                 lambda report, **change: self.project.report_features(
                     self.project.name_of(report), **change))
+            # and the test dates, which calibration is judged against
+            self.report_editor.calibration_dater = (
+                lambda report, start, end: self.project.report_test_date(
+                    self.project.name_of(report), start, end))
             self._table_layout.insertWidget(1, self.report_editor, 1)
         # the report has the pane to itself. Hiding the table and the
         # MAC is not enough: the splitter holding them keeps its share of

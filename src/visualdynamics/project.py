@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
+from .core.calibration import CalibrationCheck
 from .core.channel_table import ChannelTable
 from .core.data import (
     DataArray,
@@ -5036,6 +5037,113 @@ class Project(dict):
         return [str(owed) for owed in check(
             self._report(name), self, self.object_groups)]
 
+    def report_test_date(self, name: str, start: str | None,
+                         end: str | None = None) -> None:
+        """Set the dates of the test a report covers, which its sensors'
+        calibration is judged against (the dates in the report editor's
+        pane on the channel table).
+
+        With the report feature `calibration_in_date` on, the report's
+        channel table carries each sensor's calibration status on these
+        dates: in date, expired before the test, lapsing during it, or
+        no date given (`visualdynamics.core.calibration`). The dates are
+        kept with the report's channel table blocks, and a `.vdreport`
+        template leaves them out.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        start : str or None
+            The first test day, YYYY-MM-DD. None or '' clears the dates.
+        end : str, optional
+            The last test day, YYYY-MM-DD, for a test over several
+            days; the first day when omitted.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            When the report does not have `calibration_in_date` enabled
+            or has no channel table block, or for a date not written
+            YYYY-MM-DD (a slashed date reads two ways) or a last day
+            before the first. Nothing is changed.
+        TypeError
+            When `name` is not a report, or a date is not a string.
+        """
+        from .report.calibration import set_dates
+
+        set_dates(self._report(name), self, self.object_groups, start, end)
+
+    def report_calibration(self, name: str) -> CalibrationCheck:
+        """Each sensor of a report's channel table against its test
+        dates (what the report's Calibration column shows).
+
+        Parameters
+        ----------
+        name : str
+            The report.
+
+        Returns
+        -------
+        CalibrationCheck
+            `span`, the test dates; `channels`, one entry per channel
+            with its `status` ('in date', 'expired', 'lapses during the
+            test' or 'no date given') and `days`; `summary()`, the
+            check in words.
+
+        Raises
+        ------
+        ValueError
+            When the report does not have `calibration_in_date` enabled,
+            has no channel table block or no test date (there is then
+            nothing to judge against, and no answer would read as in
+            date), or when a date or an Expiration cell cannot be read
+            as a date; the message names the cell.
+        TypeError
+            When `name` is not a report.
+        """
+        from .report.calibration import checked
+
+        return checked(self._report(name), self, self.object_groups)[0]
+
+    def report_calibration_text(self, name: str) -> str:
+        """The equipment list with each sensor's calibration status on
+        the test date, as Markdown offered for the report's Setup and
+        Method section (the section pane's Insert Calibration Status).
+
+        The section is the author's, so nothing is written into it
+        here; put the text in with `report_section`:
+
+            text = project.report_calibration_text('Report')
+            project.report_section('Report', 'setup', text)
+
+        Parameters
+        ----------
+        name : str
+            The report.
+
+        Returns
+        -------
+        str
+            A sentence, a pipe table of the sensors (channel, DOF,
+            quantity, make, model, serial number, expiration and
+            calibration status) and the lines of the check.
+
+        Raises
+        ------
+        ValueError
+            As `report_calibration` refuses.
+        TypeError
+            When `name` is not a report.
+        """
+        from .report.calibration import draft
+
+        return draft(self._report(name), self, self.object_groups)
+
     def _report(self, name: str) -> Report:
         """The report called `name`; `TypeError` for anything else."""
         name = self.name_of(name)
@@ -6509,7 +6617,8 @@ _JOURNALED_VERBS = (
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',
-    'generate_report', 'report_features', 'report_section', 'export_report',
+    'generate_report', 'report_features', 'report_section',
+    'report_test_date', 'export_report',
     'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:

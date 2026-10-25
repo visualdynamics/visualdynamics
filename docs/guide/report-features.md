@@ -128,6 +128,88 @@ always has something to say, and an attribution outside the
 discussion. `report_check` refuses a report without the skeleton,
 since there is then nothing to check it against.
 
+## Calibration in date
+
+**Calibration in date** (group Records) answers the first thing a
+quality signer checks: whether every sensor was in calibration on the
+test date. MIL-STD-810H (2019), Part One, Task 406, asks a final report
+for the test equipment with its calibration status (paragraph
+406.2.2.2), and SMC-S-016 (2014) keeps calibration dates in the test
+documentation file (paragraph 4.9.1). The channel table already holds
+each sensor's expiration, its Expiration column; the feature compares
+it with the dates of the test.
+
+Each channel gets one of four answers:
+
+| Answer | When |
+|---|---|
+| in date | the expiration is on or after the last test day |
+| expired | the expiration is before the first test day; the report says how many days before |
+| lapses during the test | in date on the first test day, out of date before the last |
+| no date given | the Expiration cell is blank: nothing was judged, and the channel is never counted in date |
+
+A sensor is taken as in calibration through its expiration date: one
+due on the 24th may be used on the 24th, not on the 25th.
+
+**Where it shows.** The channel table gains a **Calibration** column
+with each channel's answer, and an expired or lapsing channel's
+Expiration and Calibration cells are shaded red. Under the table a
+paragraph gives the count in date and names each channel out of date
+by its number, DOF and quantity (a force and an acceleration at one
+DOF are two sensors), with how many days, and the channels with no
+date, which were not checked:
+
+> **Calibration on the test dates, 2026-10-24 to 2026-10-26: 8 of 12
+> channels in date.**
+>
+> - Channel 2 (104Z+ acceleration, control) expired 2026-09-30, 24 days
+>   before the test.
+> - Channel 3 (110Z+ acceleration, control) lapses during the test: in
+>   date through 2026-10-25, not on the last test day.
+> - No expiration date given, so not checked: channel 4 (113Z+
+>   acceleration, control), channel 11 (1304Z+ force).
+
+"All channels in date" is written only when every channel had a date.
+A table with no expirations at all, a table with no channels, and a
+report with no test date entered each say that calibration was not
+checked, and why. With Skeleton sections on, the column and the
+paragraph fall under Instrumentation.
+
+**The test date.** Select the channel table in the report editor and
+type the **Test date**, and the **Last test day** for a test over
+several days, as YYYY-MM-DD. A date written another way is refused
+rather than guessed (10/04/2026 is October 4 in one country and April
+10 in another), and so is a last day before the first. A file whose
+Expiration cell holds something that is not a date names the cell on
+the page: *channel table row 6 (channel 6), Expiration: 'June' is not a
+date*. The dates are kept with the report; a `.vdreport` template
+leaves them out, so a house template never judges the next test
+against the last one's date.
+
+**Setup and Method.** That section is the author's and is never
+written by the program. With Skeleton sections on, its pane has an
+**Insert Calibration Status** button, which puts the equipment list at
+the cursor (a table of the sensors with their make, model, serial
+number, expiration and answer, then the lines of the check) for the
+author to keep, change or delete.
+
+From a script:
+
+```python
+project.report_features('Report', enable=['calibration_in_date'])
+project.report_test_date('Report', '2026-10-24', end='2026-10-26')
+check = project.report_calibration('Report')
+check.summary()          # the paragraph, line by line
+[c.status for c in check.channels]
+project.report_section('Report', 'setup',
+                       project.report_calibration_text('Report'))
+```
+
+`report_test_date` is recorded in the journal and refuses a report
+without the feature or without a channel table. `report_calibration`
+refuses a report with no test date, since there is then nothing to
+judge against. What to do about a lapsed sensor stays the engineer's.
+
 ## Plot conventions
 
 **Plot conventions** (group Figures) puts a report's figures under
@@ -168,7 +250,6 @@ and are grayed out until each is built:
 | Cross-axis and limit channels | Results | cross-axis against its limit, and where limit channels held the control down |
 | Control-channel uncertainty | Results | each control channel's uncertainty against one third of the tolerance |
 | Data index | Records | every file the report rests on, with its size and SHA-256, checked again at export |
-| Calibration in date | Records | whether each sensor was in calibration on the test date |
 | Identity and issue | Issue control | number, revision, status and page n of N on every page, a paginated PDF, and amendments |
 | Flash report | Issue control | a one-page preliminary report from the day's analysis |
 | Record captions | Figures | a caption block on each spectrum, SRS and sine figure, read off the record |

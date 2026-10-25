@@ -1990,9 +1990,10 @@ class TimeHistory(DataArray):
         Parameters
         ----------
         ranges : ChannelTable, array_like or float
-            The channel table describing this record (its Range in
-            volts over its Sensitivity), or the ranges in SI, one per
-            channel or one for all.
+            The channel table describing this record (the level each
+            channel clips at, `ChannelTable.clip_ranges`, over its
+            Sensitivity), or the ranges in SI, one per channel or one
+            for all.
         **options
             `records`, `step_db`, `margin` and `rail_samples`, as
             `core.overload.overload_check` takes them.

@@ -605,7 +605,8 @@ def overload():
     table = ChannelTable({'channel': [1, 2, 3], 'node': [1, 2, 3],
                           'direction': ['Z+'] * 3, 'unit': ['g'] * 3,
                           'channel_type': ['acceleration'] * 3,
-                          'sensitivity': [400.0] * 3, 'range': [10] * 3})
+                          'sensitivity': [400.0] * 3,
+                          'daq_range': [10.0] * 3})
     check = history.overload_check(table)
     for channel in check.channels:
         print(channel.describe('g', g))

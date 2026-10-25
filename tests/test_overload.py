@@ -10,10 +10,10 @@ that is 37 g, past it. Through the 25 g range at full level it reads
 287 samples on the rail, 0.47 %, about 24 a second, a crest factor of
 2.83 and a kurtosis of 2.86, which the kurtosis bars' band of 2 to 4
 passes and this check does not. The range is read from a channel table:
-10 V over 400 mV/g. A table row whose Range is the column's default of
-5 V is read but marked, since a blank, zero or fractional Range reads
-back as 5 V too: a channel clipped at 2.5 g on a 0.5 V input over
-200 mV/g is read against 25 g, 20 dB of headroom it does not have.
+10 V over 400 mV/g. The level a channel clips at is the table's
+`clip_ranges()`, the smaller of its DAQ Range and its Sensor Range: a
+0.5 V input over 200 mV/g is a 2.5 g range, and a 10 V input feeding a
+sensor whose own output stops at 5 V is a 5 V one.
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ from visualdynamics.core.channel_table import ChannelTable
 from visualdynamics.core.data import TimeHistory
 from visualdynamics.core.kurtosis import HIGH, LOW, channel_kurtosis
 from visualdynamics.core.overload import (
-    DEFAULT_RANGE,
     OVERLOADS,
     STEP_DB,
     channel_overload,
@@ -69,14 +68,19 @@ def history(*rows, dofs=None):
                        ordinate_unit=['g'] * count)
 
 
-def table(nodes, ranges, sensitivities, units=None, types=None):
+def table(nodes, ranges, sensitivities, units=None, types=None,
+          sensors=None):
+    """A channel table with `ranges` its DAQ Range and `sensors`, when
+    given, its Sensor Range, both in volts."""
     count = len(nodes)
     return ChannelTable({
         'channel': list(range(1, count + 1)), 'node': list(nodes),
         'direction': ['Z+'] * count,
         'unit': units or ['g'] * count,
         'channel_type': types or ['acceleration'] * count,
-        'sensitivity': list(sensitivities), 'range': list(ranges)})
+        'sensitivity': list(sensitivities),
+        'daq_range': [str(value) for value in ranges],
+        'sensor_range': [str(value) for value in sensors or [''] * count]})
 
 
 @pytest.fixture(scope='module')
@@ -105,10 +109,10 @@ def test_a_sensitivity_that_is_not_a_number_gives_no_range():
 
 
 def test_the_tables_range_is_read_in_si(run, channels):
-    scales, reasons, defaults, notes = table_full_scales(channels, run)
+    scales, reasons, notes = table_full_scales(channels, run)
     assert scales == pytest.approx([25.0 * G] * 3)
     assert reasons == ['', '', '']
-    assert defaults == [False] * 3 and notes == [''] * 3
+    assert notes == [''] * 3
 
 
 def test_a_range_in_si_units_is_its_volts_over_its_sensitivity(run):
@@ -122,7 +126,7 @@ def test_a_range_in_si_units_is_its_volts_over_its_sensitivity(run):
 def test_each_channel_without_a_range_says_why(run):
     described = table([1, 2, 7], [5, 5, 5], [200.0, float('nan'), 200.0],
                       units=['g', 'g', 'g'])
-    scales, reasons, _defaults, _notes = table_full_scales(described, run)
+    scales, reasons, _notes = table_full_scales(described, run)
     assert scales[0] == pytest.approx(25.0 * G)
     assert np.isnan(scales[1:]).all()
     assert reasons == ['', 'no sensitivity in the channel table',
@@ -132,7 +136,7 @@ def test_each_channel_without_a_range_says_why(run):
 def test_a_unit_of_another_quantity_gives_no_range(run):
     described = table([1, 2, 3], [5, 5, 5], [200.0] * 3,
                       units=['g', 'lbf', 'g'])
-    scales, reasons, _defaults, _notes = table_full_scales(described, run)
+    scales, reasons, _notes = table_full_scales(described, run)
     assert np.isnan(scales[1])
     assert reasons[1] == "the table's unit 'lbf' is not acceleration"
 
@@ -142,7 +146,7 @@ def test_a_row_with_no_unit_says_so(run):
     (the guard before the unit is converted)."""
     described = table([1, 2, 3], [10, 10, 10], [400.0] * 3,
                       units=['g', '', 'g'])
-    scales, reasons, _defaults, _notes = table_full_scales(described, run)
+    scales, reasons, _notes = table_full_scales(described, run)
     assert np.isnan(scales[1])
     assert reasons == ['', 'no unit in the channel table', '']
 
@@ -197,38 +201,34 @@ def test_two_rows_naming_one_channel_must_agree(run):
     assert not run.overload_check(differ).channels[1].has_range
 
 
-def test_a_range_on_the_columns_default_is_read_and_marked(clean):
-    """The Range column holds whole volts with a default of 5: 0.5 V, a
-    blank and a 0 all read back as 5 V. A channel clipped at 2.5 g on a
-    0.5 V input over 200 mV/g is read against 25 g with 20 dB of
-    headroom, so the words say the range is the default and ask for it
-    to be confirmed."""
-    assert DEFAULT_RANGE == 5
+def test_the_range_is_where_the_channel_clips(clean):
+    """The range is `ChannelTable.clip_ranges()` over the sensitivity: a
+    0.5 V input over 200 mV/g reads to 2.5 g, so a channel clipped at
+    2.5 g is read against 2.5 g and is on its rail, not against a range
+    it never had. A 10 V input feeding a sensor whose own output stops at
+    5 V clips at 5 V, 25 g over 200 mV/g; the input alone would say 50."""
     record = history(np.clip(clean, -2.5, 2.5), clean / 4.0)
-    described = table([1, 2], ['0.5', ''], [200.0, 200.0])
-    assert described.ranges().tolist() == [5, 5]
+    described = table([1, 2], [0.5, 10.0], [200.0, 200.0],
+                      sensors=['', 5.0])
+    assert described.clip_ranges().tolist() == [0.5, 5.0]
     found = table_full_scales(described, record)
-    assert found.on_default == [True, True]
-    check = record.overload_check(described)
-    clipped, _quiet = check.channels
-    assert clipped.headroom_db == pytest.approx(20.0, abs=0.01)
-    assert clipped.flagged == [] and clipped.on_default
-    assert clipped.describe('g', G) == (
-        "1Z+: 20.0 dB of headroom, 14.0 dB at +6 dB. Its range is the "
-        "Range column's default of 5 V, which a blank, zero or fractional "
-        "Range also reads as.")
-    assert check.describe() == (
-        "All 2 channels inside their ranges, at +6 dB as well. 2 channels "
-        "(1Z+, 2Z+) read against the Range column's default of 5 V, which a "
-        "blank, zero or fractional Range also reads as: confirm they are "
-        "the input's.")
-    # a range given in SI is not the table's and carries no such mark
-    assert not record.overload_check(25.0 * G).channels[0].on_default
-    one = table([1, 2], [5, 10], [200.0, 400.0])
-    assert record.overload_check(one).describe().endswith(
-        "1 channel (1Z+) read against the Range column's default of 5 V, "
-        "which a blank, zero or fractional Range also reads as: confirm it "
-        "is the input's.")
+    assert found.full_scales == pytest.approx([2.5 * G, 25.0 * G])
+    clipped, quiet = record.overload_check(described).channels
+    assert clipped.headroom_db == pytest.approx(0.0, abs=0.01)
+    assert 'rail' in clipped.flagged
+    assert quiet.full_scale == pytest.approx(25.0 * G)
+
+
+def test_a_row_stating_neither_range_gives_none_and_says_so(clean):
+    record = history(clean / 4.0)
+    check = record.overload_check(table([1], [''], [200.0]))
+    channel = check.channels[0]
+    assert not channel.has_range
+    assert channel.reason == ('no range in the channel table: neither its '
+                              'DAQ Range nor its Sensor Range is stated')
+    assert channel.describe('g', G) == (
+        '1Z+: no range (no range in the channel table: neither its DAQ '
+        'Range nor its Sensor Range is stated).')
 
 
 def test_the_tables_rows_name_the_historys_channels(run, channels):

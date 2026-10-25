@@ -2,8 +2,9 @@
 draw it.
 
 The Overload reading of a time history reads every channel against the
-range its linked channel table gives it, the table's Range in volts over
-its Sensitivity (`core.overload`), and draws the worst channel's trace
+range its linked channel table gives it, the level the channel clips
+at (`ChannelTable.clip_ranges`, in volts) over its Sensitivity
+(`core.overload`), and draws the worst channel's trace
 over its range with the headroom bars beside the kurtosis bars
 (`plot.overload`). This panel says which table the ranges came from, or
 that no linked table describes the record, and holds what the reading
@@ -50,8 +51,8 @@ ROWS = (('channel', 'Channel'), ('range', 'Range'), ('peak', 'Largest peak'),
 
 #: what the panel says when no linked channel table describes the record
 NO_TABLE = ('No channel table linked with this record describes its '
-            'channels. Link one: its Range and Sensitivity columns give '
-            'each channel its range.')
+            'channels. Link one: its DAQ Range, Sensor Range and '
+            'Sensitivity columns give each channel its range.')
 
 
 class OverloadPanel(QWidget):
@@ -222,8 +223,7 @@ class OverloadPanel(QWidget):
             })
         if channel.has_range:
             text.update({
-                'range': (f'{channel.full_scale / scale:.4g}{after}'
-                          + (', the default' if channel.on_default else '')),
+                'range': f'{channel.full_scale / scale:.4g}{after}',
                 'headroom': f'{channel.headroom_db:.2f} dB',
                 'rail': (f'{channel.rail} '
                          f'({percent(channel.rail_share or 0.0)})'),

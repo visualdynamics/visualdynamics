@@ -391,6 +391,91 @@ project.accept_chronology('Report', 'Runs 1 to 4 on X, then ...')
 `report_chronology` takes `window_s`, `drop_db` and `min_s` to read
 with a different window, depth or least duration.
 
+## Findings register
+
+**Findings register** (group Results, needs Skeleton sections) writes
+section 9, Deviations, Anomalies and Nonconformances, from a register
+the author keeps. Each finding has a number of its kind (D-1 for a
+deviation, A-1 for an anomaly, NC-1 for a nonconformance), the run,
+channel and band it concerns, an optional status (open or closed), and
+four parts, in this order:
+
+| Part | What it holds |
+|---|---|
+| Fact | what happened, on which run, channel and band, by how much, and the record that shows it |
+| Cause | what is known about why, or "not determined" |
+| Effect | what it changes about what the test proves |
+| Approval (a deviation) or Disposition (an anomaly or nonconformance) | who approved or disposed of it, when, and under which authority |
+
+Section 9 draws the deviations, then the anomalies, then the
+nonconformances, each finding as its four labeled parts. The Summary
+gets a line listing them by number, such as "Deviations: D-1, D-2.
+Anomalies: A-1 (closed). Nonconformances: NC-1 (open)." A part left
+blank is drawn as NOT YET WRITTEN, and the export check lists it. A
+number is never given twice: a removed finding's number is not reused.
+
+**None.** A kind with nothing entered is owed until the author says
+otherwise; an empty register is not a statement that nothing happened.
+The section's **None** button says it in one step. With nothing
+entered it writes "No deviations. No anomalies. No nonconformances.",
+as it does without the register. With findings entered it says "none"
+only of the kinds with nothing entered ("No anomalies. No
+nonconformances."). Entering a finding of a kind said to be none takes
+that sentence out.
+
+**A fact drafted from a measurement.** The fact is the one part a
+program can read exactly, and the part most often written without its
+band, size or channel. In the editor's pane, choose a finding, enter
+its channel (and its band, to read only that band), choose the
+measured spectrum, the specification and the limits, and press
+**Draft the fact**. The draft names each stretch where the channel
+went outside the limits, by its band, its side, how far beyond at
+worst in dB and how many lines, then the record and the time history
+it came from:
+
+```text
+2Y+ above its abort limit from 617.5 to 660.0 Hz by up to 1.22 dB
+(18 lines); PSD 'Y PSDs', from 'Y run 11'.
+```
+
+It is read on the same cells and at the same scale as the comparison
+figure, so it agrees with the lines the figure marks. A draft fills
+nothing: it is shown beside **Accept** and **Discard**, and until it
+is accepted the fact stays owed, on the page and in the check, marked
+as having a drafted fact waiting. Accepted, it is the author's fact,
+to edit like any other; its run, channel and band fill the finding's
+own only where they are blank. A channel inside its limits gives no
+draft, since that is no fact about a finding, and the cause, effect
+and approval are never drafted.
+
+From a script:
+
+```python
+project.report_features('Report', enable=['skeleton_sections', 'findings'])
+project.report_finding('Report', kind='deviation', channel='2Y+',
+                       band=(600, 680))                       # 'D-1'
+project.draft_finding_fact('Report', 'D-1', 'Y PSDs', 'Specification')
+project.report_finding('Report', 'D-1', accept=True,
+                       cause='The fixture mode near 640 Hz.',
+                       effect='Over-test at 2Y+ in that band.',
+                       approval="The customer's representative, Day 2.")
+project.report_finding('Report', kind='anomaly',
+                       fact='M1 clipped at its 17 g range.')
+project.report_section('Report', 'deviations', none=True)
+# 'No nonconformances.'
+project.report_check('Report')
+# [..., '9. Deviations, Anomalies and Nonconformances: A-1: cause,
+#  effect, disposition not yet written', ...]
+```
+
+`report_finding` refuses, changing nothing, a finding with no kind, a
+kind changed on an existing finding (enter it again under the other
+kind), a band that is not two ordered frequencies, and a status other
+than open or closed. `draft_finding_fact` refuses a channel the two
+objects do not share, a comparison the package refuses (different
+quantities, units on one side only), a band with nothing to judge, an
+all-zero channel, and a channel inside its limits.
+
 ## Calibration in date
 
 **Calibration in date** (group Records) answers the first thing a
@@ -601,7 +686,9 @@ and revision and records the issue in the project: the revision, the
 date of issue as entered, the file, and the SHA-256 of the PDF and of
 the page it was printed from. It is refused while a field the
 identification needs is not entered, or a skeleton section is still
-owed. After issue the number and revision cannot be edited, and an
+owed (with the findings register on, section 9 as the register reads
+it: each kind entered or set to None, and every finding's four parts
+written). After issue the number and revision cannot be edited, and an
 export (HTML or PDF) is refused if anything in the report has changed:
 a block, a word, a field, the marking, or the data under a figure. An
 unchanged export is a copy of the issued report and is written.
@@ -687,7 +774,6 @@ and are grayed out until each is built:
 | Feature | Group | What it will add |
 |---|---|---|
 | Requirement and results | Results | the requirement in words and a met or not met row per criterion; the pass/fail box labeled a screening without one |
-| Findings register | Results | deviations, anomalies and nonconformances in four parts, the fact filled from the measurement |
 | Cross-axis and limit channels | Results | cross-axis against its limit, and where limit channels held the control down |
 | Control-channel uncertainty | Results | each control channel's uncertainty against one third of the tolerance |
 | Flash report | Issue control | a one-page preliminary report from the day's analysis |

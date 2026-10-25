@@ -1359,9 +1359,9 @@ class DataPane(QWidget):
         Reading('amplitude', 'amplitude_panel', 'averaging',
                 flat=True, sticky=True),
         # offered wherever a record is, as the kurtosis bars are, so
-        # long as a linked channel table describes it (Brandon,
-        # 2026-10-23): a shock record is clipped by its range as readily
-        # as a random one, but without a table there is no range
+        # long as a linked channel table describes it: a shock record is
+        # clipped by its range as readily as a random one, but without a
+        # table there is no range
         Reading('overload', 'overload_panel', 'table', flat=True,
                 sticky=True),
         Reading('shocks', 'shock_panel', 'shocks'),

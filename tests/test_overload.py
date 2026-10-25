@@ -556,7 +556,7 @@ def test_the_reading_is_offered_once_a_table_describes_the_record(
         window, pump, run, channels):
     """No button on a time history with no linked table, or with a
     linked table that names none of its channels: there is no range to
-    read against (Brandon, 2026-10-23)."""
+    read against."""
     window.add_object('Run', run)
     window.data_pane.waterfall_action.setChecked(False)
     window.show_object('Run')

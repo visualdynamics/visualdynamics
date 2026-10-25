@@ -1565,8 +1565,8 @@ class Project(dict):
             The table's name and the table, or None when no linked table
             fits.
         """
-        # One lookup where there were two: this, and the shape values'
-        # first-table-in-the-group (Brandon, 2026-10-23).
+        # one lookup for both readers, so the overload check and the
+        # shape values cannot find different tables for one object
         name = self.name_of(name)
         obj = self.get(name)
         if isinstance(obj, TimeHistory):

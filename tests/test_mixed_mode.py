@@ -22,10 +22,12 @@ from visualdynamics.core.mixed_mode import (
     MixedSpecification,
     Narrowband,
     Tone,
+    held_share,
     judge_mixed,
     settling_seconds,
+    tone_mean_square,
 )
-from visualdynamics.core.sine import LOG, SineSweepSpecification
+from visualdynamics.core.sine import LINEAR, LOG, SineSweepSpecification, SineTone
 from visualdynamics.core.sine_tracking import SineTracking
 
 G = 9.80665
@@ -178,7 +180,7 @@ def test_the_lines_left_out_are_those_a_tone_held():
     there; a line 0.5 Hz from either end holds it 2 s, 0.1; a line at
     either end 1.5 s, which is not enough. A sweep across a thousand
     hertz holds no line long enough to leave it out."""
-    from visualdynamics.core.mixed_mode import LEFT_OUT_SHARE, held_share
+    from visualdynamics.core.mixed_mode import LEFT_OUT_SHARE
 
     spec = MixedSpecification(_floor(), [Tone(20.0, G),
                                          Tone(100.0, G, sweep_to=120.0,
@@ -428,8 +430,8 @@ def test_a_swept_tone_is_tracked_along_its_sweep():
 
 
 def test_a_tone_that_starts_late_is_found_where_it_starts():
-    """Brandon's review: a sweep starting 3 s into the record, read
-    from the record's start, reads 0.044 g against 1 g. Found by matched
+    """A sweep starting 3 s into the record, read from the record's
+    start, reads 0.044 g against 1 g. Found by matched
     filter, as the extraction finds it, it reads 1 g. A steady tone that
     starts late is placed somewhere it plays, never before it."""
     tone = Tone(20.0, G, sweep_to=40.0, rate=1.0)
@@ -471,8 +473,8 @@ def test_a_record_whose_clock_does_not_start_at_zero_reads_the_same(composite):
 
 
 def test_a_correctly_controlled_floor_passes_on_short_records():
-    """Brandon's review: every judged line within 3 dB and none outside
-    failed ten 10 s records of ten. An averaged line scatters: read from
+    """A rule of every judged line within 3 dB and none outside fails
+    ten 10 s records of ten. An averaged line scatters: read from
     2 s, after the band settled, a line has about 28.5 degrees of freedom
     and is outside plus or minus 3 dB 1.4 percent of the time, five lines
     of each record's 384. The lines are held to what chance puts
@@ -712,6 +714,12 @@ def test_the_readout_reads_the_sheet_in_the_sine_view(window, pump):
     text = panel.sheet.text()
     assert 'Tones, 3 together' in text and 'Total, the whole drive' in text
     assert panel.preview.isVisible() and panel.preview.items
+    # the status line carries the sheet in one line, in the display unit
+    from visualdynamics.gui.mixed_panel import status_line
+
+    assert window._status_text == status_line(reading, window.unit_system)
+    assert window._status_text.startswith('1Z+: floor ')
+    assert window._status_text.endswith('every part passes')
     assert window.project.journal[-1] == (
         "visualdynamics.plot.plot_mixed_mode(project['Record'], "
         "project['Floor'], project['Sweep'], channel='1Z+', exclusion=2.0, "
@@ -759,6 +767,8 @@ def test_a_refusal_is_shown_in_place_of_the_sheet(window, pump):
     pump()
     assert panel.reading is None
     assert 'holds 1 sample that is not finite' in panel.sheet.text()
+    assert window._status_text.startswith('1Z+: 1Z+ holds 1 sample that is '
+                                          'not finite')
     assert not panel.preview.isVisible()
 
 
@@ -815,6 +825,11 @@ def test_a_swept_band_is_not_judged_when_steady_tones_cannot_time_it():
                for note in reading.notes)
     assert reading.passed is not None, 'the floor and tones are judged'
     assert 'some not judged' in reading.describe('g', 1.0 / G)
+    # and the status line says which part, and why, where it is read
+    from visualdynamics.gui.mixed_panel import status_line
+
+    assert 'some not judged; track: the tones are all steady' in (
+        status_line(reading))
     given = judge_mixed(history, _spec(narrowbands=[narrow]), onset=0.0)
     assert given.narrowbands[0].passed
 
@@ -842,7 +857,7 @@ def test_correctly_controlled_narrowbands_pass_on_white_noise():
     def fixed(t, rng):
         return _noise(285.0, 315.0, np.sqrt(0.02 * 30.0), rng, len(t))
 
-    level, failed = 0.05, []
+    level, failed, inside = 0.05, [], []
     for seed in range(10):
         narrow = Narrowband.plus_minus(300.0, 5.0, 0.02 * G ** 2)
         row, = judge_mixed(_record(extra=fixed, seed=200 + seed,
@@ -857,10 +872,14 @@ def test_correctly_controlled_narrowbands_pass_on_white_noise():
                            _spec(narrowbands=[narrow]),
                            onset=0.0).narrowbands
         failed += [('swept', seed)] * (row.passed is not True)
+        inside.append(row.inside)
     assert failed == []
+    # the share of slices inside is reported, not the rule: 90 percent of
+    # slices inside a 90 percent scatter band would fail some of these
+    assert min(inside) < 0.9
 
 
-# ---- the survivors of tools/mutate.py, each pinned -------------------------
+# ---- each refusal, and the sheet's words, at their edges -------------------
 
 @pytest.mark.parametrize('given', [
     {'width': 0.0}, {'share': 0.0, 'width': None}, {'share': 2.0, 'width': None},
@@ -969,3 +988,338 @@ def test_a_swept_band_reads_the_same_on_a_clock_that_starts_late():
                           onset=0.0).narrowbands
     assert second.slices == first.slices
     assert second.error_db == pytest.approx(first.error_db, abs=1e-9)
+
+
+# ---- the parts at their edges, the slicing by hand, and the identity ------
+
+@pytest.mark.parametrize('given,said', [
+    ({'share': 2.0, 'width': None}, 'as wide as twice its center'),
+    ({'sweep_to': 0.0, 'rate': 1.0}, 'sweeps to another frequency above'),
+    ({'sweep_to': 50.0, 'rate': 1.0}, 'sweeps to another frequency above'),
+    ({'sweep_to': 1.0, 'rate': 1.0}, 'reaches below zero frequency'),
+])
+def test_a_band_that_cannot_be_run_says_why(given, said):
+    """Each refusal names its own cause: a band swept to its own center,
+    or to a frequency its lower edge would put below zero, is not the
+    same mistake as a band too wide for its center."""
+    fields = {'center': 50.0, 'level': 1.0, 'width': 4.0, **given}
+    with pytest.raises(ValueError, match=said):
+        Narrowband(**fields)
+    with pytest.raises(ValueError, match='upper edge is above'):
+        Narrowband.between(10.0, 10.0, 1.0)
+
+
+def _two_dwells(levels=(1.0, 1.0), hop=None):
+    """A tone that dwells 10 s at 20 Hz, then (a hair of a hertz, or a
+    1 s sweep to `hop` Hz, later) 30 s, at `levels` (g) in turn."""
+    a, b = levels
+    second = 20.000021 if hop is None else hop
+    rate = 1e-3 if hop is None else (hop - 20.00002)
+    return SineTone('two dwells', 0.0,
+                    [20.0, 20.00002, second, second * (1 + 1e-6)],
+                    np.array([[a], [a], [b], [b]]) * G,
+                    [LINEAR] * 3,
+                    [2e-6, rate, second * 1e-6 / 30.0])
+
+
+def test_a_tone_held_as_several_dwells_reads_back_fixed():
+    """Two dwells in a row, each within a hair of 20 Hz, stand at one
+    frequency: the row is fixed, as the sheet reads it."""
+    tone = _two_dwells()
+    assert len(tone.dwell_segments()) == 3
+    row = Tone.of(tone)
+    assert row.fixed and row.frequency == 20.0
+
+
+def test_a_swept_tone_reads_back_its_mode_and_rate():
+    up = Tone(20.0, G, sweep_to=80.0, rate=2.0, mode=LOG)
+    assert Tone.of(up.sine_tone()) == Tone(20.0, G, sweep_to=80.0, rate=2.0,
+                                           mode=LOG, name='20-80 Hz')
+    two = SineTone('up and on', 0.0, [20.0, 40.0, 60.0],
+                   np.full((3, 1), G), [LOG, LOG], [1.0, 1.0])
+    row = Tone.of(two)
+    assert row.rate is None and row.mode == LINEAR and row.sweep_to == 60.0
+
+
+def test_a_tone_s_mean_square_is_its_level_squared_over_two_in_time():
+    """A²/2 for a held tone; a tone at 1 g for 10 s then 2 g for 30 s
+    holds (1 x 10 + 4 x 30)/40/2 = 1.625 g²; a sweep from 1 g at 20 Hz
+    to 2 g at 40 Hz, its level rising linearly in time, holds the mean of
+    (1 + u)² over u from 0 to 1, halved: 7/6 g²."""
+    assert tone_mean_square(Tone(20.0, G).sine_tone(10.0)) == pytest.approx(
+        0.5 * G ** 2)
+    assert tone_mean_square(_two_dwells((1.0, 2.0))) / G ** 2 == \
+        pytest.approx(1.625, rel=1e-3)
+    rising = SineTone('rising', 0.0, [20.0, 40.0], [[G], [2 * G]], [LINEAR],
+                      [1.0])
+    assert tone_mean_square(rising) / G ** 2 == pytest.approx(7.0 / 6.0,
+                                                              rel=1e-3)
+
+
+def test_a_tone_that_hops_between_dwells_holds_only_their_lines():
+    """10 s at 20 Hz, a 1 s sweep to 30 Hz and 30 s there: the lines
+    beside each dwell are held, the ones the hop crosses are not."""
+    tone = _two_dwells(hop=30.0)
+    share = held_share(tone, [20.0, 25.0, 30.0], 1.5)
+    assert share[0] == pytest.approx(10.15 / 41.0, abs=0.01)
+    assert share[1] < 0.01
+    assert share[2] == pytest.approx(30.15 / 41.0, abs=0.01)
+
+
+def test_either_setting_alone_goes_on_a_copy():
+    floor = _floor()
+    band = Narrowband.between(380.0, 390.0, 1.0)
+    banded = MixedSpecification(floor, None, [band])
+    widened = MixedSpecification(floor, None, None, 3.0)
+    assert banded.narrowbands == (band,) and widened.exclusion == 3.0
+    assert floor.narrowbands == () and floor.tone_exclusion is None
+
+
+def test_the_tone_table_and_the_description_read_the_parts():
+    spec = _spec(narrowbands=[Narrowband.between(380.0, 390.0, 1.0)],
+                 exclusion=2.5)
+    assert spec.tone_table() == [Tone(f, a * G, name=f'{f:g} Hz')
+                                 for f, a in TONES]
+    assert repr(spec) == ("<MixedSpecification: floor at ['1Z+'], 3 tones, "
+                          "1 narrowbands, 2.5 Hz left out>")
+    assert repr(MixedSpecification(_floor())).startswith(
+        "<MixedSpecification: floor at ['1Z+'], 0 tones")
+
+
+def test_the_reference_holds_a_fixed_band_on_the_lines_it_is_judged_on():
+    """The reference is the floor with a fixed band's level on every
+    line between its edges, the edges included as the band's own lines
+    are; a swept band has no place on it."""
+    floor = 1.0 / 395.0 * G ** 2
+    fixed = Narrowband.between(285.0, 315.0, 2.0 * floor)
+    swept = Narrowband(150.0, 5.0 * floor, width=16.0, sweep_to=250.0,
+                       rate=10.0)
+    spec = MixedSpecification(_floor(), None, [fixed, swept])
+    f = np.arange(100.0, 400.0)
+    reference = spec.reference(f)
+    inside = (f >= 285.0) & (f <= 315.0)
+    assert inside.sum() == 31
+    assert reference[inside] == pytest.approx(3.0 * floor)
+    assert reference[~inside] == pytest.approx(floor)
+
+
+def test_a_given_averaging_is_the_one_read():
+    """Frames of 2048 samples give 0.5 Hz lines; a fixed band's rms
+    above the floor is its lines' excess times that spacing."""
+    from visualdynamics.core.averaging import Averaging
+
+    def band(t, rng):
+        return _noise(285.0, 315.0, np.sqrt(0.02 * 30.0), rng, len(t))
+
+    narrow = Narrowband.plus_minus(300.0, 5.0, 0.02 * G ** 2)
+    reading = judge_mixed(_record(extra=band), _spec(narrowbands=[narrow]),
+                          onset=0.0,
+                          averaging=Averaging(frame_length=2048, overlap=0.5))
+    assert reading.floor.spacing == 0.5
+    assert reading.averaging.frame_length == 2048
+    row, = reading.narrowbands
+    assert row.measured / G == pytest.approx(np.sqrt(0.6), rel=0.05)
+    assert row.slices == 1
+
+
+def test_a_record_one_frame_long_is_read_and_a_shorter_one_refused():
+    one = judge_mixed(_record(tones=(), seconds=1.0),
+                      MixedSpecification(_floor()))
+    assert one.averaging.frames == 1
+    with pytest.raises(ValueError, match='does not fit'):
+        judge_mixed(_record(tones=(), seconds=1.0 - 1.0 / FS),
+                    MixedSpecification(_floor()))
+
+
+def test_a_tone_that_turns_on_later_than_the_environment_is_read_from_then():
+    """A tone's `start_time` puts it that long after the onset: a tone
+    on from 4 s reads its level when timed from there."""
+    tone = Tone(19.44, G).sine_tone(SECONDS - 4.0, start_time=4.0)
+    tones = SineSweepSpecification([tone], [CHANNEL],
+                                   ordinate_unit='m/s**2')
+
+    def late(t, _rng):
+        return np.where(t >= 4.0, np.sin(2.0 * np.pi * 19.44 * t), 0.0)
+
+    reading = judge_mixed(_record(tones=(), extra=late),
+                          MixedSpecification(_floor(), tones), onset=0.0)
+    assert reading.tones[0].measured / G == pytest.approx(1.0, rel=0.02)
+
+
+def test_a_fixed_band_with_no_line_over_the_floor_is_not_judged():
+    narrow = Narrowband.between(450.0, 460.0, 0.02 * G ** 2, name='high')
+    reading = judge_mixed(_record(), _spec(narrowbands=[narrow]), onset=0.0)
+    row, = reading.narrowbands
+    assert row.passed is None and row.slices == 0
+    assert any(note.startswith('high: no line of the spectrum lies')
+               for note in reading.notes)
+
+
+def test_a_swept_band_s_slices_are_counted_by_hand():
+    """A 16 Hz band at 10 Hz/s crosses its width in 1.6 s, so a slice is
+    0.8 s, 819 samples, read in frames of 512 (2 Hz lines, a quarter of
+    the narrowest width's eight lines), two to a slice. From 2 s to 20 s
+    that is 22 slices; a record 22 slices long to the sample reads all
+    22; and a band four times as fast is read in 0.2 s slices at 8 Hz
+    lines, 90 of them, with a note that it may read low."""
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.chance import _sum_dof
+
+    level = 0.05
+    narrow = Narrowband(150.0, level * G ** 2, width=16.0, sweep_to=250.0,
+                        rate=10.0, name='track')
+    extra = _swept(level, 16.0, 150.0, 250.0, 10.0)
+    reading = judge_mixed(_record(extra=extra), _spec(narrowbands=[narrow]),
+                          onset=0.0)
+    row, = reading.narrowbands
+    assert row.slices == 22
+    frames = Averaging(frame_length=512, overlap=0.5, window='hann',
+                       frames=2)
+    each = frames.statistical_dof().equivalent
+    # the lines within a quarter of the width of the center at 2 Hz: 4 or 5
+    assert any(row.slice_dof == pytest.approx(
+        _sum_dof(np.ones(k), each, frames.line_correlation()))
+        for k in (4, 5))
+    exact = (2048 + 22 * 819) / FS
+    fitted, = judge_mixed(_record(extra=extra, seconds=exact),
+                          _spec(narrowbands=[narrow]), onset=0.0).narrowbands
+    assert fitted.slices == 22
+    fast = Narrowband(150.0, level * G ** 2, width=16.0, sweep_to=250.0,
+                      rate=40.0, name='fast')
+    quick = judge_mixed(_record(extra=_swept(level, 16.0, 150.0, 250.0,
+                                             40.0)),
+                        _spec(narrowbands=[fast]), onset=0.0)
+    assert quick.narrowbands[0].slices == 90
+    assert any(note.startswith('fast: the band moves half its width in '
+                               '0.2 s') and '8 Hz lines' in note
+               for note in quick.notes)
+
+
+def test_a_swept_band_is_timed_from_the_onset():
+    """The band, and the environment with it, starts 3 s in: timed from
+    the onset given it reads its level; timed from the record's start it
+    would be read where it is not."""
+    level = 0.05
+    narrow = Narrowband(150.0, level * G ** 2, width=16.0, sweep_to=250.0,
+                        rate=10.0)
+    sweep = _swept(level, 16.0, 150.0, 250.0, 10.0)
+
+    def late(t, rng):
+        return np.where(t >= 3.0, sweep(np.maximum(t - 3.0, 0.0), rng), 0.0)
+
+    history = _record(tones=(), extra=late)
+    spec = MixedSpecification(_floor(), None, [narrow])
+    timed, = judge_mixed(history, spec, onset=3.0).narrowbands
+    assert abs(timed.error_db) < 1.0 and timed.passed
+    wrong, = judge_mixed(history, spec, onset=0.0).narrowbands
+    assert wrong.error_db < -2.0
+
+
+def test_tones_written_in_another_quantity_are_refused():
+    sweep = SineSweepSpecification([Tone(19.44, 1.0).sine_tone(SECONDS)],
+                                   [CHANNEL], ordinate_dim='velocity',
+                                   ordinate_unit='m/s')
+    with pytest.raises(ValueError, match='the tones'):
+        judge_mixed(_record(), MixedSpecification(_floor(), sweep),
+                    onset=0.0)
+
+
+def test_the_total_record_is_the_samples_the_frames_cover():
+    """A burst in the last 300 samples, after the last whole frame, is
+    in neither the composite's spectrum nor the record's rms."""
+    def burst(t, _rng):
+        return np.where(t >= 20.0, 50.0, 0.0)
+
+    history = _record(tones=(), extra=burst, seconds=20.0 + 300.0 / FS)
+    reading = judge_mixed(history, MixedSpecification(_floor()))
+    used = reading.averaging
+    first = used.start_sample(FS)
+    last = first + used.hop * (used.frames - 1) + used.frame_length
+    assert last == 20 * 1024
+    x = np.asarray(history.ordinate[0])
+    assert reading.total.record == pytest.approx(
+        np.sqrt(np.mean(x[first:last] ** 2)), rel=1e-12)
+    assert reading.total.measured == pytest.approx(reading.total.record,
+                                                   rel=0.005)
+
+
+def test_a_floor_band_3_8_db_under_is_outside():
+    """The lower bound is the reference 3 dB down, read at the
+    comparison's own scale: lines 3.8 dB under fall outside, most of
+    them, at about 76 degrees of freedom a line."""
+    rng = np.random.default_rng(41)
+    n = int(SECONDS * FS)
+    spectrum = np.fft.rfft(rng.standard_normal(n))
+    f = np.fft.rfftfreq(n, 1.0 / FS)
+    spectrum[(f < 3.0) | (f > 480.0)] = 0.0
+    x = np.fft.irfft(spectrum, n)
+    x = x * np.sqrt(477.0 / 395.0) / np.sqrt(np.mean(x ** 2))
+    spectrum = np.fft.rfft(x)
+    spectrum[(f >= 200.0) & (f <= 240.0)] *= 10.0 ** (-3.8 / 20.0)
+    x = np.fft.irfft(spectrum, n)
+    history = TimeHistory(np.arange(n) / FS, x[None] * G,
+                          response_dof=[CHANNEL],
+                          ordinate_dim=['acceleration'], ordinate_unit=['g'])
+    reading = judge_mixed(history, MixedSpecification(_floor()))
+    assert reading.floor.outside >= 26
+    assert not reading.floor.passed
+
+
+def test_a_constant_channel_is_refused_by_its_cause():
+    x = np.full(int(SECONDS * FS), 0.5 * G)
+    history = TimeHistory(np.arange(len(x)) / FS, x[None],
+                          response_dof=[CHANNEL],
+                          ordinate_dim=['acceleration'], ordinate_unit=['g'])
+    with pytest.raises(ValueError, match='one value throughout: a constant'):
+        judge_mixed(history, _spec(), onset=0.0)
+
+
+def test_a_record_with_two_quantities_at_the_channel_reads_the_floor_s():
+    """A force and an acceleration at 1Z+: the acceleration is the
+    channel the floor is the density of, wherever it sits; two
+    acceleration records at 1Z+ are refused, since the sheet reads one."""
+    history = _record()
+    x = np.asarray(history.ordinate[0])
+    both = TimeHistory(history.abscissa, np.vstack([x * 3.0, x]),
+                       response_dof=[CHANNEL, CHANNEL],
+                       ordinate_dim=['force', 'acceleration'],
+                       ordinate_unit=['N', 'g'])
+    alone = judge_mixed(history, _spec(), onset=0.0)
+    read = judge_mixed(both, _spec(), onset=0.0)
+    assert read.dimension == 'acceleration'
+    assert read.tones_measured == pytest.approx(alone.tones_measured)
+    assert read.floor.measured == pytest.approx(alone.floor.measured)
+    twice = TimeHistory(history.abscissa, np.vstack([x, x]),
+                        response_dof=[CHANNEL, CHANNEL],
+                        ordinate_dim=['acceleration'] * 2,
+                        ordinate_unit=['g', 'g'])
+    with pytest.raises(ValueError, match='holds 2 records of the 1Z\\+'):
+        judge_mixed(twice, _spec(), onset=0.0)
+
+
+def test_a_part_not_judged_shows_no_count_and_no_number(composite):
+    """A floor with no line left gives no count of lines outside (none
+    outside would read as a pass), a tone with no reading and a band
+    with no slice give a dash, not 'nan' or '0 dof'."""
+    from dataclasses import replace
+
+    from visualdynamics.core.mixed_mode import _not_judged
+    from visualdynamics.plot.mixed_mode import sheet_rows
+
+    reading = composite[2]
+    band = Narrowband.between(450.0, 460.0, 1.0, name='high')
+    empty = replace(reading,
+                    floor=replace(reading.floor, judged=0, outside=0,
+                                  measured=0.0, reference=0.0),
+                    tones=(replace(reading.tones[0], readings=0,
+                                   measured=float('nan')),),
+                    narrowbands=(_not_judged(band, 3.0),),
+                    tones_measured=float('nan'))
+    rows = sheet_rows(empty)
+    floor, together, tone, high, _total = rows
+    assert 'outside' not in floor[5] and 'no line left to judge' in floor[5]
+    assert floor[2:5] == ('—', '—', '—') and floor[-1] == 'not judged'
+    assert tone[3] == '—' and tone[-1] == 'not judged'
+    assert together[3] == '—'
+    assert 'dof' not in high[5] and high[3] == '—' and high[-1] == 'not judged'
+    assert not any('nan' in cell for row in rows for cell in row)

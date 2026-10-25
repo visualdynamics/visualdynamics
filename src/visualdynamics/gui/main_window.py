@@ -982,6 +982,7 @@ class MainWindow(QMainWindow):
         # record takes seconds
         self.data_pane.sine_panel.mixed.read.connect(self._journal_mixed)
         self.data_pane.sine_panel.mixed.runner = self._run_long
+        self.data_pane.sine_panel.mixed.said.connect(self._show_status)
         self.data_pane.truncate_toggled.connect(
             lambda _wanted: self.render_current())
         self.data_pane.truncate_panel.changed.connect(

@@ -50,7 +50,9 @@ The tone table is entered as `Tone` rows. A fixed tone is a row with a
 frequency and an amplitude; a swept tone adds `sweep_to`, a `rate` and
 a `mode` (`LINEAR` in Hz/s, `LOG` in octaves a minute). A fixed tone
 is written into the sine specification as the dwell a controller's
-file holds (`SineTone.dwell`).
+file holds (`SineTone.dwell`). A tone's written mean square is its
+level squared over two, averaged over its run, so a tone held at two
+levels in turn counts each for the time it is held.
 `spec.tone_table()` reads any sine specification back as rows, fixed
 where every segment holds one frequency.
 
@@ -110,7 +112,8 @@ part by part:
    line held a tone when the tone spent a tenth of its run or more
    within the left-out width of it: every line beside a fixed tone, and
    few or none of the lines a long sweep passes, since it is near each
-   only briefly and what the band took with it is a small share of that
+   only briefly (a tone that dwells at two frequencies in turn holds
+   the lines beside each, not the ones its hop between them crosses) and what the band took with it is a small share of that
    line's power. The floor is judged as a comparison is
    (`compliance.judge`): its rms against the reference's over the same
    lines (plus or minus 10 percent), and its lines against the
@@ -195,9 +198,11 @@ sits under the extraction's settings: the channel, the width left out
 either side of a tone, the tracking band and the tones' tolerance.
 Reading a long record takes seconds, so the first reading waits for
 **Read Data Sheet**, and runs with the progress bar up; once the sheet
-is up, an edit reads again at once. A refusal (a dead channel, a sample
+is up, an edit reads again at once. A refusal (a dead or constant channel, a sample
 that is not finite, a record of another quantity) is shown in place of
-the sheet.
+the sheet and on the status line. The status line also carries the
+sheet in one line once it is read, with its notes, so a part not judged
+or a band that may read low says so there as well as on the sheet.
 The sheet shows the same rows as the plot, the settings under them,
 and a small spectrum of the residual over the reference with the
 left-out lines hatched. The narrowbands are the floor's own
@@ -220,11 +225,18 @@ left-out lines hatched. The narrowbands are the floor's own
   `onset` when the tones' start is known. A swept narrowband needs it:
   where the band is at a moment is counted from the start, so with
   steady tones and no `onset` it is not judged, and a note says why.
-- A channel holding a sample that is not finite, or zero throughout, is
-  refused, naming the cause: one such sample spreads over every line of
-  its frame's spectrum. A part with nothing left to judge reads "not
-  judged", never "passes", and a sheet that judged nothing has not
-  passed.
+- A channel holding a sample that is not finite, zero throughout or
+  one value throughout is refused, naming the cause: one sample that is
+  not finite spreads over every line of its frame's spectrum, and a dead
+  or constant channel has no floor or tones to judge. A part with
+  nothing left to judge reads "not judged", never "passes", and shows no
+  count of lines outside and no degrees of freedom; a sheet that judged
+  nothing has not passed.
+- The channel is read by its full identity. Where a record holds two
+  quantities at the control DOF (a force and an acceleration at `1Z+`),
+  the one read is the quantity the floor is the density of; two records
+  of that one quantity at the DOF are refused, since the sheet reads
+  one.
 - A record of another quantity than the floor or the tones (velocity
   against an acceleration floor) is refused, by the rule every
   comparison uses.

@@ -90,7 +90,13 @@ its degrees of freedom and the chi-square scatter of an estimate are
 worth about 2BT degrees of freedom is the band-limited estimate's
 normalized random error.
 
-1. Welch, P. D. (1967). "The Use of Fast Fourier Transform for the
+1. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
+   Measurement Procedures*, 4th ed. Wiley. The autospectrum's
+   normalized random error, 1/sqrt(B T) for a band B wide averaged over
+   T, and the chi-square distribution of an averaged autospectrum, by
+   which a line's scatter and its chance of lying outside the line
+   tolerance are read.
+2. Welch, P. D. (1967). "The Use of Fast Fourier Transform for the
    Estimation of Power Spectra." *IEEE Transactions on Audio and
    Electroacoustics*, 15(2), 70-73.
    [doi:10.1109/TAU.1967.1161901](https://doi.org/10.1109/TAU.1967.1161901)
@@ -499,10 +505,12 @@ class Tone:
         """The tone-table row of a sine specification's tone, on control
         channel `column`.
 
-        A tone every segment of which is a dwell (`SineTone.is_dwell`)
-        at one frequency is fixed; any other is swept from its first
-        breakpoint to its last, with its one segment's rate and mode, or
-        no rate when it has several segments.
+        A tone that stands at one frequency for its whole run, every
+        frequency it passes within `DWELL_SPAN` of its highest (a dwell,
+        `SineTone.is_dwell`, or several in a row), is fixed: the rule the
+        data sheet reads a row by (`ToneRow.fixed`). Any other is swept
+        from its first breakpoint to its last, with its one segment's
+        rate and mode, or no rate when it has several segments.
 
         Parameters
         ----------
@@ -518,10 +526,7 @@ class Tone:
         """
         amplitude = float(np.max(tone.amplitude[:, column]))
         segments = len(tone.segment_rate)
-        held = (len(tone.dwell_segments()) == segments
-                and np.ptp(tone.frequency) <= DWELL_SPAN
-                * float(np.max(tone.frequency)) * max(segments, 1))
-        if held:
+        if _steady(tone):
             return cls(float(tone.frequency[0]), amplitude, name=tone.name)
         rate = mode = None
         if segments == 1:
@@ -557,10 +562,13 @@ def held_share(tone: SineTone, frequencies: Any, width: float) -> np.ndarray:
         A share from 0 to 1 for each frequency.
     """
     f = np.asarray(frequencies, dtype=np.float64)
-    seconds = tone.duration()
-    if seconds <= 0.0 or len(tone.dwell_segments()) == len(tone.segment_rate):
+    if _steady(tone):
+        # a tone that stands at one frequency holds every line near it
+        # for its whole run; one that dwells at several in turn holds
+        # each only for its own dwell, which the path below weighs
         low, high = tone_span(tone)
         return ((f >= low - width) & (f <= high + width)).astype(float)
+    seconds = tone.duration()
     t, path = tone.trajectory(seconds / 4000.0)
     # each point of the path weighed by the time it stands for, since a
     # segment's steps are whole and may differ from the next segment's
@@ -574,15 +582,17 @@ def held_share(tone: SineTone, frequencies: Any, width: float) -> np.ndarray:
 
 
 def tone_mean_square(tone: SineTone, column: int = 0) -> float:
-    """A tone's mean square as written: A²/2 for a fixed tone, the time
-    average of its amplitude squared over two along a sweep."""
-    seconds = tone.duration()
-    if seconds <= 0.0 or len(tone.dwell_segments()) == len(tone.segment_rate):
-        amplitude = float(np.max(tone.amplitude[:, column]))
-        return 0.5 * amplitude ** 2
-    _t, f = tone.trajectory(seconds / 400.0)
-    level = tone.target(f)[:, column]
-    return 0.5 * float(np.nanmean(level ** 2))
+    """A tone's mean square as written: A²/2 for a tone held at one
+    level, and the time average of its amplitude squared over two for
+    one whose level changes along its run, swept or held."""
+    t, f = tone.trajectory(tone.duration() / 400.0)
+    level = np.asarray(tone.target(f)[:, column], dtype=np.float64)
+    # each point weighed by the time it stands for, since a segment's
+    # steps are whole and may differ from the next segment's
+    weight = np.gradient(np.asarray(t, dtype=np.float64))
+    good = np.isfinite(level)
+    return 0.5 * float(np.sum(weight[good] * level[good] ** 2)
+                       / np.sum(weight[good]))
 
 
 # ---- the specification -----------------------------------------------------
@@ -811,8 +821,8 @@ class FloorRow:
     exclusion: float
     spacing: float
     dof: float
-    expected: float = 0.0
-    allowed: int = 0
+    expected: float
+    allowed: int
 
     @property
     def error(self) -> float:
@@ -1035,20 +1045,52 @@ def settling_seconds(band: Any, tones: Sequence[SineTone] = ()) -> float:
     return 0.0
 
 
-def _channel_history(history: Any, channel: str, values: np.ndarray | None
+def _channel_history(history: Any, row: int, values: np.ndarray | None
                      = None) -> Any:
-    """One channel of `history` as a record of its own, with other
+    """Record `row` of `history` as a record of its own, with other
     `values` in its place when given."""
     from .data import TimeHistory
 
-    dofs = [str(d) for d in history.response_dof]
-    row = dofs.index(channel)
     y = np.real(np.asarray(history.ordinate[row], dtype=np.float64)) \
         if values is None else values
     return TimeHistory(np.asarray(history.abscissa, dtype=np.float64),
-                       y[None], response_dof=[channel],
+                       y[None], response_dof=[history.response_dof[row]],
                        ordinate_dim=[history.ordinate_dim[row]],
-                       ordinate_unit=[history.ordinate_unit[row]])
+                       ordinate_unit=[history.ordinate_unit[row]],
+                       dimension_hint=[history.dimension_hint[row]])
+
+
+def _record_row(history: Any, spec: MixedSpecification, channel: str) -> int:
+    """The record of `history` the floor at `channel` is read from.
+
+    One record at that DOF is it, whatever it measures (a record of
+    another quantity is refused by the units check after). Where the DOF
+    holds several, the record is the channel, by its full identity
+    (`TimeHistory.channel_key`, matched as `rms_check` matches a
+    spectrum to its records), measuring the quantity whose density the
+    floor is; ValueError naming why when no record is that channel, or
+    when several captures of it are, since the sheet reads one.
+    """
+    from .rms_check import _channel
+
+    rows = [i for i, dof in enumerate(history.response_dof)
+            if str(dof) == channel]
+    if not rows:
+        raise ValueError(f'the record holds no channel {channel}; it holds '
+                         f'{[str(d) for d in history.response_dof]}')
+    if len(rows) == 1:
+        return rows[0]
+    record = spec.record(channel)
+    hints = getattr(spec.floor, 'dimension_hint', None)
+    hint = hints[record] if hints else None
+    _key, found = _channel(history, channel,
+                           str(spec.floor.ordinate_dim[record]), hint)
+    if len(found) > 1:
+        raise ValueError(f'the record holds {len(found)} records of the '
+                         f'{channel} channel measuring what the floor is '
+                         'the density of; the data sheet reads one, so '
+                         'give a record that holds one')
+    return found[0]
 
 
 def _averaging_from(history: Any, averaging: Any, start: float,
@@ -1110,8 +1152,9 @@ def _judge_floor(spec, channel, residual_psd, lines_kept, floor_db):
     if not len(middles):
         empty = np.zeros(0, dtype=bool)
         return 0.0, 0.0, empty, empty
-    line = np.clip(np.searchsorted(left, middles, side='right') - 1, 0,
-                   len(lines_kept) - 1)
+    # each cell lies on the spectrum's lines, so its middle is within
+    # a line's bin and names that line
+    line = np.searchsorted(left, middles, side='right') - 1
     judged = target['judged'] & lines_kept[line]
     out = judged & (upper['out'] | lower['out'])
     return (float(np.sum(target['held'][judged])),
@@ -1182,6 +1225,15 @@ def _lines_dof(averaging: Any, dof_line: float, k: int) -> float:
                         averaging.line_correlation()), float(dof_line))
 
 
+def _not_judged(band: Narrowband, tolerance: float) -> BandRow:
+    """A narrowband's row when nothing of it was read: no level, no
+    degrees of freedom and no slice, so `BandRow.passed` is None."""
+    low, high = band.edges()
+    return BandRow(band.label, low, high, band.swept, band.span(), band.rms,
+                   float('nan'), float('nan'), -tolerance, tolerance,
+                   0.0, 0, 0.0, 0.0)
+
+
 def _fixed_band(band, f, residual, floor, dof_line, averaging, db,
                 confidence, notes):
     """A fixed narrowband's row, read off the residual's lines between
@@ -1194,9 +1246,7 @@ def _fixed_band(band, f, residual, floor, dof_line, averaging, db,
     if not k:
         notes.append(f'{band.label}: no line of the spectrum lies between '
                      'its edges over the floor; it is not judged')
-        return BandRow(band.label, low, high, False, band.span(), band.rms,
-                       float('nan'), float('nan'), -tolerance, tolerance,
-                       0.0, 0, 0.0, 0.0)
+        return _not_judged(band, tolerance)
     got = float(np.mean(residual[lines]))
     wanted = float(np.mean(floor[lines])) + band.level
     above = float(np.sum(residual[lines] - floor[lines])) * spacing
@@ -1216,22 +1266,21 @@ def _swept_band(band, residual_history, spec, channel, rate, onset, start,
     is not known either, and the band is not judged."""
     from .averaging import Averaging
 
+    tolerance = band.tolerance_db if band.tolerance_db is not None else db
     if not timed:
-        low, high = band.edges()
-        tolerance = band.tolerance_db if band.tolerance_db is not None else db
         notes.append(f'{band.label}: the tones are all steady, so the record '
                      'does not show where the environment starts, and a '
                      'swept band read from where they were found playing '
                      'would be read where it is not; give the onset to '
                      'judge it')
-        return BandRow(band.label, low, high, True, band.span(), band.rms,
-                       float('nan'), float('nan'), -tolerance, tolerance,
-                       0.0, 0, 0.0, 0.0)
+        return _not_judged(band, tolerance)
     c_low, c_high = sorted((band.center, float(band.sweep_to)))
-    centers = np.geomspace(c_low, c_high, 32)
-    slice_seconds = 0.5 * min(band.crossing_seconds(c) for c in centers)
-    widths = [band.width_at(c) for c in centers]
-    narrowest = min(widths)
+    # the time to cross its own width, and the width, each move one way
+    # with the center for every way a band is written (constant, or
+    # growing or shrinking with it), so their least is at an end
+    ends = (c_low, c_high)
+    slice_seconds = 0.5 * min(band.crossing_seconds(c) for c in ends)
+    narrowest = min(band.width_at(c) for c in ends)
     t = np.asarray(residual_history.abscissa, dtype=np.float64)
     samples = len(t)
     slice_samples = int(slice_seconds * rate)
@@ -1243,8 +1292,7 @@ def _swept_band(band, residual_history, spec, channel, rate, onset, start,
                      f'{slice_seconds:.3g} s, shorter than a frame fine '
                      'enough to resolve it; each slice is read at '
                      f'{rate / frame:.3g} Hz lines and may read low')
-    hop = max(frame // 2, 1)
-    tolerance = band.tolerance_db if band.tolerance_db is not None else db
+    hop = frame // 2
     begin = int(np.ceil(start * rate))
     errors, dofs, inside, levels = [], [], [], []
     got_all, wanted_all = [], []
@@ -1277,13 +1325,11 @@ def _swept_band(band, residual_history, spec, channel, rate, onset, start,
         inside.append(low_db <= error <= high_db)
         levels.append(max(got - float(np.mean(floor[lines])), 0.0)
                       * band.width_at(center))
-    low, high = band.edges()
     if not errors:
         notes.append(f'{band.label}: the record holds no slice of the sweep '
                      'with a line under the band; it is not judged')
-        return BandRow(band.label, low, high, True, band.span(), band.rms,
-                       float('nan'), float('nan'), -tolerance, tolerance,
-                       0.0, 0, 0.0, 0.0)
+        return _not_judged(band, tolerance)
+    low, high = band.edges()
     # the band's level over the whole sweep: the slices pooled, each by
     # the degrees of freedom it carries, which is the estimate the band
     # is judged by; a swept band gathers few of them a slice
@@ -1356,9 +1402,12 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
     Raises
     ------
     ValueError
-        For a channel the record or the floor does not hold, a record
-        of another quantity than the floor or the tones, a record not
-        evenly sampled, or a span too short for one frame.
+        For a channel the record or the floor does not hold, or that
+        the record holds twice in the floor's quantity; a record of
+        another quantity than the floor or the tones; a channel holding
+        a sample that is not finite, zero throughout or one value
+        throughout; a record not evenly sampled; or a span too short
+        for one frame.
     """
     from scipy.stats import binom
 
@@ -1370,16 +1419,15 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
     spec = mixed(specification, tones)
     channel = spec.channels[0] if channel is None else str(channel)
     spec.record(channel)
-    dofs = [str(d) for d in history.response_dof]
-    if channel not in dofs:
-        raise ValueError(f'the record holds no channel {channel}; it holds '
-                         f'{dofs}')
+    row = _record_row(history, spec, channel)
     if band is None:
         band = SineTracking(fixed=TRACKING_BAND)
     t = np.asarray(history.abscissa, dtype=np.float64)
     rate = float(history.sample_rate)
-    row = dofs.index(channel)
     x = np.real(np.asarray(history.ordinate[row], dtype=np.float64))
+    # every reading after this is of the one record, so another record at
+    # the same DOF (a force beside an acceleration) is never tracked
+    one = _channel_history(history, row)
     notes: list[str] = []
     column = spec.column(channel)
     tone_list = [] if column is None else list(spec.tones.tones)
@@ -1413,6 +1461,9 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
     if not np.any(x):
         raise ValueError(f'{channel} is zero throughout: a dead channel '
                          'has no floor or tones to judge')
+    if np.ptp(x) == 0.0:
+        raise ValueError(f'{channel} holds one value throughout: a constant '
+                         'channel has no floor or tones to judge')
     found = onset is None
     if onset is None:
         onset = (find_environment([x], 1.0 / rate, tone_list) if tone_list
@@ -1431,13 +1482,12 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
     residual = x.copy()
     tone_rows = []
     for tone in tone_list:
-        tone_row, wave = _judge_tone(history, spec.tones, tone, column, band,
+        tone_row, wave = _judge_tone(one, spec.tones, tone, column, band,
                                      onset, start, tone_tolerance, channel)
         tone_rows.append(tone_row)
         first = round((wave.time[0] - t[0]) * rate)
         residual[first:first + len(wave.passed)] -= wave.passed
-    one = _channel_history(history, channel)
-    left = _channel_history(history, channel, residual)
+    left = _channel_history(history, row, residual)
     used = _averaging_from(history, averaging, start, rate, len(t))
     composite_psd = one.compute_psds(used)
     residual_psd = left.compute_psds(used)
@@ -1460,7 +1510,7 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
     # what chance puts outside the line tolerance at each line's degrees
     # of freedom, and the most that may be outside before the lines fail
     chance = _outside_by_chance(dof_line, floor_db)
-    allowed = int(binom.ppf(FLOOR_CHANCE, count, chance)) if count else 0
+    allowed = int(binom.ppf(FLOOR_CHANCE, count, chance))
     share = float(np.mean((tone_lines | band_held)[written]))
     floor_row = FloorRow(
         reference=float(np.sqrt(asked_power)), measured=float(np.sqrt(power)),

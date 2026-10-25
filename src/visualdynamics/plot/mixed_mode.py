@@ -58,6 +58,14 @@ def _signed(value: float, unit: str, places: int = 1) -> str:
     return f'{value:+.{places}f} {unit}'.replace('-', '−')
 
 
+def _level(value: float, scale: float, unit: str) -> str:
+    """A level in the display unit to three figures; a dash for a level
+    not read (NaN), never 'nan'."""
+    if not np.isfinite(value):
+        return '—'
+    return f'{value * scale:.3g} {unit}'
+
+
 def scales(dimension: str, unit_system: Any = None
            ) -> tuple[float, float, str]:
     """(amplitude scale, density scale, amplitude unit) that take the
@@ -84,18 +92,27 @@ def sheet_rows(reading: Any, unit_system: Any = None
     rms = f'{unit} rms'.strip()
     peak = f'{unit} peak'.strip()
     floor = reading.floor
-    rows = [('Floor, tone and band lines left out', '—',
-             f'{floor.reference * scale:.3g} {rms}',
-             f'{floor.measured * scale:.3g} {rms}',
-             _signed(floor.error, '%'),
-             (f'±{floor.rms_percent:g} %, lines ±{floor.db:g} dB '
-             f'({floor.outside} of {floor.judged} outside, '
-             f'{floor.expected:.2g} by chance, {floor.allowed} allowed)'),
-             _verdict(floor.passed))]
+    if floor.assessed:
+        rows = [('Floor, tone and band lines left out', '—',
+                 _level(floor.reference, scale, rms),
+                 _level(floor.measured, scale, rms),
+                 _signed(floor.error, '%'),
+                 (f'±{floor.rms_percent:g} %, lines ±{floor.db:g} dB '
+                  f'({floor.outside} of {floor.judged} outside, '
+                  f'{floor.expected:.2g} by chance, {floor.allowed} '
+                  'allowed)'),
+                 _verdict(floor.passed))]
+    else:
+        # nothing was judged, so no count of lines outside is given: a
+        # count of none outside would read as a pass
+        rows = [('Floor, tone and band lines left out', '—', '—', '—', '—',
+                 (f'±{floor.rms_percent:g} %, lines ±{floor.db:g} dB; no '
+                  'line left to judge'),
+                 _verdict(floor.passed))]
     if reading.tones:
         rows.append((f'Tones, {len(reading.tones)} together', '—',
-                     f'{reading.tones_reference * scale:.3g} {rms}',
-                     f'{reading.tones_measured * scale:.3g} {rms}',
+                     _level(reading.tones_reference, scale, rms),
+                     _level(reading.tones_measured, scale, rms),
                      _signed(100.0 * (reading.tones_measured
                                       / reading.tones_reference - 1.0)
                              if reading.tones_reference else float('nan'),
@@ -105,22 +122,31 @@ def sheet_rows(reading: Any, unit_system: Any = None
         where = (f'{tone.low:.4g}' if tone.fixed
                  else f'{tone.low:.4g} to {tone.high:.4g}')
         rows.append((f'  {tone.name}', where,
-                     f'{tone.reference * scale:.3g} {peak}',
-                     f'{tone.measured * scale:.3g} {peak}',
+                     _level(tone.reference, scale, peak),
+                     _level(tone.measured, scale, peak),
                      _signed(tone.error, '%'),
-                     f'±{tone.tolerance:g} %',
+                     (f'±{tone.tolerance:g} %' if tone.readings
+                      else f'±{tone.tolerance:g} %; no reading left'),
                      _verdict(tone.passed)))
     for band in reading.narrowbands:
         where = (f'{band.low:.4g} to {band.high:.4g}' if not band.swept
                  else f'{band.span[0]:.4g} to {band.span[1]:.4g}, swept')
-        tolerance = (f'{_signed(band.low_db, "dB")} to '
-                     f'{_signed(band.high_db, "dB")} at {band.dof:.0f} dof')
-        if band.swept:
-            tolerance += (f'; {band.slices} slices of {band.slice_dof:.0f} '
-                          f'dof, {100 * band.inside:.0f} % inside')
+        if not band.slices:
+            # not judged: no degrees of freedom or slices to quote
+            tolerance = (f'{_signed(band.low_db, "dB")} to '
+                         f'{_signed(band.high_db, "dB")}; not read, see '
+                         'the notes')
+        else:
+            tolerance = (f'{_signed(band.low_db, "dB")} to '
+                         f'{_signed(band.high_db, "dB")} at '
+                         f'{band.dof:.0f} dof')
+            if band.swept:
+                tolerance += (f'; {band.slices} slices of '
+                              f'{band.slice_dof:.0f} dof, '
+                              f'{100 * band.inside:.0f} % inside')
         rows.append((f'Band {band.name}', where,
-                     f'{band.reference * scale:.3g} {rms}',
-                     f'{band.measured * scale:.3g} {rms}',
+                     _level(band.reference, scale, rms),
+                     _level(band.measured, scale, rms),
                      _signed(band.error_db, 'dB'), tolerance,
                      _verdict(band.passed)))
     total = reading.total

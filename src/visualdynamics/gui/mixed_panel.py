@@ -73,6 +73,9 @@ class MixedPanel(QWidget):
     #: the sheet was read: (history, floor, tones, reading, settings), so
     #: the window can journal the call that draws it
     read = Signal(object, object, object, object, object)
+    #: what the reading says, for the status line: the sheet in one line
+    #: with its notes (what was not judged, and why), or the refusal
+    said = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -280,6 +283,7 @@ class MixedPanel(QWidget):
                 self.reading = None
                 self._key = None
                 self._show(None, str(refusal))
+                self.said.emit(f'{settings["channel"]}: {refusal}')
                 return
             if self._key_now() != key:
                 # the record or a setting moved while the worker read:
@@ -288,6 +292,7 @@ class MixedPanel(QWidget):
             self.reading = reading
             self._key = key
         self._show(self.reading)
+        self.said.emit(status_line(self.reading, self._unit_system))
         self.read.emit(self._history, self._floor, self._tones,
                        self.reading, settings)
 
@@ -315,4 +320,16 @@ class MixedPanel(QWidget):
             self._show(self.reading)
 
 
-__all__ = ['MixedPanel', 'MixedPlot']
+def status_line(reading: Any, unit_system: Any = None) -> str:
+    """A reading for the status line: the sheet in one line
+    (`MixedReading.describe`, in the display unit), then each of its
+    notes, so a part not judged, or read where it may read low, says so
+    where the result is read and not only on the sheet."""
+    from ..plot.mixed_mode import scales
+
+    scale, _dense, unit = scales(reading.dimension, unit_system)
+    words = reading.describe(unit, scale)
+    return '; '.join([words, *reading.notes])
+
+
+__all__ = ['MixedPanel', 'MixedPlot', 'status_line']

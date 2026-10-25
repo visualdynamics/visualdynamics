@@ -17,14 +17,18 @@ headroom beside its kurtosis.
 
 ## Where the range comes from
 
-The channel table's *Range (V)* column is the input's range in volts,
-and its *Sensitivity (mV/Unit)* column the chain's sensitivity in
-millivolts per the unit beside it. The range in that unit is
+The level a channel clips at is the smaller of the channel table's
+*DAQ Range (V)*, the input's range, and its *Sensor Range (V)*, the
+sensor's own full-scale output, whichever is stated
+(`ChannelTable.clip_ranges()`). Its *Sensitivity (mV/Unit)* column is
+the chain's sensitivity in millivolts per the unit beside it. The range
+in that unit is
 
-    range [unit] = Range [V] × 1000 / Sensitivity [mV/unit]
+    range [unit] = clip range [V] × 1000 / Sensitivity [mV/unit]
 
-so a 10 V input on a 100 mV/g chain reads to 100 g, and a 5 V input on
-a 200 mV/g chain to 25 g. Each channel of the record is matched to the
+so a 10 V input on a 100 mV/g chain reads to 100 g, and a 0.5 V input
+on a 200 mV/g chain to 2.5 g. A row that states neither range gives its
+channel none, and the channel says so. Each channel of the record is matched to the
 table's row that names it, by its DOF and its channel type (or its DOF
 alone when the type is blank and the record has one channel there), the
 same match the roles use. A channel the table does not name, or names
@@ -33,15 +37,6 @@ says why; it is not judged against a guess. Two rows that name one
 channel give it a range only when they agree, and the check notes which
 rows; where they differ the channel has no range. A range can also be
 given directly in SI, one per channel or one for all.
-
-The Range column holds whole volts, with a default of 5 V and a minimum
-of 1 V, so a blank cell, a 0, and a fractional range such as 0.5 or
-2.5 V all read back as 5 V. A channel clipped at 2.5 g on a 0.5 V input
-over 200 mV/g is then read against 25 g, with 20 dB of headroom it does
-not have. Since 5 V is also a common setting, a channel whose row holds
-it is still read, but it is marked (`on_default`), its words say its
-range is the column's default, and the check's words count the channels
-read against it and ask for the range to be confirmed.
 
 ## What it reports
 
@@ -60,15 +55,15 @@ range makes of them.
 | `headroom_db` | the range over the largest excursion, in dB: 20 log10(range / peak). At or below 0 dB the range was reached |
 | `next_peak`, `next_headroom_db` | the largest excursion scaled up by the step to the next level (`step_db`, 6 dB by default), and the headroom left there |
 | `beyond` | samples further out than the range and its margin |
-| `on_default`, `note`, `cautions()` | whether the range came from a Range cell holding the column's default, any note on the table rows it came from, and both in words |
+| `note`, `cautions()` | any note on the table rows the range came from, and that and any samples left out in words |
 | `statistics` | the channel's `TimeStatistics`, for every other number |
 
 Three things are judged, each channel for the first that applies:
 
 - **Beyond the range.** A converter cannot write a sample past its own
   range, so a record that holds one was not taken through the range the
-  table states. The table's Range or Sensitivity is not the one the
-  record was made with, and every other number is against the wrong
+  table states. The table's ranges or its Sensitivity are not the ones
+  the record was made with, and every other number is against the wrong
   range.
 - **On the rail.** More samples on the rail than `rail_samples` (none
   by default), as the time statistics judge it. A sample on the rail is
@@ -151,8 +146,7 @@ from that table. The panel names the table the ranges came from and
 holds the step to the next level and the margin; under them is a row a
 channel, its headroom and its samples on the rail, with each flagged
 channel in bold, then the numbers for the channel the trace draws, and
-the judgment in words. A range taken from the column's default reads
-"the default" beside it, and its row and value say why in their tips.
+the judgment in words. A channel with no range says why in its tip.
 Clicking a channel's row draws its trace.
 Dragging the floor on the headroom bars moves the step. A record of
 more than 300,000 samples, every channel counted, is read with the
@@ -161,13 +155,13 @@ call.
 
 ## Where judgment lives
 
-- The range in the table. The check is only as good as the Range and
-  Sensitivity columns, which is why a sample beyond the range is flagged
-  as a table that does not match the record. The usable range of a
-  channel is also the smaller of the input's and the sensor's own,
-  which the table does not hold: a sensor that clips ahead of the input
-  leaves flat tops inside the range, and those are found by the
-  [time statistics](time-statistics.md)' excursions at the peak.
+- The range in the table. The check is only as good as the DAQ Range,
+  Sensor Range and Sensitivity columns, which is why a sample beyond the
+  range is flagged as a table that does not match the record. Where the
+  sensor's full-scale output is left blank, a sensor that clips ahead of
+  the input leaves flat tops inside the range the input gives, and
+  those are found by the [time statistics](time-statistics.md)'
+  excursions at the peak.
 - The step. The scaled peak assumes the structure behaves at the next
   level as it did at this one. Joints slip, resonances move and rattles
   wake up at full level, so the scaled peak is a starting point, never a

@@ -155,7 +155,13 @@ def render_html(report: Report, objects: Mapping[str, Any],
 
     payload = _report_payload(report, objects, unit_system, edit,
                               object_groups, selected, labels, fill, theme)
-    return _page_html(payload, edit, channel_js, enabled_features(report))
+    active = enabled_features(report)
+    css = ''
+    if 'report_identity' in active:
+        from .identity import page_css
+
+        css = page_css(report)
+    return _page_html(payload, edit, channel_js, active, css)
 
 
 def _report_payload(report, objects, unit_system=None, edit=False,
@@ -206,6 +212,9 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     # the data index: every file the report rests on, generated into
     # the record section (or at the end, without the skeleton)
     indexed = 'data_index' in active
+    # identity and issue: the identification block first, the end mark
+    # last, and the printed page's margins (`report/identity.py`)
+    identity = 'report_identity' in active
     #: the report block each page block was built from, and each
     #: section's own blocks, for the skeleton
     origins: list[Mapping[str, Any]] = []
@@ -356,19 +365,48 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     if checks:
         check_blocks.finish(payload['blocks'])
     if skeleton:
-        from .skeleton import finish
+        from .skeleton import END, finish
 
-        finish(payload['blocks'])
+        heads = [at for at, built in enumerate(payload['blocks'])
+                 if built.get('skeleton', {}).get('key') == 'identification']
+        if identity and heads:
+            # the identification section is filled by the identity
+            # block, so it is not owed; anything the author wrote in it
+            # stays, above the block
+            meta = payload['blocks'][heads[0]]['skeleton']
+            if meta['state'] == 'owed':
+                meta['state'] = 'quiet'
+        if identity:
+            from .identity import end_mark
+
+            finish(payload['blocks'], end=end_mark(report))
+        else:
+            finish(payload['blocks'], end=END)
+    if identity:
+        from .identity import block_html, end_mark
+
+        first = {'kind': 'text', 'html': block_html(report)}
+        if skeleton:
+            payload['blocks'].insert(heads[0] + 1 if heads else 0, first)
+        else:
+            payload['blocks'].insert(0, first)
+            payload['blocks'].append({
+                'kind': 'text',
+                'html': f'<p class="endmark">'
+                        f'{html_escape.escape(end_mark(report))}</p>'})
     return payload
 
 
-def _page_html(payload, edit=False, channel_js=None, features=()) -> str:
+def _page_html(payload, edit=False, channel_js=None, features=(),
+               extra_css='') -> str:
     """The one-file page around a payload: its stylesheet, its viewers
     and the payload itself inline. `features` are the report features
     enabled (`report.features`), whose page code `page_parts` adds; with
-    none, the page as it always was."""
+    none, the page as it always was. `extra_css` follows the page's own
+    stylesheet: the printed margins of identity and issue."""
     data = json.dumps(payload, allow_nan=False)
     css, script = page_parts(features)
+    css += extra_css
     scripts = script + (_EDIT_JS if edit else '')
     shell = _PAGE
     if edit:

@@ -994,3 +994,145 @@ def test_export_checks_the_files_and_asks(editing, tmp_path, monkeypatch):
     editor._operate({'op': 'export'})
     assert saved == [1, 1, 1]
     assert said[-1] == 'Export canceled: the data index was not checked'
+
+
+# ---- the PDF and the issue check the index first ------------------------------------
+
+#: every field the identification needs to be issued, entered
+IDENTITY = {
+    'number': 'R-0037', 'revision': '0', 'laboratory': 'Test Lab',
+    'address': '1 Main Street, Albuquerque', 'location': 'Bay 2',
+    'customer': 'Acme', 'contact': 'J. Doe, jdoe@example.com',
+    'received': '2026-10-01', 'tested': '2026-10-02',
+    'issued': '2026-10-05', 'authorized': ['A. Engineer, test engineer']}
+
+
+def _printed(monkeypatch):
+    """Stand in for the web engine's print, which is tested in
+    test_report_identity: the pages handed to it, in order, with a
+    stand-in PDF written where each was asked for."""
+    from visualdynamics.report import pdf
+
+    pages = []
+
+    def fake(page, path, *, page_size='letter'):
+        pages.append(page)
+        with open(path, 'wb') as out:
+            out.write(b'%PDF-1.4 stand-in')
+        return b'%PDF-1.4 stand-in'
+
+    monkeypatch.setattr(pdf, 'print_pdf', fake)
+    return pages
+
+
+def _identified(tmp_path, features=('data_index', 'report_identity')):
+    project, name = _project_with_report(tmp_path)
+    project[name].features = list(features)
+    if 'report_identity' in features:
+        project.report_identity(name, **IDENTITY)
+    return project, name
+
+
+@pytest.mark.parametrize('verb', ['export_report_pdf', 'issue_report'])
+def test_the_pdf_and_the_issue_check_the_index_first(verb, tmp_path,
+                                                     monkeypatch):
+    """The PDF states what the check finds when it is written, not what
+    an earlier check found: a file changed since is printed CHANGED."""
+    pages = _printed(monkeypatch)
+    project, name = _identified(tmp_path)
+    assert project.verify_data_index() == ['run1.vdyn: matches']
+    with open(project.data_index[0].path, 'ab') as handle:
+        handle.write(b'!')
+    getattr(project, verb)(name, str(tmp_path / 'out.pdf'))
+    assert project.data_index[0].status == di.CHANGED
+    [printed] = pages
+    table = next(block for block in _payload(printed)['blocks']
+                 if block['kind'] == 'table')
+    assert [row[-1] for row in table['rows']] == ['CHANGED']
+    assert project.journal[-1].startswith(f'project.{verb}('), \
+        'the check inside is not a line of its own'
+
+
+@pytest.mark.parametrize('verb', ['export_report_pdf', 'issue_report'])
+def test_without_the_index_nothing_is_hashed(verb, tmp_path, monkeypatch):
+    pages = _printed(monkeypatch)
+    project, name = _identified(tmp_path, features=('report_identity',))
+
+    def never(*_args, **_kwargs):
+        raise AssertionError('hashed with the data index off')
+
+    monkeypatch.setattr(project, 'verify_data_index', never)
+    monkeypatch.setattr(di, 'digest', never)
+    getattr(project, verb)(name, str(tmp_path / 'out.pdf'))
+    assert len(pages) == 1
+
+
+def test_a_refused_issue_reads_no_file(tmp_path, monkeypatch):
+    """A report that cannot be issued is refused before the index is
+    hashed, so the refusal changes nothing, the check's results
+    included."""
+    pages = _printed(monkeypatch)
+    project, name = _identified(tmp_path)
+    project.report_identity(name, customer='')
+    checked = []
+    monkeypatch.setattr(project, 'verify_data_index',
+                        lambda *args, **kwargs: checked.append(1))
+    with pytest.raises(ValueError, match='Customer is not entered'):
+        project.issue_report(name, str(tmp_path / 'never.pdf'))
+    assert checked == [] and pages == []
+    assert project.data_index[0].status == ''
+
+
+@pytest.mark.parametrize(('act', 'start'), [
+    ('Export', lambda window: window.export_report_pdf()),
+    ('Issue', lambda window: window.issue_report())])
+def test_the_window_checks_once_and_asks_before_a_pdf(act, start, editing,
+                                                      tmp_path, monkeypatch):
+    """PDF export and Issue each hash the index once, on the worker, ask
+    when a file does not match, and write nothing on No."""
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    from visualdynamics.report import identity as ri
+
+    window, _editor, report, name = editing
+    pages = _printed(monkeypatch)
+    window.project.report_features(name, enable=['data_index',
+                                                 'report_identity'])
+    window.project.report_identity(name, **IDENTITY)
+    asked, saved, checked = [], [], []
+    answer = [QMessageBox.StandardButton.No]
+    monkeypatch.setattr(QMessageBox, 'question', staticmethod(
+        lambda _parent, title, text, *_rest: asked.append((title, text))
+        or answer[0]))
+    target = tmp_path / 'out.pdf'
+    monkeypatch.setattr(QFileDialog, 'getSaveFileName', staticmethod(
+        lambda *_args: saved.append(1) or (str(target), '')))
+    real = window.project.verify_data_index
+    monkeypatch.setattr(window.project, 'verify_data_index',
+                        lambda *args, **kwargs: checked.append(1)
+                        or real(*args, **kwargs))
+    with open(window.project.data_index[0].path, 'ab') as handle:
+        handle.write(b'!')
+    start(window)
+    assert asked == [(f'{act} Report',
+                      (f'1 file in the data index of {name} does not match '
+                       'the checksum indexed:\n\nrun1.vdyn: CHANGED\n\n'
+                       f'{act} anyway?'))]
+    assert checked == [1] and saved == [] and pages == []
+    assert not target.exists() and ri.record(report) == []
+    answer[0] = QMessageBox.StandardButton.Yes
+    said = []
+    monkeypatch.setattr(window, '_show_status', said.append)
+    start(window)
+    assert checked == [1, 1], 'hashed once for the export, not twice'
+    assert saved == [1] and target.exists()
+    [printed] = pages
+    assert '"CHANGED"' in printed
+    verb = 'export_report_pdf' if act == 'Export' else 'issue_report'
+    assert window.project.journal[-1].startswith(f'project.{verb}({name!r}')
+    if act == 'Export':
+        assert said[-1].startswith('Exported out.pdf. Checked ')
+        assert said[-1].endswith(': 0 of 1 file matches the checksum '
+                                 'indexed; 1 changed.')
+    else:
+        assert ri.value(report, 'status') == 'issued'

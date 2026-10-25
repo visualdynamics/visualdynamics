@@ -24,13 +24,13 @@ from visualdynamics.report import features as rf
 from visualdynamics.report import page, plot_conventions, render_html
 
 LIVE = ('skeleton_sections', 'check_blocks', 'prediction', 'data_index',
-        'calibration_in_date', 'record_captions', 'plot_conventions',
-        'shared_decades')
+        'calibration_in_date', 'report_identity', 'record_captions',
+        'plot_conventions', 'shared_decades')
 #: the built features the test report preset names (responses against
 #: prediction is built but in no preset)
 PRESET_LIVE = ('skeleton_sections', 'check_blocks', 'data_index',
-               'calibration_in_date', 'record_captions', 'plot_conventions',
-               'shared_decades')
+               'calibration_in_date', 'report_identity', 'record_captions',
+               'plot_conventions', 'shared_decades')
 #: the plot conventions and their option
 CONVENTIONS = ('plot_conventions', 'shared_decades')
 
@@ -203,12 +203,13 @@ def test_the_presets_enable_what_they_can_and_say_what_they_skipped():
     assert selection.enabled == PRESET_LIVE
     skipped = [key for key in rf.PRESETS['test_report'].features
                if key not in LIVE]
-    assert len(selection.notes) == len(skipped) == 4
+    assert len(selection.notes) == len(skipped) == 3
     assert selection.notes[1] == ('Test report: Findings register skipped, '
                                   'not yet available')
     flash = rf.configure(report, preset='flash_report')
-    assert flash.enabled == () and report.features == []
-    assert len(flash.notes) == 4
+    assert flash.enabled == ('report_identity',)
+    assert report.features == ['report_identity']
+    assert len(flash.notes) == 3
     assert rf.configure(report, preset='default') == rf.FeatureSelection((), ())
 
 

@@ -1929,6 +1929,19 @@ class MainWindow(QMainWindow):
             'Write this report as one self-contained HTML file — opens '
             'in any browser, nothing to install')
         self.export_report_action.triggered.connect(self.export_report)
+        # identity and issue (report feature `report_identity`): offered
+        # on a report's menu while the feature is on
+        self.export_report_pdf_action: QAction = QAction(
+            'Export Report as P&DF...', self)
+        self.export_report_pdf_action.setToolTip(
+            'Write this report as a paginated PDF, page n of N on every '
+            'page; a draft says so on each page')
+        self.export_report_pdf_action.triggered.connect(self.export_report_pdf)
+        self.issue_report_action: QAction = QAction('&Issue Report...', self)
+        self.issue_report_action.setToolTip(
+            'Issue this report as a PDF under its number and revision; a '
+            'change after issue is an amendment')
+        self.issue_report_action.triggered.connect(self.issue_report)
         self.save_test_action: QAction = QAction('Save &Project As...', self)
         self.save_test_action.setToolTip(
             'Save the whole project — every object, under its name — as '
@@ -8285,6 +8298,12 @@ class MainWindow(QMainWindow):
                 menu.addAction(self.active_geometry_action)
             if isinstance(self.current_object(), Report):
                 menu.addAction(self.export_report_action)
+                from ..report.features import enabled
+                from ..report.identity import FEATURE
+
+                if FEATURE in enabled(self.current_object()):
+                    menu.addAction(self.export_report_pdf_action)
+                    menu.addAction(self.issue_report_action)
             # no acts here: merging, projecting and transforming live
             # on the bar with every other act (Brandon, 2026-09-04),
             # and linking on the tree's own toolbar — which group an
@@ -18783,6 +18802,13 @@ class MainWindow(QMainWindow):
             self.report_editor.calibration_dater = (
                 lambda report, start, end: self.project.report_test_date(
                     self.project.name_of(report), start, end))
+            # and so do the Identity and Issue fields and Amend
+            self.report_editor.identity_changer = (
+                lambda report, **fields: self.project.report_identity(
+                    self.project.name_of(report), **fields))
+            self.report_editor.amender = (
+                lambda report, changes, **given: self.project.amend_report(
+                    self.project.name_of(report), changes, **given))
             # the check blocks' readings are made on the worker
             self.report_editor.checks_preparer = self._prepare_report_checks
             self._table_layout.insertWidget(1, self.report_editor, 1)
@@ -18931,9 +18957,18 @@ class MainWindow(QMainWindow):
             self._show_status('The report checks wait on another task; '
                               'nothing was exported')
             return
+        page = render_html(obj, self.objects, self.unit_system,
+                           object_groups=self.object_groups)
+        from ..report.identity import guard
+
+        try:
+            # an issued report is written again only unchanged
+            guard(obj, page)
+        except ValueError as refused:
+            QMessageBox.warning(self, 'Export Report', str(refused))
+            return
         with open(path, 'w', encoding='utf-8') as out:
-            out.write(render_html(obj, self.objects, self.unit_system,
-                                  object_groups=self.object_groups))
+            out.write(page)
         note = (f' ({skipped} unbound block'
                 f'{"s" * (skipped != 1)} left out)') if skipped else ''
         self._show_status(
@@ -18978,6 +19013,83 @@ class MainWindow(QMainWindow):
                               'the page says which were not read')
         return True
 
+    def export_report_pdf(self) -> None:
+        """Export the selected report as a paginated PDF
+        (`Project.export_report_pdf`), rendered and printed off the
+        window's thread. With the data index on, its files are hashed
+        again first and a file that does not match is asked about, as
+        for the HTML export."""
+        obj = self.current_object()
+        if not isinstance(obj, Report):
+            self._show_status('Select a report to export')
+            return
+        name = self.object_item().text(0)
+        if not self._export_owed(obj, name):
+            return
+        if not self._export_index(obj, name):
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, 'Export Report as PDF', f'{name}.pdf', 'PDF (*.pdf)')
+        if not path:
+            return
+        if not path.endswith('.pdf'):
+            path += '.pdf'
+        try:
+            # the index was checked above; the write alone, so it is
+            # not hashed twice
+            self._run_long(f'Printing {os.path.basename(path)}…',
+                           lambda progress=None: self.project._export_pdf(
+                               name, path, self.unit_system))
+        except (ValueError, OSError) as refused:
+            QMessageBox.warning(self, 'Export Report as PDF', str(refused))
+            return
+        self._show_status(f'Exported {os.path.basename(path)}'
+                          f'{self._index_said(obj)}')
+
+    def issue_report(self) -> None:
+        """Issue the selected report as a PDF under its number and
+        revision (`Project.issue_report`). What stands in the way (a
+        field not entered, a section owed, a report already issued) is
+        said before the file is asked for, and with the data index on,
+        its files are hashed again and a file that does not match is
+        asked about before then too."""
+        from ..report.identity import issue_ready
+        from ..report.identity import name as identity_name
+
+        obj = self.current_object()
+        if not isinstance(obj, Report):
+            self._show_status('Select a report to issue')
+            return
+        name = self.object_item().text(0)
+        try:
+            issue_ready(obj, self.objects, self.object_groups)
+        except ValueError as refused:
+            QMessageBox.warning(self, 'Issue Report', str(refused))
+            return
+        if not self._export_index(obj, name, 'Issue'):
+            return
+        number = str(obj.identity.get('number', name))
+        path, _ = QFileDialog.getSaveFileName(
+            self, 'Issue Report', f'{number}.pdf', 'PDF (*.pdf)')
+        if not path:
+            return
+        if not path.endswith('.pdf'):
+            path += '.pdf'
+        try:
+            # the index was checked above; the write alone, so it is
+            # not hashed twice
+            self._run_long(f'Issuing {identity_name(obj)}…',
+                           lambda progress=None: self.project._issue_pdf(
+                               name, path, self.unit_system))
+        except (ValueError, OSError) as refused:
+            QMessageBox.warning(self, 'Issue Report', str(refused))
+            return
+        if self.report_editor is not None and self.report_editor.report is obj:
+            self.report_editor.rebuild()
+            self.report_editor._show_selection()
+        self._show_status(f'Issued {identity_name(obj)} as '
+                          f'{os.path.basename(path)}')
+
     def _export_owed(self, report: Report, name: str) -> bool:
         """With skeleton sections on, list the sections the report
         still owes and ask whether to export anyway; True to go on.
@@ -19002,11 +19114,14 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.No)
         return answer == QMessageBox.StandardButton.Yes
 
-    def _export_index(self, report: Report, name: str) -> bool:
+    def _export_index(self, report: Report, name: str,
+                      act: str = 'Export') -> bool:
         """With the data index on, hash every indexed file again on the
         worker, so the export states what the check found today, and
         ask before exporting a report whose files do not all match;
-        True to go on. Without the feature nothing is read or asked."""
+        True to go on. Without the feature nothing is read or asked.
+        `act` is the word the dialogs and the status line use: 'Export'
+        or 'Issue'."""
         from ..core.data_index import MATCHES
         from ..core.progress import Cancelled
         from ..report.data_index import CHECK_WORDS, FEATURE
@@ -19018,11 +19133,11 @@ class MainWindow(QMainWindow):
             self._run_long('Checking the data index…',
                            self.project.verify_data_index)
         except Cancelled:
-            self._show_status('Export canceled: the data index was not '
+            self._show_status(f'{act} canceled: the data index was not '
                               'checked')
             return False
         except OSError as failure:
-            QMessageBox.warning(self, 'Export Report',
+            QMessageBox.warning(self, f'{act} Report',
                                 f'The data index could not be checked: '
                                 f'{failure}')
             return False
@@ -19035,10 +19150,10 @@ class MainWindow(QMainWindow):
         one = len(astray) == 1
         with self._asking():
             answer = QMessageBox.question(
-                self, 'Export Report',
+                self, f'{act} Report',
                 f'{len(astray)} file{"" if one else "s"} in the data index '
                 f'of {name} do{"es" if one else ""} not match the checksum '
-                f'indexed:\n\n{lines}\n\nExport anyway?',
+                f'indexed:\n\n{lines}\n\n{act} anyway?',
                 QMessageBox.StandardButton.Yes
                 | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No)

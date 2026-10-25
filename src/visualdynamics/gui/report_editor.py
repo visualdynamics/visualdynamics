@@ -279,6 +279,20 @@ class ReportEditor(QWidget):
         #: False means the worker is busy with another task and the page
         #: waits for the next rebuild. On its own the editor reads them as it renders.
         self.checks_preparer: Callable[[Report], bool] | None = None
+        #: the Identity and Issue fields, by field key, and the line
+        #: that says what was refused, while the report's own settings
+        #: are in the pane and the feature is on
+        self.identity_edits: dict[str, Any] = {}
+        self.identity_notes: QLabel | None = None
+        self.amend_button: QPushButton | None = None
+        self.identity_box: QWidget | None = None
+        #: how identification is entered and an amendment made: the
+        #: window sets the project's verbs, so each is journaled as a
+        #: script would make it; on its own the editor calls
+        #: `report.identity` directly. Called as `identity_changer(report,
+        #: **fields)` and `amender(report, changes, revision=, number=)`.
+        self.identity_changer: Callable[..., Any] | None = None
+        self.amender: Callable[..., Any] | None = None
         #: a skeleton section's None button and its Interpretation, by
         #: field, while such a block is in the pane
         self.none_button: QPushButton | None = None
@@ -521,6 +535,8 @@ class ReportEditor(QWidget):
         self.none_button = self.by_edit = self.level_edit = None
         self.date_edit = self.end_edit = None
         self.calibration_button = self.calibration_note = None
+        self.identity_edits, self.identity_notes = {}, None
+        self.amend_button = self.identity_box = None
         self.field_boxes = {}
         body = QWidget()
         form = QFormLayout(body)
@@ -572,6 +588,7 @@ class ReportEditor(QWidget):
                     lambda change: self._operate({'op': 'features',
                                                   **change}))
                 form.addRow(self.features_panel)
+                self._identity_pane(form, report)
             elif block.get('kind') == 'text' and 'section' in block:
                 self._section_pane(form, block)
             elif block.get('kind') == 'text' and 'check' in block:
@@ -832,6 +849,124 @@ class ReportEditor(QWidget):
                     '' if block.get('level') is None
                     else f'{block["level"]:g}')))
         form.addRow('Level run', self.level_edit)
+
+    def _identity_pane(self, outer, report) -> None:
+        """The Identity and Issue fields: each identification field the
+        author enters, the status, and Amend for an issued report. The
+        number and revision of an issued report are read-only: they
+        change only by an amendment. Shown while the feature is on
+        (`_show_identity`)."""
+        from ..report import identity
+
+        self.identity_box = QWidget()
+        form = QFormLayout(self.identity_box)
+        form.setContentsMargins(0, 8, 0, 0)
+        outer.addRow(self.identity_box)
+        self._show_identity()
+        form.addRow(QLabel('<b>Identity and Issue</b>'))
+        held = report.identity
+        issued = bool(held.get('record'))
+        status = QLabel(f'Status: {identity.status_words(report)}')
+        status.setObjectName('identity_status')
+        form.addRow(status)
+        for field in identity.FIELDS:
+            given = identity.value(report, field.key)
+            text = '; '.join(given) if field.key == 'authorized' else given
+            edit = QLineEdit(text)
+            edit.setPlaceholderText(
+                'name, role; name, role' if field.key == 'authorized'
+                else identity.NOT_ENTERED if field.required else 'optional')
+            if issued and field.key in ('number', 'revision'):
+                edit.setReadOnly(True)
+                edit.setToolTip('Issued: changed only by an amendment')
+            edit.editingFinished.connect(
+                lambda key=field.key, box=edit: self._identity_edited(
+                    key, box.text()))
+            form.addRow(field.label, edit)
+            self.identity_edits[field.key] = edit
+        full = QCheckBox('Not reproduced except in full')
+        full.setChecked(identity.value(report, 'full_only'))
+        full.setToolTip(identity.FULL_ONLY)
+        full.toggled.connect(
+            lambda on: self._operate({'op': 'identity', 'field': 'full_only',
+                                      'value': bool(on)}))
+        form.addRow(full)
+        self.identity_edits['full_only'] = full
+        if held.get('status', 'draft') != 'draft':
+            self.amend_button = QPushButton('Amend...')
+            self.amend_button.setToolTip(
+                'A change after issue: an amendment with its own revision '
+                'and a table of what changed')
+            self.amend_button.clicked.connect(self._ask_amendment)
+            form.addRow(self.amend_button)
+        self.identity_notes = QLabel('')
+        self.identity_notes.setWordWrap(True)
+        self.identity_notes.setStyleSheet('color: #c0392b;')
+        form.addRow(self.identity_notes)
+
+    def _show_identity(self) -> None:
+        """Show the Identity and Issue fields while the report has the
+        feature on, and hide them otherwise."""
+        from ..report.features import enabled
+        from ..report.identity import FEATURE
+
+        if self.identity_box is not None and self.report is not None:
+            self.identity_box.setVisible(FEATURE in enabled(self.report))
+
+    def _identity_edited(self, key: str, text: str) -> None:
+        if self._loading_pane or self.report is None:
+            return
+        from ..report import identity
+
+        now = identity.value(self.report, key)
+        if key == 'authorized':
+            value: Any = [part.strip() for part in text.split(';')
+                          if part.strip()]
+        else:
+            value = text.strip()
+        if value != now:
+            self._operate({'op': 'identity', 'field': key, 'value': value})
+
+    def _change_identity(self, operation) -> bool:
+        """Enter one identification field through the verb a script
+        calls; a refusal is shown under the fields and changes nothing.
+        Returns whether the report changed."""
+        from ..report.identity import identify
+
+        changer = self.identity_changer or identify
+        before = dict(self.report.identity)
+        try:
+            changer(self.report, **{str(operation.get('field')):
+                                    operation.get('value')})
+        except (TypeError, ValueError) as refused:
+            if self.identity_notes is not None:
+                self.identity_notes.setText(str(refused))
+            return False
+        return self.report.identity != before
+
+    def _ask_amendment(self) -> None:
+        """Ask for the amendment's revision, number and changes, and make
+        it (`_operate` 'amend')."""
+        from .amend_dialog import AmendDialog
+
+        dialog = AmendDialog(self.report, self)
+        if dialog.exec():
+            self._operate({'op': 'amend', **dialog.amendment()})
+
+    def _amend(self, operation) -> bool:
+        from ..report.identity import amend
+
+        amender = self.amender or amend
+        before = dict(self.report.identity)
+        try:
+            amender(self.report, operation.get('changes', []),
+                    revision=operation.get('revision', ''),
+                    number=operation.get('number'))
+        except (TypeError, ValueError) as refused:
+            if self.identity_notes is not None:
+                self.identity_notes.setText(str(refused))
+            return False
+        return self.report.identity != before
 
     def _combo(self, form, field, label, current, options):
         box = QComboBox()
@@ -1180,6 +1315,16 @@ class ReportEditor(QWidget):
         elif op == 'features':
             if not self._change_features(operation):
                 return
+            self._show_identity()
+        elif op == 'identity':
+            if not self._change_identity(operation):
+                return
+            if self.identity_notes is not None:
+                self.identity_notes.setText('')
+        elif op == 'amend':
+            if not self._amend(operation):
+                return
+            reselect = True
         elif op == 'section':
             # a skeleton section's one-step None, or who interpreted:
             # through the one function a script calls, which refuses

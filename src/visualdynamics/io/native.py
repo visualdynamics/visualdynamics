@@ -719,6 +719,10 @@ def save_report(report: Report, group: h5py.Group) -> None:
         # written only when there are any, so a report with none is
         # stored exactly as it was before features existed
         group.attrs['features'] = json.dumps(report.features)
+    if report.identity:
+        # likewise only when entered: identification fields and the
+        # issue record (`report/identity.py`)
+        group.attrs['identity'] = json.dumps(report.identity)
     group.create_dataset('blocks', data=json.dumps(report.blocks),
                          dtype=h5py.string_dtype('utf-8'))
 
@@ -736,11 +740,14 @@ def load_report(group: h5py.Group) -> Report:
     if isinstance(features, bytes):
         features = features.decode('utf-8')
     features = json.loads(features)
+    identity = group.attrs.get('identity', '{}')
+    if isinstance(identity, bytes):
+        identity = identity.decode('utf-8')
     return Report(title=str(group.attrs['title']),
                   blocks=json.loads(blocks),
                   marking=str(group.attrs['marking']),
                   marking_color=str(group.attrs['marking_color']),
-                  features=features)
+                  features=features, identity=json.loads(identity))
 
 
 def save_predictions(predictions, group) -> None:

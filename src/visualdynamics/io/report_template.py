@@ -7,7 +7,10 @@ whatever project loads it. The file is JSON with one marker key and the
 fields the project file keeps for a report (title, marking, marking
 color, blocks, and the report features when any are enabled; see
 `native.save_report`), under its own suffix, `.vdreport`. A lab's house
-template therefore carries its choice of report features. A block whose binding does not resolve in the new
+template therefore carries its choice of report features, and the
+laboratory's name, address and reproduction statement from the
+report's identification; never a report number, revision, status or
+issue record. A block whose binding does not resolve in the new
 project is an unbound card there, to be pointed at an object in the
 editor's pane, as an unbound block of a built-in template is.
 
@@ -75,6 +78,14 @@ def save(report: Report, path: str | os.PathLike, unit_system: Any = None,
         # only when there are any: a template with none is the file it
         # always was, and opens in a version that has no features
         out['features'] = list(report.features)
+    from ..report.identity import TEMPLATE_FIELDS
+
+    # the laboratory's own fields only: a number, a revision, a status
+    # or an issue record belongs to one report and never to the next
+    laboratory = {key: report.identity[key] for key in TEMPLATE_FIELDS
+                  if key in report.identity}
+    if laboratory:
+        out['identity'] = laboratory
     with open(path, 'w', encoding='utf-8') as handle:
         json.dump(out, handle, indent=1)
         handle.write('\n')
@@ -92,11 +103,20 @@ def load(path: str | os.PathLike, **_ignored: Any) -> Report:
             or not all(isinstance(key, str) for key in features)):
         raise ValueError(f'{path}: features must be a list of feature '
                          f'keys, not {features!r}')
+    from ..report.identity import TEMPLATE_FIELDS
+
+    identity = data.get('identity', {})
+    if (not isinstance(identity, dict)
+            or not all(isinstance(key, str) for key in identity)):
+        raise ValueError(f'{path}: identity must be a mapping of fields, not '
+                         f'{identity!r}')
     return Report(title=str(data.get('title', 'Report')),
                   blocks=data.get('blocks', []),
                   marking=str(data.get('marking', 'UNCLASSIFIED')),
                   marking_color=str(data.get('marking_color', 'ink')),
-                  features=features)
+                  features=features,
+                  identity={key: identity[key] for key in TEMPLATE_FIELDS
+                            if key in identity})
 
 
 def templates_folder() -> Path:

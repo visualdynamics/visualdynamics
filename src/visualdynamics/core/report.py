@@ -37,7 +37,10 @@ class Report:
     banner. `marking_color` is 'ink' (the page's own text color) or
     'red'; any other value is read as 'ink'. `features` holds the keys
     of the report features enabled on it (`visualdynamics.report.features`),
-    none by default; with none, the report renders as it always has. A
+    none by default; with none, the report renders as it always has.
+    `identity` holds the author's identification fields and the issue
+    record (`visualdynamics.report.identity`), empty by default; it is
+    drawn only while the report feature `report_identity` is on. A
     block of a kind not in `BLOCK_KINDS` raises `ValueError`.
 
     Block shapes:
@@ -114,7 +117,8 @@ class Report:
                  blocks: Sequence[Mapping[str, Any]] | None = None,
                  marking: str = 'UNCLASSIFIED',
                  marking_color: str = 'ink',
-                 features: Sequence[str] | None = None) -> None:
+                 features: Sequence[str] | None = None,
+                 identity: Mapping[str, Any] | None = None) -> None:
         self.title: str = str(title)
         #: the classification marking, carried as a banner across the
         #: top and bottom of the rendered document — one value, two
@@ -136,6 +140,26 @@ class Report:
             if block.get('kind') not in BLOCK_KINDS:
                 raise ValueError(f"unknown block kind {block.get('kind')!r}")
         self.features = features or []
+        self.identity = identity or {}
+
+    @property
+    def identity(self) -> dict[str, Any]:
+        """The report's identification and issue record: plain values,
+        empty by default.
+
+        What the keys mean, and the only way they change in step (the
+        fields entered, the report issued, an amendment made), is
+        `visualdynamics.report.identity`. Assigning stores a copy and
+        refuses anything but a mapping with `TypeError`.
+        """
+        return self._identity
+
+    @identity.setter
+    def identity(self, held: Mapping[str, Any]) -> None:
+        if not isinstance(held, Mapping):
+            raise TypeError(f'identity is a mapping of fields, not '
+                            f'{type(held).__name__}')
+        self._identity: dict[str, Any] = dict(held)
 
     @property
     def features(self) -> list[str]:

@@ -5744,6 +5744,260 @@ class Project(dict):
                 if entries else _index_now())
         return [f'{entry.name}: {entry.status}' for entry in entries]
 
+    def report_identity(self, name: str, **fields: Any) -> None:
+        """Enter a report's identification (the report editor's Identity
+        and Issue fields).
+
+        With the report feature `report_identity` on, every printed page
+        carries the laboratory, the report number and revision, the
+        title and page n of N, and the first page the identification
+        block. Every field is the author's: the program never writes a
+        number, a date or a name of its own, and a field left blank
+        shows as not entered.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        **fields
+            Any of 'number', 'revision', 'laboratory', 'address',
+            'location', 'customer', 'contact', 'received', 'tested',
+            'issued' (the dates as the lab writes them) and
+            'distribution', each a str ('' clears it); 'authorized',
+            the people authorizing the report, a list of names or one
+            per line ("name, role"), printed each with a blank line for
+            the signature; and 'full_only', whether the first page says
+            the report is not reproduced except in full (True unless
+            turned off).
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            For an unknown field, the status or issue record (changed
+            only by issuing and amending), or the number or revision of
+            a report already issued. Nothing is changed.
+        TypeError
+            When `name` is not a report, or a value is of the wrong
+            type.
+        """
+        from .report.identity import identify
+
+        identify(self._report(name), **fields)
+
+    def export_report_pdf(self, name: str, path: str | os.PathLike,
+                          unit_system: Any = None,
+                          page_size: str = 'letter') -> str:
+        """Write a report as a paginated PDF, printed from the same page
+        `export_report` writes.
+
+        A draft prints as often as wanted and says it is a draft on
+        every page. An issued report prints again only unchanged: a copy
+        of what was issued. With the report feature `report_identity`
+        on, each page carries the identity and page n of N. With the
+        report feature `data_index` on, every indexed file is hashed
+        again first, as for `export_report`, so the PDF states what the
+        check found today.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        path : str or os.PathLike
+            Where to write the PDF.
+        unit_system : UnitSystem, optional
+            Units to render in; `units.DEFAULT_SYSTEM` when left out.
+        page_size : str, default 'letter'
+            'letter' or 'a4'.
+
+        Returns
+        -------
+        str
+            The path written.
+
+        Raises
+        ------
+        ValueError
+            When the report was issued and has changed since (a change
+            after issue is an amendment), or for an unknown page size.
+        OSError
+            When the page cannot be printed.
+        """
+        self._verify_index_for(name)
+        return self._export_pdf(name, path, unit_system, page_size)
+
+    def _export_pdf(self, name: str, path: str | os.PathLike,
+                    unit_system: Any = None,
+                    page_size: str = 'letter') -> str:
+        """`export_report_pdf` without the check of the data index; the
+        window calls it after it has checked the index and asked."""
+        from .report.pdf import print_pdf
+
+        page = self._export_page(name, unit_system)
+        path = os.path.expanduser(str(path))
+        print_pdf(page, path, page_size=page_size)
+        return path
+
+    def issue_report(self, name: str, path: str | os.PathLike,
+                     unit_system: Any = None,
+                     page_size: str = 'letter') -> str:
+        """Issue a report: print it as a PDF under its number and
+        revision, and record the issue.
+
+        The report's status becomes issued (or amended, for an
+        amendment), and the issue record gains the number, revision,
+        status and date of issue as entered, with the SHA-256 of the
+        PDF and of the page it was printed from. From then on the report
+        is not written again under that identity unless it is
+        unchanged; a change is an amendment (`amend_report`). With the
+        report feature `data_index` on, every indexed file is hashed
+        again first, as for `export_report`, so the issued PDF states
+        what the check found today.
+
+        Parameters
+        ----------
+        name : str
+            The report, with the report feature `report_identity` on.
+        path : str or os.PathLike
+            Where to write the issued PDF.
+        unit_system : UnitSystem, optional
+            Units to render in; `units.DEFAULT_SYSTEM` when left out.
+        page_size : str, default 'letter'
+            'letter' or 'a4'.
+
+        Returns
+        -------
+        str
+            The path written.
+
+        Raises
+        ------
+        ValueError
+            When the feature is off, the report is already issued, a
+            field the identification needs is not entered, or (with
+            skeleton sections on) a section is still owed; or for an
+            unknown page size. Nothing is changed or written.
+        OSError
+            When the PDF cannot be printed; the report stays a draft.
+        """
+        from .report.identity import issue_ready
+        from .report.pdf import PAGE_SIZES
+
+        if page_size not in PAGE_SIZES:
+            raise ValueError(f'unknown page size {page_size!r}; the sizes '
+                             f'are: {", ".join(PAGE_SIZES)}')
+        # refused before the files are read: a report that cannot be
+        # issued is not worth hashing an index for, and a refusal
+        # changes nothing, the check's results included
+        issue_ready(self._report(name), self, self.object_groups)
+        self._verify_index_for(name)
+        return self._issue_pdf(name, path, unit_system, page_size)
+
+    def _issue_pdf(self, name: str, path: str | os.PathLike,
+                   unit_system: Any = None, page_size: str = 'letter') -> str:
+        """`issue_report` without the check of the data index; the window
+        calls it after it has checked the index and asked."""
+        from .report.pdf import print_pdf
+
+        report = self._report(name)
+        path = os.path.expanduser(str(path))
+        self._issue(report, unit_system,
+                    lambda page: print_pdf(page, path, page_size=page_size),
+                    os.path.basename(path))
+        return path
+
+    def _issue(self, report: Report, unit_system: Any, write: Any,
+               file: str) -> None:
+        """Mark `report` issued, render it, hand the page to `write`
+        (which returns the PDF's bytes), and record the issue; on any
+        failure the report is put back as it was. The one sequence the
+        script verb and the window share."""
+        from .report import render_html
+        from .report.identity import (
+            issue_ready,
+            mark_issued,
+            record_issue,
+            unmark,
+        )
+
+        status = issue_ready(report, self, self.object_groups)
+        before = mark_issued(report, status)
+        try:
+            page = render_html(report, self, unit_system,
+                               object_groups=self.object_groups)
+            pdf = write(page)
+        except BaseException:
+            unmark(report, before)
+            raise
+        record_issue(report, page, pdf, file)
+
+    def amend_report(self, name: str, changes: Sequence[Mapping[str, str]],
+                     *, revision: str, number: str | None = None) -> None:
+        """Make an issued report an amendment, to be issued in its turn
+        (`issue_report`).
+
+        The amendment carries its own revision (and, if given, its own
+        number), refers to the revision it amends by number, revision
+        and date of issue, and prints a table of what it changes. It
+        ends "End of amendment.". The original's record is kept.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        changes : sequence of mapping
+            Each change: 'where' (page or section), 'was' (what it
+            said), 'now' (what it says) and, where appropriate,
+            'reason'.
+        revision : str
+            The amendment's revision, entered by the author.
+        number : str, optional
+            The amendment's own report number; the original's when left
+            out.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            When the report has not been issued, a change lacks where,
+            was or now, there are no changes, or the number and revision
+            were already issued. Nothing is changed.
+        TypeError
+            When `name` is not a report, or a value is of the wrong
+            type.
+        """
+        from .report.identity import amend
+
+        amend(self._report(name), changes, revision=revision, number=number)
+
+    def _verify_index_for(self, name: str) -> None:
+        """With the report feature `data_index` on report `name`, hash
+        every indexed file again (`verify_data_index`), so what is
+        written states what the check found today, not at the last
+        check; nothing is read with the feature off."""
+        from .report.features import enabled
+
+        if 'data_index' in enabled(self._report(name)):
+            self.verify_data_index()
+
+    def _export_page(self, name: str, unit_system: Any = None) -> str:
+        """The report rendered for export, refused when it was issued and
+        has changed since (`report.identity.guard`)."""
+        from .report import render_html
+        from .report.identity import guard
+
+        report = self._report(name)
+        page = render_html(report, self, unit_system,
+                           object_groups=self.object_groups)
+        guard(report, page)
+        return page
+
     def _report(self, name: str) -> Report:
         """The report called `name`; `TypeError` for anything else."""
         name = self.name_of(name)
@@ -5972,16 +6226,18 @@ class Project(dict):
         -------
         str
             The path written.
-        """
-        from .report import render_html
-        from .report.features import enabled
 
+        Raises
+        ------
+        ValueError
+            With the report feature `report_identity` on, when the
+            report was issued and has changed since: an issued report
+            is not written again under its identity, and a change after
+            issue is an amendment (`amend_report`).
+        """
         name = self.name_of(name)
-        if 'data_index' in enabled(self[name]):
-            # the export states what the check found today, not at the
-            # last check: every indexed file is hashed again first
-            self.verify_data_index()
-        html = render_html(self[name], self, unit_system, object_groups=self.object_groups)
+        self._verify_index_for(name)
+        html = self._export_page(name, unit_system)
         path = os.path.expanduser(str(path))
         with open(path, 'w', encoding='utf-8') as out:
             out.write(html)
@@ -6813,8 +7069,9 @@ class Project(dict):
         return '\n'.join([*head, '', *self.journal])
 
 
-def _journaled(verb):
-    """Record a successful verb call as the line that would replay it.
+def _journaled(verb, name=None):
+    """Record a successful verb call as the line that would replay it,
+    under `name` when given (a private step journaled as its verb).
 
     After success, never before: a refused verb changed nothing, and a
     script replaying the session must not replay the refusal. The
@@ -6853,15 +7110,16 @@ def _journaled(verb):
             shown += [f'{key}={self._journal_arg(value)}'
                       for key, value in kwargs.items()
                       if not callable(value)]
-            line = f'project.{verb.__name__}({", ".join(shown)})'
+            called = name or verb.__name__
+            line = f'project.{called}({", ".join(shown)})'
             if unsayable:
                 line = f'# {line} — not replayable'
             # the sheet edits a specification live, one verb call per
             # keystroke (2026-09-06): a run of edits on one object
             # settles to the line that stands, as a nudged setting
             # does in `record_setting`, rather than a line per key
-            prefix = (f'project.{verb.__name__}({shown[0]}, '
-                      if verb.__name__ in _SETTLING and shown else None)
+            prefix = (f'project.{called}({shown[0]}, '
+                      if called in _SETTLING and shown else None)
             if (prefix and kwargs.get('replace') and self.journal
                     and self.journal[-1].startswith(prefix)
                     and self.journal[-1].endswith(', replace=True)')):
@@ -7244,10 +7502,15 @@ _JOURNALED_VERBS = (
     'generate_report', 'report_features', 'report_section',
     'report_test_date', 'predict', 'report_prediction', 'export_report',
     'index_file', 'unindex_file', 'verify_data_index', 'report_check_block',
+    'report_identity', 'export_report_pdf', 'issue_report', 'amend_report',
     'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:
     setattr(Project, _verb, _journaled(getattr(Project, _verb)))
+# the window checks the data index and asks before it writes, then calls
+# the write alone; the line it leaves is the verb a script would call
+Project._export_pdf = _journaled(Project._export_pdf, 'export_report_pdf')
+Project._issue_pdf = _journaled(Project._issue_pdf, 'issue_report')
 
 
 def _extract_again(project, source, params):

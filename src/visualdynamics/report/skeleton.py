@@ -399,7 +399,19 @@ def check(report: Any, objects: Mapping[str, Any],
             block, objects, object_groups)))
     filled = set(place(entries))
     owed = []
+    # with identity and issue on, the identification section is the
+    # identity block: owed while a field it needs is not entered
+    from .identity import FEATURE as IDENTITY
+    from .identity import missing
+
+    identified = IDENTITY in enabled(report)
     for found in SECTIONS:
+        if identified and found.key == 'identification':
+            gaps = missing(report)
+            if gaps:
+                owed.append(Owed(found.key, found.number, found.title,
+                                 f'{", ".join(gaps)} not entered'))
+            continue
         held = blocks_of(report, found.key)
         by = str(report.blocks[held[0]].get('by', '')) if held else ''
         now = state(found, words(report, found.key), by,
@@ -480,16 +492,18 @@ def under(blocks: Sequence[dict[str, Any]], key: str,
     return out[:stop] + list(extra) + out[stop:]
 
 
-def finish(blocks: Sequence[dict[str, Any]]) -> None:
+def finish(blocks: Sequence[dict[str, Any]], end: str = END) -> None:
     """Draw each head `arrange` made, in place, once its words are HTML:
     the heading, then the author's words, the owed card or nothing;
-    the discussion's attribution and the conclusion's sentence."""
+    the discussion's attribution and the conclusion's sentence. `end`
+    is the last line ('End of amendment.' for an amendment, from the
+    identity feature)."""
     for block in blocks:
         meta = block.pop('skeleton', None)
         if meta is None:
             continue
         if meta['key'] == 'end':
-            block['html'] = f'<p class="endmark">{html.escape(END)}</p>'
+            block['html'] = f'<p class="endmark">{html.escape(end)}</p>'
             continue
         found = BY_KEY[meta['key']]
         parts = [f'<h2 class="skeleton">{html.escape(found.heading)}</h2>']

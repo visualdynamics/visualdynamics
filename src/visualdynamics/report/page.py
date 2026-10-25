@@ -2930,11 +2930,63 @@ p.check-criterion { color: var(--faint); font-size: .9rem; margin: .2rem 0;
   white-space: normal; }
 """
 
+#: how many times finer a figure is drawn when the page is printed
+#: (feature `report_identity`): the PDF export loads the page with
+#: `#print`, and each canvas is drawn at three device pixels to a CSS
+#: pixel, about 300 dpi on a letter page, instead of one
+_PRINT_SPLICES = (
+    ("  const scale = window.devicePixelRatio || 1;",
+     "  const scale = (window.devicePixelRatio || 1) * printScale();"),
+)
+
+_PRINT_JS = r"""
+/* ---- identity and issue ----------------------------------------------
+   A page loaded to be printed (`#print`) draws its figures finer. A
+   function declaration, so the figures drawn above it can call it. */
+function printScale() { return location.hash === '#print' ? 3 : 1; }
+"""
+
+#: the identification block, the end mark and the printed page (feature
+#: `report_identity`). The page's margins, with the identity and page n
+#: of N, are written for each report (`report.identity.page_css`).
+_IDENTITY_CSS = """
+div.identity { white-space: normal; margin: .4rem 0 1.4rem; }
+table.identity { width: auto; min-width: 60%; }
+table.identity th { text-align: left; white-space: nowrap; }
+table.changes { margin: .6rem 0; }
+span.missing { color: #c0392b; font-weight: 700; font-style: italic; }
+.amends { font-weight: 600; }
+.authorized { margin-top: 1rem; }
+.authorized .label { font-weight: 600; margin: 0 0 .3rem; }
+.signature { display: flex; gap: 1.5rem; align-items: flex-end;
+  margin: .9rem 0; }
+.signature .who { min-width: 14rem; }
+.signature .line { flex: 1; border-top: 1px solid var(--ink);
+  padding-top: .15rem; font-size: .75rem; color: var(--faint);
+  margin-top: 1.6rem; }
+.signature .line.date { flex: 0 0 9rem; }
+.fullonly { font-size: .85rem; font-style: italic; margin-top: 1rem; }
+.endmark { margin-top: 2.5rem; text-align: center; font-weight: 600;
+  letter-spacing: .06em; }
+@media print {
+  :root, :root[data-theme="dark"] { --ink: #1f2328; --faint: #6a737d;
+    --line: #d0d7de; --paper: #ffffff; color-scheme: light; }
+  body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .themetoggle, .marking, .controls .reset, .controls .hint {
+    display: none; }
+  body.marked { padding-top: 0; }
+  body.marked::after { display: none; }
+  section { break-inside: avoid; }
+  h1, h2, h3 { break-after: avoid; }
+}
+"""
+
 #: page code by feature: (splices into `_JS`, functions added, CSS added)
 FEATURE_PAGE = {
     'skeleton_sections': ((), '', _SKELETON_CSS),
     'data_index': ((), '', _INDEX_CSS),
     'check_blocks': ((), '', _CHECK_CSS),
+    'report_identity': (_PRINT_SPLICES, _PRINT_JS, _IDENTITY_CSS),
     'plot_conventions': (_STYLE_SPLICES, _STYLE_JS, _STYLE_CSS),
     'shared_decades': (_WINDOW_SPLICES, _WINDOW_JS, ''),
 }

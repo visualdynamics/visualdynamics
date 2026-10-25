@@ -60,7 +60,7 @@ pages knows whether all of them are there.
 
 | Section | What belongs in it | Filled by |
 |---|---|---|
-| 1. Identification | title, number and revision, the laboratory, the customer, the dates, who authorized it | the author |
+| 1. Identification | title, number and revision, the laboratory, the customer, the dates, who authorized it | the author, or the identification block with Identity and issue on |
 | 2. Summary | what was tested and why, the result against each requirement, the deviations by number, the open anomalies | the author, above the pass/fail box and the generated description |
 | 3. Requirement | the governing document, the plan and procedure, the tolerance clause, the completion criteria | the author |
 | 4. Test Article | description, part and serial, configuration, condition | the author |
@@ -445,6 +445,98 @@ with its units undefined is listed as not compared. Whether a
 difference is explained is never written by the program; the table
 states the numbers, and the answer is the analyst's.
 
+## Identity and issue
+
+**Identity and issue** (group Issue control) says on every page which
+report it belongs to and where the report ends, and keeps an issued
+report from being changed under its own identity.
+
+**The identification.** Every field is typed by the author, in the
+editor's pane with nothing selected (under **Identity and Issue**) or
+from a script; the program never writes a report number, a revision, a
+date or a name of its own. A field the identification needs that is
+still blank shows on the page as *not entered*.
+
+| Field | What goes in it |
+|---|---|
+| Report number, Revision | the report's unique identity |
+| Laboratory, Laboratory address | who ran the test, and where the laboratory is |
+| Location of the work | where the test was run: the laboratory's own building, a customer's site, another facility |
+| Customer, Customer contact | who the report is for, and how to reach them |
+| Date of receipt of the item, Date of test, Date of issue | the dates, as the laboratory writes them |
+| Authorized by | each person authorizing the report, "name, role"; each is printed with a blank line for the signature and the date |
+| Distribution | who receives it (optional) |
+
+The first page opens with these as a table, then the people authorizing
+the report with their blank signature lines, and the statement "This
+report shall not be reproduced except in full without the written
+approval of the laboratory." (a check box turns it off). The last line
+of the report is "End of report.". With Skeleton sections on, the table
+is section 1, and the export check lists section 1 while a field it
+needs is not entered.
+
+**Every printed page.** The report prints with the laboratory and the
+report's number and revision in the top margin, the title and page n of
+N in the bottom margin, and the classification marking centered in
+both. The page numbers are the print engine's own, so they are true of
+the copy printed. A draft says Draft beside its number on every page.
+The same margins apply when the exported HTML file is printed from a
+browser.
+
+**The PDF.** A report's menu in the tree offers **Export Report as
+PDF...** while the feature is on: the same page, printed on letter or
+A4 paper, with each figure drawn at three times its screen resolution
+and the print stylesheet keeping a figure off a page break.
+The interactive HTML stays the working copy.
+
+**Issue.** **Issue Report...** writes the PDF under the report's number
+and revision and records the issue in the project: the revision, the
+date of issue as entered, the file, and the SHA-256 of the PDF and of
+the page it was printed from. It is refused while a field the
+identification needs is not entered, or a skeleton section is still
+owed. After issue the number and revision cannot be edited, and an
+export (HTML or PDF) is refused if anything in the report has changed:
+a block, a word, a field, the marking, or the data under a figure. An
+unchanged export is a copy of the issued report and is written.
+
+**Amend.** A change after issue is an amendment. **Amend...**, in the
+pane of an issued report, asks for the amendment's own revision (and
+its own number, if it has one) and a table of changes: where, what it
+said, what it now says, and the reason. The amendment's first page
+names the revision it amends, by number, revision and date of issue,
+and lists the changes; its last line is "End of amendment.". It is a
+draft until it is issued in its turn, with its own date of issue. The
+record of the original issue is kept.
+
+```python
+project.report_features('Report', enable=['report_identity'])
+project.report_identity('Report', number='R-0037', revision='0',
+                        laboratory='Structures Test Laboratory',
+                        address='1 Main Street, Albuquerque, NM',
+                        location='Bay 2', customer='Acme Aerospace',
+                        contact='J. Doe, jdoe@example.com',
+                        received='2026-10-01', tested='2026-10-02',
+                        issued='2026-10-05',
+                        authorized=['A. Engineer, test engineer',
+                                    'Q. Signer, quality'])
+project.issue_report('Report', 'R-0037.pdf')
+project.amend_report('Report', [{'where': 'Page 3, Table 1',
+                                 'was': '10.2 mV/g', 'now': '12.0 mV/g',
+                                 'reason': 'digits transposed'}],
+                     revision='1')
+project.report_identity('Report', issued='2026-10-20')
+project.issue_report('Report', 'R-0037-1.pdf')
+```
+
+`project.export_report_pdf('Report', 'draft.pdf')` prints a draft, or a
+copy of the issued report, without issuing. `report_identity` refuses
+an unknown field, the status and the issue record, and a new number or
+revision once issued; `amend_report` refuses a draft (it is changed in
+place), a change without where, was and now, and a number and revision
+already issued. A report template carries the laboratory's name and
+address and the reproduction statement, never a number, a status or an
+issue record.
+
 ## Plot conventions
 
 **Plot conventions** (group Figures) puts a report's figures under
@@ -492,7 +584,6 @@ and are grayed out until each is built:
 | Findings register | Results | deviations, anomalies and nonconformances in four parts, the fact filled from the measurement |
 | Cross-axis and limit channels | Results | cross-axis against its limit, and where limit channels held the control down |
 | Control-channel uncertainty | Results | each control channel's uncertainty against one third of the tolerance |
-| Identity and issue | Issue control | number, revision, status and page n of N on every page, a paginated PDF, and amendments |
 | Flash report | Issue control | a one-page preliminary report from the day's analysis |
 
 What stays the engineer's to write (the cause and effect of a finding,

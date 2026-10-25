@@ -113,9 +113,9 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 
 #: every report feature, in the order the selection tool shows them
 #: within their groups. `skeleton_sections`, `check_blocks`,
-#: `prediction`, `data_index`, `calibration_in_date`, `record_captions`,
-#: `plot_conventions` and its option `shared_decades` are built; the
-#: rest are the road map.
+#: `prediction`, `data_index`, `calibration_in_date`, `report_identity`,
+#: `record_captions`, `plot_conventions` and its option `shared_decades`
+#: are built; the rest are the road map.
 FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'skeleton_sections', 'Skeleton sections', 'Structure',
@@ -182,10 +182,12 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         'setup and method section.'),
     ReportFeature(
         'report_identity', 'Identity and issue', 'Issue control',
-        'Report number, revision and status on every page with page n '
-        'of N, an identification block, an end-of-report line, a '
-        'paginated PDF, and amendments in place of a silent reissue.',
-        available=False),
+        'Report number, revision and laboratory on every printed page '
+        'with page n of N, the identification block on the first page, '
+        'an end-of-report line, and a status: draft, issued or amended. '
+        'Issued as a paginated PDF; a change after issue is an amendment '
+        'with its own revision and a table of what changed, never a '
+        'silent reissue.'),
     ReportFeature(
         'flash_report', 'Flash report', 'Issue control',
         'A one-page preliminary report from the day\'s analysis: '

@@ -85,7 +85,8 @@ something that cannot be bought back.
 
 The repository holds no working branches: `main`, `cla-signatures`
 (the record of a retired contributor agreement), the publishing
-branches and, should a backport ever be needed, `maintenance/X.Y.x`.
+branches, the merge queue's own temporary branches and, should a
+backport ever be needed, `maintenance/X.Y.x`.
 A ruleset refuses the creation of anything else, the maintainers
 included, and write access is only for merging — so every working
 branch, yours and the maintainers' alike, lives in a fork. Your fork is your folder:
@@ -100,6 +101,12 @@ checks the name on every pull request and the check is required, so
 a branch named otherwise cannot merge; rename it in your fork (the
 pull request follows the rename) and push again. When you make a
 branch for the person you are working with, name it by the scheme.
+
+A pull request merges through a merge queue. A maintainer adds it once
+its checks pass, and the queue tests it again on top of `main` and
+everything queued ahead of it, merging only if that passes. There is no
+need to keep a pull request rebased on `main` while it waits; rebase
+only when it has a conflict.
 
 ## The gate
 

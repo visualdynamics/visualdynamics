@@ -1,8 +1,8 @@
 name: tests
 
-# On every push to main, on any pull request, and on demand. The
-# repository is public (2026-09-14), and GitHub's hosted runners are
-# free without a minute limit for a public repository — the "not on
+# On every push to main, on any pull request and in the merge queue, and
+# on demand. The repository is public (2026-09-14), and GitHub's hosted
+# runners are free without a minute limit for a public repository — the "not on
 # push, no schedule" rule of 2026-09-01 was the private allowance
 # talking (2 000 minutes a month, 54 a push), and that reason is gone.
 #
@@ -26,6 +26,12 @@ on:
   schedule:
     - cron: '0 13 * * 1'          # Mondays, 07:00 Mountain
   pull_request:
+  # the merge queue (Kevin's proposal, Brandon's yes, 2026-10-25): a
+  # queued pull request is tested on top of main and everything ahead
+  # of it, and the queue waits on these checks, so they run there too.
+  # `branch` is skipped in the queue (no head branch to name), and a
+  # skipped required job counts as passed
+  merge_group:
   workflow_dispatch:
     inputs:
       runner:

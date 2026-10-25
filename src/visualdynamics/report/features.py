@@ -112,9 +112,10 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 
 
 #: every report feature, in the order the selection tool shows them
-#: within their groups. `skeleton_sections`, `prediction`, `data_index`,
-#: `calibration_in_date`, `record_captions`, `plot_conventions` and its
-#: option `shared_decades` are built; the rest are the road map.
+#: within their groups. `skeleton_sections`, `check_blocks`,
+#: `prediction`, `data_index`, `calibration_in_date`, `record_captions`,
+#: `plot_conventions` and its option `shared_decades` are built; the
+#: rest are the road map.
 FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'skeleton_sections', 'Skeleton sections', 'Structure',
@@ -143,11 +144,11 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         available=False),
     ReportFeature(
         'check_blocks', 'Check blocks', 'Results',
-        'A table for each check the project holds (time statistics, '
+        'A block for each check the report can make (time statistics, '
         'shock validity, the SRS points rule, the pulse check, the sine '
-        'distortion and sweep rate, signature shifts), one row per '
-        'channel against its criterion.',
-        available=False),
+        'distortion and sweep rate, signature shifts, replication '
+        'segments): its verdict, a row per channel against its criterion, '
+        'and its figures. A check that judged nothing says why.'),
     ReportFeature(
         'prediction', 'Responses against prediction', 'Results',
         'Each response channel against its prediction scaled to the '

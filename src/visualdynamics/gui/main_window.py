@@ -18759,6 +18759,8 @@ class MainWindow(QMainWindow):
             self.report_editor.calibration_dater = (
                 lambda report, start, end: self.project.report_test_date(
                     self.project.name_of(report), start, end))
+            # the check blocks' readings are made on the worker
+            self.report_editor.checks_preparer = self._prepare_report_checks
             self._table_layout.insertWidget(1, self.report_editor, 1)
         # the report has the pane to itself. Hiding the table and the
         # MAC is not enough: the splitter holding them keeps its share of
@@ -18899,6 +18901,12 @@ class MainWindow(QMainWindow):
         if not path.endswith('.html'):
             path += '.html'
         skipped = len(obj.unbound(self.objects))
+        # the check readings on the worker first, so the page is written
+        # without reading any on this thread
+        if not self._prepare_report_checks(obj):
+            self._show_status('The report checks wait on another task; '
+                              'nothing was exported')
+            return
         with open(path, 'w', encoding='utf-8') as out:
             out.write(render_html(obj, self.objects, self.unit_system,
                                   object_groups=self.object_groups))
@@ -18920,6 +18928,31 @@ class MainWindow(QMainWindow):
             return ''
         index = self.project.data_index
         return f'. {checked(index) if len(index) else EMPTY}'
+
+    def _prepare_report_checks(self, report: Report) -> bool:
+        """Make the readings of a report's check blocks on the worker
+        (report feature `check_blocks`), so the page that follows draws
+        them without reading any on this thread; True when every one is
+        read or canceled (a canceled reading is drawn as not judged, and
+        asked for again on the next rebuild). While another long verb has
+        the worker, nothing is read, the report is rebuilt once it is
+        done, and the answer is False."""
+        from ..core.progress import Cancelled
+        from ..report.check_blocks import pending, prepare
+
+        if not pending(report, self.objects, self.object_groups):
+            return True
+        if self._importing:
+            # the worker is in use: try again once it is free
+            self._report_settle.start(REPORT_SETTLE_MS)
+            return False
+        try:
+            self._run_long('Reading the report checks…', prepare, report,
+                           self.objects, self.object_groups)
+        except Cancelled:
+            self._show_status('Reading the report checks was canceled; '
+                              'the page says which were not read')
+        return True
 
     def _export_owed(self, report: Report, name: str) -> bool:
         """With skeleton sections on, list the sections the report

@@ -217,6 +217,10 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     kinded: list[tuple[dict[str, Any], str | None]] = []
     figures = tables = 0
     for index, block in enumerate(report.blocks):
+        if 'check' in block:
+            # a check of its own (`check_blocks.add`): drawn with the
+            # other checks, and only while that feature is on
+            continue
         if 'section' in block:
             # a skeleton section's own words: drawn only while the
             # feature is on, as the head of their section
@@ -279,6 +283,29 @@ def _report_payload(report, objects, unit_system=None, edit=False,
                                                   object_groups)))
             if skeleton:
                 origins.append(block)
+    # check blocks: every check the report can make, with its verdict,
+    # its numbers and its figures, under a Checks heading that closes the
+    # results
+    checks = 'check_blocks' in active
+    if checks:
+        from . import check_blocks
+
+        made = check_blocks.page(report, objects, us, object_groups,
+                                 edit=edit)
+        if made:
+            at = check_blocks.position(payload['blocks'])
+            payload['blocks'][at:at] = made
+            if skeleton:
+                origins[at:at] = [check_blocks.origin(built)
+                                  for built in made]
+            figures = tables = 0
+            for built in payload['blocks']:
+                if built['kind'] in _FIGURE_KINDS:
+                    figures += 1
+                    built['label'] = f'Figure {figures}'
+                elif built['kind'] == 'table':
+                    tables += 1
+                    built['label'] = f'Table {tables}'
     if skeleton:
         from .skeleton import arrange
 
@@ -326,6 +353,8 @@ def _report_payload(report, objects, unit_system=None, edit=False,
             built['html'] = to_html(
                 _resolve_figures(built.pop('text'), labeled, edit),
                 tables=skeleton)
+    if checks:
+        check_blocks.finish(payload['blocks'])
     if skeleton:
         from .skeleton import finish
 

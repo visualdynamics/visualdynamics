@@ -5271,6 +5271,65 @@ class Project(dict):
 
         write(self._report(name), section, text, none=none, by=by)
 
+    def report_check_block(self, name: str, check: str, *,
+                           source: str | None = None,
+                           measured: str | None = None,
+                           specification: str | None = None,
+                           shapes: str | None = None,
+                           **settings: Any) -> int:
+        """Give a report a check of its own, with what it reads and its
+        settings (report feature `check_blocks`).
+
+        With the feature on, the report carries a block for every check
+        it can make from what it shows. A check that needs a fact no
+        object holds is made from a block of its own: the classical
+        pulse ('pulse', with its nominal shape, peak and duration), the
+        sweep rate against the modes the test plan names ('sweep_rate',
+        `modes`), two signatures before and after the test
+        ('signature', `source` before and `measured` after) and a
+        replicated record's segments ('segments', `segments`). A check
+        made from what the report shows, given a block of its own, is
+        made from the block, so its settings hold. The checks and what
+        each reads are `visualdynamics.report.check_blocks.CHECKS`.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        check : str
+            'time_statistics', 'shock_validity', 'srs_points', 'pulse',
+            'distortion', 'sweep_rate', 'signature' or 'segments'.
+        source, measured, specification, shapes : str, optional
+            What the check reads, by object name or symbolic binding
+            ('@basis:TimeHistory'); each field the check takes defaults
+            to its own binding.
+        **settings
+            The keyword arguments of the check's reading in `core`, such
+            as `shape`, `peak` (SI) and `duration` for the pulse, or
+            `modes` as [[frequency, Q], ...] for the sweep rate.
+
+        Returns
+        -------
+        int
+            The index of the check's block in the report.
+
+        Raises
+        ------
+        ValueError
+            For an unknown check, a field or setting the check does not
+            take, a required setting left out, or settings that cannot
+            be saved. Nothing is changed.
+        TypeError
+            When `name` is not a report.
+        """
+        from .report.check_blocks import add
+
+        bindings = {key: value for key, value in (
+            ('source', source), ('measured', measured),
+            ('specification', specification), ('shapes', shapes))
+            if value is not None}
+        return add(self._report(name), check, bindings, settings)
+
     def report_check(self, name: str) -> list[str]:
         """What a report still owes before it is issued, one line per
         section, in order (what Export lists and asks about).
@@ -7184,7 +7243,7 @@ _JOURNALED_VERBS = (
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',
     'generate_report', 'report_features', 'report_section',
     'report_test_date', 'predict', 'report_prediction', 'export_report',
-    'index_file', 'unindex_file', 'verify_data_index',
+    'index_file', 'unindex_file', 'verify_data_index', 'report_check_block',
     'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:

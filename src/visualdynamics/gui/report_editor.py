@@ -272,6 +272,13 @@ class ReportEditor(QWidget):
         #: Called as `features_changer(report, enable=, disable=,
         #: preset=)` and returns a `FeatureSelection`.
         self.features_changer: Callable[..., Any] | None = None
+        #: how the readings of the report's check blocks are made before
+        #: the page is drawn (report feature `check_blocks`): the window
+        #: sets a call that makes them on its worker, so a slow reading
+        #: never holds the GUI thread. Called as `checks_preparer(report)`;
+        #: False means the worker is busy with another task and the page
+        #: waits for the next rebuild. On its own the editor reads them as it renders.
+        self.checks_preparer: Callable[[Report], bool] | None = None
         #: a skeleton section's None button and its Interpretation, by
         #: field, while such a block is in the pane
         self.none_button: QPushButton | None = None
@@ -567,6 +574,8 @@ class ReportEditor(QWidget):
                 form.addRow(self.features_panel)
             elif block.get('kind') == 'text' and 'section' in block:
                 self._section_pane(form, block)
+            elif block.get('kind') == 'text' and 'check' in block:
+                self._check_pane(form, block)
             elif block.get('kind') == 'text':
                 form.addRow(QLabel(f'<b>Block {self.selected + 1}</b> — text'))
                 self.text_editor = QPlainTextEdit(block.get('text', ''))
@@ -662,6 +671,29 @@ class ReportEditor(QWidget):
         self.record_caption_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
         form.addRow(self.record_caption_label)
+
+    def _check_pane(self, form, block) -> None:
+        """The pane for a check's own block: the check, what it reads and
+        its settings, as `Project.report_check_block` wrote them. They
+        are read here and set from a script; Remove takes the block."""
+        from ..report.check_blocks import CHECKS
+
+        found = CHECKS.get(str(block.get('check')))
+        title = found.title if found is not None else str(block.get('check'))
+        form.addRow(QLabel(f'<b>{html_escape.escape(title)}</b> — check'))
+        if found is not None:
+            told = QLabel(found.description)
+            told.setWordWrap(True)
+            form.addRow(told)
+        fields = [(name, str(block[name])) for name in
+                  ('source', 'measured', 'specification', 'shapes')
+                  if block.get(name)]
+        settings = block.get('settings') or {}
+        for name, value in fields + [(name, repr(value))
+                                     for name, value in settings.items()]:
+            shown = QLabel(value)
+            shown.setWordWrap(True)
+            form.addRow(name, shown)
 
     def _section_pane(self, form, block) -> None:
         """The pane for a skeleton section's own block: its heading and
@@ -853,6 +885,12 @@ class ReportEditor(QWidget):
         from ..report import render_html
 
         if self.report is None:
+            return
+        if (self.checks_preparer is not None
+                and not self.checks_preparer(self.report)):
+            # the check readings wait on the worker; the page is drawn
+            # by the rebuild that follows them
+            self.stale = True
             return
         self.stale = False
         if self._channel_js is None:

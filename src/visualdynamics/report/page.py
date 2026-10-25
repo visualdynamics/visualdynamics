@@ -2914,10 +2914,27 @@ pre.attachment { white-space: pre-wrap; font-size: .8rem;
   border: 1px solid var(--line); padding: .5rem .7rem; }
 """
 
+#: a check's head (feature `check_blocks`): its title, then its verdict
+#: as a word in bold before its words, so the verdict reads in a
+#: monochrome copy; the word takes the verdict box's colors as well,
+#: the pass color for a pass and the fail color otherwise. The heads
+#: are text the renderer has drawn (`report.check_blocks.finish`).
+_CHECK_CSS = """
+h4.check { margin: 1.4rem 0 .3rem; }
+p.check-verdict { margin: .2rem 0; white-space: normal; }
+p.check-verdict strong { letter-spacing: .04em; margin-right: .3rem; }
+p.check-passed strong { color: #2e8b57; }
+p.check-flagged strong, p.check-not-judged strong,
+p.check-partly-judged strong { color: #c0392b; }
+p.check-criterion { color: var(--faint); font-size: .9rem; margin: .2rem 0;
+  white-space: normal; }
+"""
+
 #: page code by feature: (splices into `_JS`, functions added, CSS added)
 FEATURE_PAGE = {
     'skeleton_sections': ((), '', _SKELETON_CSS),
     'data_index': ((), '', _INDEX_CSS),
+    'check_blocks': ((), '', _CHECK_CSS),
     'plot_conventions': (_STYLE_SPLICES, _STYLE_JS, _STYLE_CSS),
     'shared_decades': (_WINDOW_SPLICES, _WINDOW_JS, ''),
 }

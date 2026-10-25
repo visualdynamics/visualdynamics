@@ -23,13 +23,14 @@ from visualdynamics.core.report import Report
 from visualdynamics.report import features as rf
 from visualdynamics.report import page, plot_conventions, render_html
 
-LIVE = ('skeleton_sections', 'prediction', 'data_index',
+LIVE = ('skeleton_sections', 'check_blocks', 'prediction', 'data_index',
         'calibration_in_date', 'record_captions', 'plot_conventions',
         'shared_decades')
 #: the built features the test report preset names (responses against
 #: prediction is built but in no preset)
-PRESET_LIVE = ('skeleton_sections', 'data_index', 'calibration_in_date',
-               'record_captions', 'plot_conventions', 'shared_decades')
+PRESET_LIVE = ('skeleton_sections', 'check_blocks', 'data_index',
+               'calibration_in_date', 'record_captions', 'plot_conventions',
+               'shared_decades')
 #: the plot conventions and their option
 CONVENTIONS = ('plot_conventions', 'shared_decades')
 
@@ -202,7 +203,7 @@ def test_the_presets_enable_what_they_can_and_say_what_they_skipped():
     assert selection.enabled == PRESET_LIVE
     skipped = [key for key in rf.PRESETS['test_report'].features
                if key not in LIVE]
-    assert len(selection.notes) == len(skipped) == 5
+    assert len(selection.notes) == len(skipped) == 4
     assert selection.notes[1] == ('Test report: Findings register skipped, '
                                   'not yet available')
     flash = rf.configure(report, preset='flash_report')

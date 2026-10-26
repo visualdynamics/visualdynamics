@@ -402,6 +402,14 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
         _write_strings(group, 'roles',
                        [str(v) for (dof, quantity), role in roles.items()
                         for v in (dof, quantity, role)])
+    # which run the history is, when something has said: JSON, the
+    # known fields and where each came from. Absent when nothing has,
+    # so a history without one is stored as it always was
+    identity = getattr(data, 'run_identity', None)
+    if identity is not None and identity.to_json():
+        import json
+
+        group.attrs['run_identity'] = json.dumps(identity.to_json())
     averaging = getattr(data, 'averaging', None)
     if averaging is not None:
         group.attrs['averaging_frame_length'] = averaging.frame_length
@@ -612,6 +620,16 @@ def load_data(group: h5py.Group) -> DataArray:
     marks = _load_segments(group)
     if marks is not None:
         data.segments = marks
+    if 'run_identity' in group.attrs:
+        import json
+
+        from ..core.runs import RunIdentity
+
+        stored = group.attrs['run_identity']
+        if isinstance(stored, bytes):
+            stored = stored.decode('utf-8')
+        data.run_identity = RunIdentity.from_json(
+            json.loads(stored), str(group.attrs.get('name', 'a time history')))
     return data
 
 

@@ -18811,6 +18811,8 @@ class MainWindow(QMainWindow):
                     self.project.name_of(report), changes, **given))
             # the check blocks' readings are made on the worker
             self.report_editor.checks_preparer = self._prepare_report_checks
+            # drafting a chronology reads every run's record: the worker
+            self.report_editor.run_long = self._run_long
             self._table_layout.insertWidget(1, self.report_editor, 1)
         # the report has the pane to itself. Hiding the table and the
         # MAC is not enough: the splitter holding them keeps its share of

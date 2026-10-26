@@ -170,6 +170,64 @@ def format_of(path: str | os.PathLike) -> str:
     return f'{suffix[1:].upper()} file ({suffix})' if suffix else 'file'
 
 
+def identify_runs(path: str, result: Any) -> Any:
+    """Give each time history `result` holds the run identity its file's
+    name says, and return `result`.
+
+    The name is the one place a run's axis, number, level and start
+    often are, and it is not kept after the import, so it is read here
+    (`core.runs.read_name`), with a Rattlesnake run's environment names
+    beside it. A name that says nothing gives nothing, and the history
+    is left as it was. A field the names give two ways, or a level
+    without a sign, is not read: an `ImportNote` names the file and the
+    field, to be entered. A history that already carries an identity (a
+    reader's own) keeps it.
+    """
+    import warnings
+
+    from ..core.data import TimeHistory
+    from ..core.runs import (
+        FIELD_NAMES,
+        FROM_ENVIRONMENT,
+        FROM_NAME,
+        RunIdentity,
+        read_name,
+    )
+
+    objects = (list(result.values()) if isinstance(result, dict)
+               else [result])
+    histories = [obj for obj in objects if isinstance(obj, TimeHistory)
+                 and getattr(obj, 'run_identity', None) is None]
+    if not histories:
+        return result
+    base = os.path.basename(path)
+    environments: list[str] = []
+    if rattlesnake.sniff(path):
+        try:
+            environments = list(rattlesnake.environment_kinds(path))
+        except Exception:  # noqa: BLE001 - names are a convenience
+            environments = []
+    from_name, refused = read_name(base, *environments)
+    if not from_name and not refused:
+        return result
+    # where each field came from: the file's name when it alone gives
+    # it, an environment's name otherwise
+    own, _ = read_name(base)
+    identity = RunIdentity(
+        **from_name,
+        sources=tuple((name, FROM_NAME if own.get(name) == value
+                       else FROM_ENVIRONMENT)
+                      for name, value in from_name.items()),
+        refused=tuple(refused.items()))
+    for name, why in refused.items():
+        warnings.warn(ImportNote(
+            f'{base}: {why}, so the {FIELD_NAMES[name]} is not read; enter '
+            'it'), stacklevel=3)
+    for history in histories:
+        history.run_identity = identity
+    return result
+
+
 def import_file(path: str | os.PathLike, format: str | None = None,
                 progress: Any | None = None, **kwargs: Any) -> Any:
     """Import a file, returning the Visual Dynamics object it contains.
@@ -235,12 +293,12 @@ def import_file(path: str | os.PathLike, format: str | None = None,
     if format is not None:
         for imp in _IMPORTERS:
             if imp.name == format:
-                return load_with(imp)
+                return identify_runs(path, load_with(imp))
         raise ValueError(f"No importer named {format!r}; "
                          f"available: {[i.name for i in _IMPORTERS]}")
     for imp in _IMPORTERS:
         if imp.sniff(path):
-            return load_with(imp)
+            return identify_runs(path, load_with(imp))
     # a refusal that says what the file *is* saves a round trip: a
     # container whose contents decide the reader, and whose name does
     # not, is the case that brought this up (Brandon, 2026-09-20)

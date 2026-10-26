@@ -313,6 +313,14 @@ class ReportEditor(QWidget):
         #: the level run, while a responses-against-prediction block is
         #: in the pane
         self.level_edit: QLineEdit | None = None
+        #: the runs panels (report feature `run_sections`), while shown,
+        #: and what the last of their changes had to say
+        self.runs_panel: Any = None
+        self.chronology_panel: Any = None
+        self._runs_message: str = ''
+        #: the window's worker for a verb that takes a while, called as
+        #: `run_long(status, verb, *args)`; None runs it here
+        self.run_long: Callable[..., Any] | None = None
         self.field_boxes: dict[str, QComboBox] = {}
         self._loading_pane = False
         self._text_timer: QTimer = QTimer(self)
@@ -537,6 +545,7 @@ class ReportEditor(QWidget):
         self.calibration_button = self.calibration_note = None
         self.identity_edits, self.identity_notes = {}, None
         self.amend_button = self.identity_box = None
+        self.runs_panel = self.chronology_panel = None
         self.field_boxes = {}
         body = QWidget()
         form = QFormLayout(body)
@@ -589,6 +598,7 @@ class ReportEditor(QWidget):
                                                   **change}))
                 form.addRow(self.features_panel)
                 self._identity_pane(form, report)
+                self._runs_panel(form)
             elif block.get('kind') == 'text' and 'section' in block:
                 self._section_pane(form, block)
             elif block.get('kind') == 'text' and 'check' in block:
@@ -764,6 +774,8 @@ class ReportEditor(QWidget):
             self.calibration_note = QLabel('')
             self.calibration_note.setWordWrap(True)
             form.addRow(self.calibration_note)
+        if found is not None and found.key == 'chronology':
+            self._chronology_panel(form, block)
 
     def _calibrating(self) -> bool:
         from ..report.calibration import FEATURE
@@ -967,6 +979,47 @@ class ReportEditor(QWidget):
                 self.identity_notes.setText(str(refused))
             return False
         return self.report.identity != before
+
+    def _runs_panel(self, form) -> None:
+        """The runs and their identities, under the Report Features
+        panel, while the report has Runs and chronology on. With `form`
+        None, the panel already in the pane is added or taken away to
+        follow the feature, and nothing else in the pane moves."""
+        from .report_runs_pane import RunsPanel, project_of, shown
+
+        objects = self.objects() if self.objects else {}
+        wanted = shown(objects, self.report)
+        if form is None:
+            if self.features_panel is None:
+                return
+            form = self.features_panel.parentWidget().layout()
+            if self.runs_panel is not None and not wanted:
+                form.removeRow(self.runs_panel)
+                self.runs_panel = None
+            if self.runs_panel is not None or not wanted:
+                return
+        if not wanted:
+            return
+        self.runs_panel = RunsPanel(project_of(objects), self._runs_message)
+        self._runs_message = ''
+        self.runs_panel.requested.connect(self._operate)
+        form.addRow(self.runs_panel)
+
+    def _chronology_panel(self, form, block) -> None:
+        """Draft from the Runs, and the draft on offer while the section
+        is unwritten, in the Chronology section's pane."""
+        from ..report.runs import drafted
+        from .report_runs_pane import ChronologyPanel, shown
+
+        objects = self.objects() if self.objects else {}
+        if not shown(objects, self.report):
+            return
+        offered = ('' if str(block.get('text', '')).strip()
+                   else drafted(self.report))
+        self.chronology_panel = ChronologyPanel(offered, self._runs_message)
+        self._runs_message = ''
+        self.chronology_panel.requested.connect(self._operate)
+        form.addRow(self.chronology_panel)
 
     def _combo(self, form, field, label, current, options):
         box = QComboBox()
@@ -1316,6 +1369,9 @@ class ReportEditor(QWidget):
             if not self._change_features(operation):
                 return
             self._show_identity()
+            # the runs panel comes or goes with its feature, in place,
+            # so the Report Features panel and what it said stay
+            self._runs_panel(None)
         elif op == 'identity':
             if not self._change_identity(operation):
                 return
@@ -1324,6 +1380,19 @@ class ReportEditor(QWidget):
         elif op == 'amend':
             if not self._amend(operation):
                 return
+            reselect = True
+        elif op in ('run', 'repeat_runs', 'draft_chronology',
+                    'accept_chronology'):
+            # runs and chronology: through the project's verbs, which
+            # refuse; the pane says what they had to say
+            from .report_runs_pane import operate, project_of
+
+            project = project_of(self.objects() if self.objects else {})
+            if project is None:
+                return
+            self.flush_text()
+            self._runs_message = operate(project, report, operation,
+                                         self.run_long)
             reselect = True
         elif op == 'section':
             # a skeleton section's one-step None, or who interpreted:

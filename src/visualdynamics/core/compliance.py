@@ -878,7 +878,21 @@ def detect_scale_db(specification: Specification, measured: DataArray,
                     controls: Sequence[str] | None = None) -> int:
     """The offset in dB, a multiple of 3 dB, that best lays the
     measurement on the specification, or zero when the data does not
-    show one clearly.
+    show one clearly: `read_scale_db`, with its None read as zero, the
+    scale that changes nothing."""
+    found = read_scale_db(specification, measured, spec_records,
+                          measured_records, controls)
+    return 0 if found is None else found
+
+
+def read_scale_db(specification: Specification, measured: DataArray,
+                  spec_records: Sequence[int] | None = None,
+                  measured_records: Sequence[int] | None = None,
+                  controls: Sequence[str] | None = None) -> int | None:
+    """The offset in dB, a multiple of 3 dB, that best lays the
+    measurement on the specification, or None when the data does not
+    show one clearly. Zero is a reading here: the bands agree that the
+    run was at full level.
 
     A run captured at -6 dB needs +6 dB added before it is compared with
     the 0 dB specification. Both objects are banded to sixth octaves
@@ -901,8 +915,8 @@ def detect_scale_db(specification: Specification, measured: DataArray,
       does not see the peaks, which are a minority of the bands, and the
       total power does.
 
-    Otherwise the result is zero and the comparison is shown as
-    measured. Scaling on doubtful evidence is worse than showing the
+    Otherwise the result is None, and the comparison is shown as
+    measured (`detect_scale_db`). Scaling on doubtful evidence is worse than showing the
     mismatch, because a wrong scale can turn a failed test into a passed
     one. The Scaling field is where the true level is typed.
 
@@ -943,11 +957,11 @@ def detect_scale_db(specification: Specification, measured: DataArray,
     from .octave import PER_OCTAVE
 
     if comparable(specification, measured) is not None:
-        return 0
+        return None
     if getattr(measured, 'bandwidth', None) is None:
         if not (hasattr(specification, 'to_octave')
                 and hasattr(measured, 'to_octave')):
-            return 0
+            return None
         specification = specification.to_octave(PER_OCTAVE)
         measured = measured.to_octave(PER_OCTAVE)
     wanted = None if controls is None else {str(c) for c in controls}
@@ -984,7 +998,7 @@ def detect_scale_db(specification: Specification, measured: DataArray,
         offsets.append(10.0 * np.log10(want[good] / got[good]))
     offsets = np.concatenate(offsets) if offsets else np.array([])
     if not offsets.size or not asked_total > 0.0 or not held_total > 0.0:
-        return 0
+        return None
     rungs = np.round(offsets / SCALE_STEP_DB) * SCALE_STEP_DB
     values, counts = np.unique(rungs, return_counts=True)
     # the most common rung; a tie goes to the one nearest zero, the
@@ -998,7 +1012,7 @@ def detect_scale_db(specification: Specification, measured: DataArray,
             or abs(float(np.median(offsets)) - candidate) > DETECTION_RUNG_DB
             or abs(10.0 * np.log10(asked_total / held_total) - candidate)
             > ERROR_DB):
-        return 0
+        return None
     return candidate
 
 

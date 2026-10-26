@@ -18,7 +18,7 @@ from __future__ import annotations
 import contextlib
 import os
 import warnings
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
@@ -5998,6 +5998,214 @@ class Project(dict):
         guard(report, page)
         return page
 
+    def run_identity(self, name: str) -> Any:
+        """Which run of the test a time history is, as a report reads it.
+
+        The axis, run, level against full and start the history carries
+        (read from its file's name on import, or entered with
+        `set_run_identity`), and the level the comparison with its
+        specification detects when nothing else gives one. A field read
+        two ways is not read, and `refused` says why, naming the
+        record.
+
+        Parameters
+        ----------
+        name : str
+            A time history, or an object computed from one (which
+            answers with that run's identity).
+
+        Returns
+        -------
+        RunIdentity
+            `axis`, `run`, `level_db`, `start` and `comment`; `sources`,
+            where each came from; `refused`, what was not read and why.
+
+        Raises
+        ------
+        ValueError
+            When `name` is not in the project.
+        TypeError
+            When `name` is not a time history and comes from none.
+        """
+        from .report.runs import identity
+
+        return identity(self, self.name_of(name), self.object_groups)
+
+    def set_run_identity(self, name: str, *, axis: str | None = None,
+                         run: str | int | None = None,
+                         level_db: float | str | None = None,
+                         start: Any = None,
+                         comment: str | None = None) -> Any:
+        """Enter which run of the test a time history is.
+
+        An entered field stands over what the file's name or the
+        comparison gave. A field left out (None) is unchanged; an empty
+        string clears it, back to what the record shows. The identity
+        is saved with the history in the project file.
+
+        Parameters
+        ----------
+        name : str
+            The time history: one imported, not one computed from
+            another (that is part of the run it came from).
+        axis : str, optional
+            The test axis, 'X', 'Y', 'Z' or a lab's own name.
+        run : str or int, optional
+            The run's identifier.
+        level_db : float, optional
+            The level against full, in decibels: 0 for full level.
+        start : str, datetime or date, optional
+            When the run started, ISO 8601 text such as
+            '2026-10-11T11:11:05'.
+        comment : str, optional
+            A free note on the run.
+
+        Returns
+        -------
+        RunIdentity
+            What the history carries afterwards.
+
+        Raises
+        ------
+        ValueError
+            For a history computed from another, a level that is not a
+            finite number, a start that is not a date, or an axis or
+            run on more than one line; the message names the record.
+            Nothing is changed.
+        TypeError
+            For an object that is not a time history, or a value of the
+            wrong type.
+        """
+        from .report.runs import set_identity
+
+        given = {key: value for key, value in (
+            ('axis', axis), ('run', run), ('level_db', level_db),
+            ('start', start), ('comment', comment)) if value is not None}
+        return set_identity(self, self.name_of(name), **given)
+
+    def report_chronology(self, name: str, *, window_s: float = 0.5,
+                          drop_db: float = 6.0, min_s: float = 1.0,
+                          progress: Callable[[int, int], None] | None = None
+                          ) -> str:
+        """Draft the chronology of the project's runs and offer it to a
+        report's Chronology section (the editor's Draft from the Runs).
+
+        Each run in the order it was run, with its axis, level, start,
+        the time its record was at level and the interruptions found in
+        it, as a Markdown table, then how they were read. The chronology
+        is the author's: the draft is offered beside the section, marked
+        as drafted on the editing page, and the section stays owed until
+        the author accepts it (`accept_chronology`) or writes the
+        section (`report_section`). The outcome of each run and the
+        cause of each interruption are left for the author.
+
+        Parameters
+        ----------
+        name : str
+            The report, with the report feature `run_sections` on.
+        window_s : float, default 0.5
+            The running-RMS window, in seconds.
+        drop_db : float, default 6.0
+            How far below the run's level an interruption reaches.
+        min_s : float, default 1.0
+            How long an interruption lasts at least, in seconds.
+        progress : callable, optional
+            Called with (runs read, runs) as each record is read.
+
+        Returns
+        -------
+        str
+            The draft offered, in the report's Markdown.
+
+        Raises
+        ------
+        ValueError
+            When the report does not have `run_sections` enabled, the
+            project holds no time history, the order of the runs cannot
+            be read (the records with neither a start nor a run number
+            are named), or a setting is not one the reading can use.
+        TypeError
+            When `name` is not a report.
+        """
+        from .report.features import enabled
+        from .report.runs import FEATURE, chronology, draft, offer
+
+        report = self._report(name)
+        if FEATURE not in enabled(report):
+            raise ValueError(f'report {report.title!r} does not have Runs and '
+                             'chronology enabled')
+        text = draft(chronology(self, self.object_groups, window_s, drop_db,
+                                min_s, progress))
+        offer(report, text)
+        return text
+
+    def accept_chronology(self, name: str, text: str | None = None) -> None:
+        """Accept the drafted chronology as a report's Chronology section,
+        as it was drafted or as the author edited it.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        text : str, optional
+            The draft as the author edited it; the draft on offer when
+            omitted.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            When no draft is on offer and no `text` is given.
+        TypeError
+            When `name` is not a report, or `text` is not a string.
+        """
+        from .report.runs import accept
+
+        accept(self._report(name), text)
+
+    def report_runs(self, name: str) -> list[str]:
+        """Repeat a report's Results for every run (the editor's Results
+        for Every Run).
+
+        The report's generated Results sections drawn from its first
+        run are added again for each run it does not draw on yet, each
+        figure bound by name to the object computed from that run the
+        same way, its caption naming the run. A section whose figure
+        has nothing computed from a run is not added for that run, and
+        the line for the run says what to compute. A second call adds
+        nothing for a run already drawn on.
+
+        Parameters
+        ----------
+        name : str
+            The report, with the report feature `run_sections` on.
+
+        Returns
+        -------
+        list of str
+            A line per run: the figures added, and what was not added
+            and why.
+
+        Raises
+        ------
+        ValueError
+            When the report does not have `run_sections` enabled, or
+            draws on no run.
+        TypeError
+            When `name` is not a report.
+        """
+        from .report.features import enabled
+        from .report.runs import FEATURE, repeat
+
+        report = self._report(name)
+        if FEATURE not in enabled(report):
+            raise ValueError(f'report {report.title!r} does not have Runs and '
+                             'chronology enabled')
+        return repeat(report, self, self.object_groups)
+
     def _report(self, name: str) -> Report:
         """The report called `name`; `TypeError` for anything else."""
         name = self.name_of(name)
@@ -7503,6 +7711,8 @@ _JOURNALED_VERBS = (
     'report_test_date', 'predict', 'report_prediction', 'export_report',
     'index_file', 'unindex_file', 'verify_data_index', 'report_check_block',
     'report_identity', 'export_report_pdf', 'issue_report', 'amend_report',
+    'set_run_identity', 'report_runs', 'report_chronology',
+    'accept_chronology',
     'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:

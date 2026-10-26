@@ -112,10 +112,10 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 
 
 #: every report feature, in the order the selection tool shows them
-#: within their groups. `skeleton_sections`, `check_blocks`,
-#: `prediction`, `data_index`, `calibration_in_date`, `report_identity`,
-#: `record_captions`, `plot_conventions` and its option `shared_decades`
-#: are built; the rest are the road map.
+#: within their groups. `skeleton_sections`, `run_sections`,
+#: `check_blocks`, `prediction`, `data_index`, `calibration_in_date`,
+#: `report_identity`, `record_captions`, `plot_conventions` and its option
+#: `shared_decades` are built; the rest are the road map.
 FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'skeleton_sections', 'Skeleton sections', 'Structure',
@@ -126,10 +126,12 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         'and the export lists what is still owed.'),
     ReportFeature(
         'run_sections', 'Runs and chronology', 'Structure',
-        'Run identity on each record, a results section for each run, '
-        'and a chronology of the runs with their duration at level and '
-        'the interruptions found for the author to explain.',
-        available=False),
+        'Run identity on each record (axis, run, level, start), read from '
+        'the file name or the comparison and entered where it cannot be; '
+        'the Results grouped by run; and a chronology of the runs with '
+        'their time at level and the interruptions found, offered as '
+        'draft text for the author to accept or edit.',
+        requires=('skeleton_sections',)),
     ReportFeature(
         'test_requirement', 'Requirement and results', 'Results',
         'The test requirement in words, and a result table with one row '

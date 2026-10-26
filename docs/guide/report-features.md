@@ -284,6 +284,113 @@ reading was canceled reads Not judged, and is read again the next time
 the page is drawn. A script that renders or exports the report makes
 them as it renders.
 
+## Runs and chronology
+
+**Runs and chronology** (group Structure, needs Skeleton sections) makes
+the report the report of the test, not of one recording: a real test is
+a dozen runs on three axes.
+
+**Run identity.** Each time history in the project is a run, with an
+axis, a run number, a level against full in decibels (0 dB is full
+level), the date and time it started, and a comment. They are read from
+what the record holds where they can be:
+
+- the file's name, on import: `Z_run07_-6dB_2026-10-11T111105.nc4` is
+  axis Z, run 7, -6 dB, started 11:11:05 on 11 October 2026. A lone X,
+  Y or Z, `run7` or `R7`, `-6dB`, `m6dB` or `full`, and a date with or
+  without a time are read; a Rattlesnake run's environment names are
+  read beside the file's name;
+- the level the comparison with the specification already detects,
+  when nothing else gives the level, or the comparison scale set by
+  hand.
+
+What cannot be read one way is not read: a name with two axes in it, a
+level written without a sign (`6dB` is below full or above it), a level
+the name and the comparison give differently, two specifications that
+could each give the level. The import says so in a note naming the
+file, and the field stays empty until it is entered. A history cut or
+filtered from another is part of that run, not a run of its own.
+
+With no block selected, the pane shows the **Runs** table under the
+Report Features panel: a row per run, with its record, axis, run, level,
+start and comment. A cell's tooltip says where its value came from or
+why it was not read. Type in a cell to enter that field; an entry stands
+over what was read, and an empty cell goes back to what the record
+shows. From a script:
+
+```python
+project.run_identity('Time History')
+project.set_run_identity('Time History', axis='Z', run=7, level_db=-6,
+                         start='2026-10-11T11:11:05')
+project.set_run_identity('Time History', level_db='')   # back to the record
+```
+
+The identity is saved with the time history in the project file.
+
+**Results by run.** Under Results, each generated section whose figures
+all come from one run sits under a heading naming that run (*Run 7, Z
+axis, -6 dB, 2026-10-11 11:11:05 (Time History)*), the runs in the
+order they were run. A section that compares runs, or draws on none,
+stays first, and the checks (Check blocks) still close the Results.
+**Results for Every Run**, under the Runs table, adds the
+report's Results sections for its first run again for each run it does
+not draw on yet, each figure bound to the object computed from that run
+the same way and its caption naming the run. When a run lacks an
+object, such as its PSDs, that section is not added for it and the
+pane says what to compute (`project.report_runs('Report')`).
+
+**The chronology.** The Chronology section is the author's, and stays
+owed until the author writes it. In its pane, **Draft from the Runs**
+reads every run's record and offers a draft: a table of the runs in
+order with axis, level, start, the time at level and the interruptions
+found, then how they were read. The draft is shown under the owed
+section on the editing page, framed and marked *drafted from the
+records, not yet accepted*; it is not in the exported report.
+**Accept Draft** makes it the section's words, to edit from there, and
+the author can as well write the section without it.
+
+```text
+| Run | Axis | Level | Start | Record | At level | Interruptions found | Outcome |
+|---|---|---|---|---|---:|---|---|
+| 1 | Z | 0 dB | 2026-10-11 09:30:00 | Time History | 28.0 s | none found |  |
+| 2 | Z | -6 dB | 2026-10-11 10:00:00 | Time History (2) | 24.0 s | at 10.0 s for 4.0 s, to zero |  |
+```
+
+The runs are ordered by start when every run has one, otherwise by run
+number; when neither says the order, the draft is refused, naming the
+records to enter a start or a run number for. The time at level and the
+interruptions are read from the running RMS of each record's control
+channels (the channel table's Control flag; otherwise its response
+channels) over half a second:
+
+- the run's level is the median of the running mean square over the
+  stretches within 3 dB of its loudest, so a ramp, the lower steps of a
+  step-up, a lead-in and a tail do not pull it down;
+- the run is at level within 3 dB of that. A start or stop from silence
+  is placed to the sample; an edge between two levels neither of which
+  is silence, within half a window;
+- an interruption is a stretch out of level between reaching level and
+  leaving it, at least 1 s long and at least 6 dB down, timed on the
+  record, with its depth, or *to zero* when every channel reads zero.
+
+A channel with a sample that is not a number, or one that never varies,
+is left out and named. A shock, transient, modal or system-ID record,
+and a stack of captures, is not one run at level, and its time at level
+is not read. The outcome of each run and the cause of each interruption
+are left for the author: the program finds an interruption and never
+explains it.
+
+```python
+project.report_features('Report', enable=['skeleton_sections',
+                                          'run_sections'])
+project.report_chronology('Report')        # offered, the section still owed
+project.accept_chronology('Report')        # or accept it as edited:
+project.accept_chronology('Report', 'Runs 1 to 4 on X, then ...')
+```
+
+`report_chronology` takes `window_s`, `drop_db` and `min_s` to read
+with a different window, depth or least duration.
+
 ## Calibration in date
 
 **Calibration in date** (group Records) answers the first thing a
@@ -579,7 +686,6 @@ and are grayed out until each is built:
 
 | Feature | Group | What it will add |
 |---|---|---|
-| Runs and chronology | Structure | run identity, a results section per run, and the runs in time order with duration at level |
 | Requirement and results | Results | the requirement in words and a met or not met row per criterion; the pass/fail box labeled a screening without one |
 | Findings register | Results | deviations, anomalies and nonconformances in four parts, the fact filled from the measurement |
 | Cross-axis and limit channels | Results | cross-axis against its limit, and where limit channels held the control down |

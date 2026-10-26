@@ -2981,12 +2981,27 @@ span.missing { color: #c0392b; font-weight: 700; font-style: italic; }
 }
 """
 
+#: a run's heading over its results, and a drafted chronology on the
+#: editing page (feature `run_sections`): drawn by the renderer
+#: (`report.runs.finish`), so style and no script. A rule sets the run's
+#: heading apart from the generated headings under it; the draft is
+#: framed dotted and headed in capitals, apart from the owed card.
+_RUNS_CSS = """
+h3.run { font-size: 1.15rem; margin: 1.6rem 0 .5rem; padding: .3rem 0 .2rem;
+  border-top: 2px solid var(--line); letter-spacing: .02em; }
+div.drafted { border: 2px dotted var(--faint); border-radius: 6px;
+  margin-top: .6rem; padding: .6rem .9rem; white-space: normal; }
+div.drafted strong { display: block; color: var(--faint);
+  letter-spacing: .06em; margin-bottom: .4rem; }
+"""
+
 #: page code by feature: (splices into `_JS`, functions added, CSS added)
 FEATURE_PAGE = {
     'skeleton_sections': ((), '', _SKELETON_CSS),
     'data_index': ((), '', _INDEX_CSS),
     'check_blocks': ((), '', _CHECK_CSS),
     'report_identity': (_PRINT_SPLICES, _PRINT_JS, _IDENTITY_CSS),
+    'run_sections': ((), '', _RUNS_CSS),
     'plot_conventions': (_STYLE_SPLICES, _STYLE_JS, _STYLE_CSS),
     'shared_decades': (_WINDOW_SPLICES, _WINDOW_JS, ''),
 }

@@ -1761,6 +1761,13 @@ class TimeHistory(DataArray):
     #: transmissibility.
     roles = None
 
+    #: which run of the test this history is (a `core.runs.RunIdentity`:
+    #: axis, run, level against full, start, comment, and where each
+    #: came from), when something knows. Read from the file's name on
+    #: import and entered with `Project.set_run_identity`; None when
+    #: nothing has said.
+    run_identity = None
+
     def suggest_truncation(self) -> Any:
         """A truncation that spans the whole record.
 

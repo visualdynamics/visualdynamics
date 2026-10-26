@@ -202,6 +202,13 @@ Present only where they mean something:
             tone_exclusion           the width, Hz, left out of this
                                      floor either side of a mixed test's
                                      tones, when set
+            run_identity             JSON, a time history's run: axis,
+                                     run, level_db, start and comment
+                                     where known, "sources" (where each
+                                     came from) and "refused" (what was
+                                     not read, and why); absent when
+                                     nothing has said. The level the
+                                     comparison detects is never saved
             averaging_frame_length, _overlap, _window, _frames, _start,
             _detrend, _start_set, and _window_parameter when the window
             takes one

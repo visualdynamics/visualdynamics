@@ -318,6 +318,8 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     if skeleton:
         from .skeleton import arrange
 
+        built_from = {id(built): origin for built, origin
+                      in zip(payload['blocks'], origins, strict=True)}
         payload['blocks'] = arrange(payload['blocks'], origins, held,
                                     objects, object_groups, edit=edit)
         if indexed:
@@ -326,6 +328,17 @@ def _report_payload(report, objects, unit_system=None, edit=False,
 
             payload['blocks'] = under(payload['blocks'], 'record',
                                       page_blocks(objects))
+        if 'run_sections' in active:
+            # runs and chronology: the Results section grouped by run
+            from .runs import group_results
+
+            payload['blocks'] = group_results(payload['blocks'], built_from,
+                                              objects, object_groups)
+            if edit:
+                # a drafted chronology, marked, under the owed section
+                from .runs import mark_drafted
+
+                mark_drafted(payload['blocks'], report)
         # numbered again in the order the page now shows them
         figures = tables = 0
         for built in payload['blocks']:
@@ -382,6 +395,10 @@ def _report_payload(report, objects, unit_system=None, edit=False,
             finish(payload['blocks'], end=end_mark(report))
         else:
             finish(payload['blocks'], end=END)
+    if 'run_sections' in active:
+        from .runs import finish as finish_runs
+
+        finish_runs(payload['blocks'])
     if identity:
         from .identity import block_html, end_mark
 

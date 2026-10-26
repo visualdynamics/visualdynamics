@@ -664,6 +664,20 @@ class ReportEditor(QWidget):
                 self._dates_pane(form, block, objects, object_groups)
         finally:
             self._loading_pane = False
+        # the pane replaced is deleted once control is back in the event
+        # loop, not here: this can run from inside a signal of a widget
+        # in it (a runs table's cell typed in), and setWidget would
+        # delete that widget, and the table under it, while the signal
+        # is still being delivered. It says nothing more meanwhile: a
+        # field in it losing focus as it is hidden would otherwise be
+        # read as an edit to the block now selected
+        old = self.pane.takeWidget()
+        if old is not None:
+            for widget in (old, *old.findChildren(QWidget)):
+                widget.blockSignals(True)
+            old.hide()
+            old.setParent(self)
+            old.deleteLater()
         self.pane.setWidget(body)
         self._offer()
 

@@ -695,6 +695,22 @@ def test_the_runs_panel_lists_and_enters_identities(editing):
     assert editor.runs_panel is None
 
 
+def test_a_cell_typed_in_does_not_delete_its_table_under_it(editing):
+    """The cell's change rebuilds the pane from inside the table's own
+    signal; the pane it replaces, the table with it, is deleted once
+    that signal has returned, not while the table is still in it."""
+    import shiboken6
+
+    window, editor, _report, _name = editing
+    table = editor.runs_panel.table
+    table.item(0, 1).setText('X')
+    assert editor.runs_panel.table is not table, 'the pane was rebuilt'
+    assert shiboken6.isValid(table), 'still there while its signal returns'
+    assert not table.isVisible()
+    window._run_long('Reading…', lambda progress=None: None)
+    assert not shiboken6.isValid(table), 'and deleted after'
+
+
 def test_the_chronology_pane_drafts_and_accepts(editing):
     _window, editor, report, _name = editing
     editor._operate({'op': 'select', 'at': 'section:chronology'})

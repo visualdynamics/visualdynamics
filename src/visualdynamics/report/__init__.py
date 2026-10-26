@@ -145,9 +145,11 @@ def render_html(report: Report, objects: Mapping[str, Any],
     fixes the page's theme, which otherwise follows the reader's.
     """
     # All editing moved to the app's bar and pane on 2026-09-08.
+    from .features import enabled as enabled_features
+
     payload = _report_payload(report, objects, unit_system, edit,
                               object_groups, selected, labels, fill, theme)
-    return _page_html(payload, edit, channel_js)
+    return _page_html(payload, edit, channel_js, enabled_features(report))
 
 
 def _report_payload(report, objects, unit_system=None, edit=False,
@@ -249,11 +251,13 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     return payload
 
 
-def _page_html(payload, edit=False, channel_js=None) -> str:
+def _page_html(payload, edit=False, channel_js=None, features=()) -> str:
     """The one-file page around a payload: its stylesheet, its viewers
-    and the payload itself inline."""
+    and the payload itself inline. `features` are the report features
+    enabled (`report.features`), whose page code `page_parts` adds; with
+    none, the page as it always was."""
     data = json.dumps(payload, allow_nan=False)
-    css, script = page_parts(active)
+    css, script = page_parts(features)
     scripts = script + (_EDIT_JS if edit else '')
     shell = _PAGE
     if edit:

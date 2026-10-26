@@ -38,16 +38,16 @@ class AmendDialog(QDialog):
         told.setWordWrap(True)
         layout.addWidget(told)
         form = QFormLayout()
-        self.revision = QLineEdit()
+        self.revision: QLineEdit = QLineEdit()
         self.revision.setPlaceholderText('the amendment\'s revision')
         form.addRow('Revision', self.revision)
-        self.number = QLineEdit()
+        self.number: QLineEdit = QLineEdit()
         self.number.setPlaceholderText(
             f'{report.identity.get("number", "")} (the original\'s, unless '
             'the amendment has its own)')
         form.addRow('Report number', self.number)
         layout.addLayout(form)
-        self.changes = QTableWidget(1, len(CHANGE_PARTS))
+        self.changes: QTableWidget = QTableWidget(1, len(CHANGE_PARTS))
         self.changes.setHorizontalHeaderLabels(
             [part.capitalize() for part in CHANGE_PARTS])
         self.changes.horizontalHeader().setStretchLastSection(True)

@@ -63,26 +63,29 @@ def _on_gui_thread(app: Any, work: Any) -> Any:
     """Run `work` on the application's thread and return what it
     returns (or raise what it raises), with this thread waiting. The
     web engine lives on that thread, and a long verb runs on a worker
-    while that thread turns its event loop, which delivers the call."""
-    from PySide6.QtCore import QObject, Qt, Signal
+    while that thread turns its event loop, which delivers the call.
 
-    class Courier(QObject):
-        asked = Signal()
+    The call is posted with the application as its context, so no Qt
+    object is made, moved or deleted on this thread; the wait is a
+    plain event, set on the application's thread when the work is done.
+    """
+    import threading
+
+    from PySide6.QtCore import QTimer
 
     outcome: list[tuple[bool, Any]] = []
+    done = threading.Event()
 
     def run() -> None:
         try:
             outcome.append((True, work()))
         except BaseException as failure:  # noqa: BLE001 - raised below
             outcome.append((False, failure))
+        finally:
+            done.set()
 
-    # a function connected with no receiver runs in the sender's thread,
-    # so the courier is moved to the application's
-    courier = Courier()
-    courier.moveToThread(app.thread())
-    courier.asked.connect(run, Qt.ConnectionType.BlockingQueuedConnection)
-    courier.asked.emit()
+    QTimer.singleShot(0, app, run)
+    done.wait()
     ok, value = outcome[0]
     if not ok:
         raise value

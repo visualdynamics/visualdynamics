@@ -701,12 +701,40 @@ def test_the_window_refuses_a_changed_issued_report(editing, monkeypatch,
 # ---- a real PDF ------------------------------------------------------------------
 
 
+#: reads a PDF's pages as text, in a process of its own
+_READ_PAGES = """
+import json, sys
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtPdf import QPdfDocument
+app = QGuiApplication([])
+document = QPdfDocument()
+document.load(sys.argv[1])
+print(json.dumps([' '.join(document.getAllText(at).text().split())
+                  for at in range(document.pageCount())]))
+"""
+
+
+def _pdf_pages(path):
+    """The text of each page of the PDF at `path`, read with QtPdf in a
+    separate process. QtPdf is never loaded into a process running Qt
+    WebEngine: both carry the browser engine's own libraries, and a
+    test worker that loaded QtPdf beside a live web engine crashed in
+    its next event loop on Linux."""
+    import os
+    import subprocess
+    import sys
+
+    run = subprocess.run(
+        [sys.executable, '-c', _READ_PAGES, str(path)], capture_output=True,
+        text=True, encoding='utf-8', timeout=120, check=True,
+        env=dict(os.environ, QT_QPA_PLATFORM='offscreen'))
+    return json.loads(run.stdout.strip().splitlines()[-1])
+
+
 @pytest.fixture(scope='module')
 def issued(tmp_path_factory, qt_app):
     """A report of several pages issued for real, through the web engine,
     and read back."""
-    from PySide6.QtPdf import QPdfDocument
-
     report = _report(**COMPLETE)
     for at in range(40):
         report.add({'kind': 'text', 'text': f'## Part {at}\n\n' + ' '.join(
@@ -715,12 +743,7 @@ def issued(tmp_path_factory, qt_app):
     project, name = _project(report)
     path = tmp_path_factory.mktemp('pdf') / 'R-0037.pdf'
     project.issue_report(name, path)
-    document = QPdfDocument()
-    document.load(str(path))
-    pages = [' '.join(document.getAllText(at).text().split())
-             for at in range(document.pageCount())]
-    document.close()
-    return project, name, path, pages
+    return project, name, path, _pdf_pages(path)
 
 
 def test_page_n_of_n_is_what_the_pdf_holds(issued):
@@ -751,12 +774,14 @@ def test_the_window_issues_with_the_print_handed_to_its_thread(
     """Issue Report renders on the window's worker, and the print, which
     the web engine allows only on the application's thread, is handed
     there while the worker waits."""
+    import sys
     import threading
 
     from PySide6.QtWidgets import QFileDialog
 
     from visualdynamics.report import pdf
 
+    assert 'PySide6.QtPdf' not in sys.modules,         'QtPdf stays out of a process running the web engine (_pdf_pages)'
     window, editor, report, name = editing
     window.project.report_features(name, enable=[ri.FEATURE])
     window.project.report_identity(name, **COMPLETE)

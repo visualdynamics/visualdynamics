@@ -707,6 +707,39 @@ def _draw_field_limit(painter, color):
         painter.drawRect(QRectF(corner.x() - 3.5, corner.y() - 3.5, 7, 7))
 
 
+def _draw_fatigue(painter, color):
+    """A row of resonators under a rising curve of their responses.
+
+    The reading in miniature: four springs of falling height stood on a
+    base, each with its mass, and over them a curve rising through the
+    masses, drawn bold, with a dashed curve under it, the field and the
+    test.
+    """
+    faint = QColor(color)
+    faint.setAlpha(110)
+    painter.setPen(_pen(faint, 2))
+    painter.drawLine(QPointF(4, 56), QPointF(60, 56))
+    for k, x in enumerate((12, 24, 36, 48)):
+        top = 44 - 6 * k
+        zig = [QPointF(x, 56)]
+        for step in range(1, 6):
+            y = 56 - (56 - top) * step / 6
+            zig.append(QPointF(x + (3 if step % 2 else -3), y))
+        zig.append(QPointF(x, top))
+        painter.drawPolyline(zig)
+        painter.setBrush(QBrush(faint))
+        painter.drawRect(QRectF(x - 4, top - 6, 8, 6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(color, 4))
+    painter.drawPath(_curve([(6 + i, 34 - 26 * (i / 52) ** 0.7)
+                             for i in range(53)]))
+    pen = QPen(QColor(color), 3)
+    pen.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(pen)
+    painter.drawPath(_curve([(6 + i, 40 - 24 * (i / 52) ** 0.8)
+                             for i in range(53)]))
+
+
 def _draw_truncate(painter, color):
     """A trace with its ends grayed away behind two cut lines.
 
@@ -2657,6 +2690,7 @@ def control_icon(name: str) -> QIcon:
      'partial_coherence': _draw_partial_coherence,
      'transformation': _draw_transformation,
      'field_limit': _draw_field_limit,
+     'fatigue': _draw_fatigue,
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'sweep_rate': _draw_sweep_rate,

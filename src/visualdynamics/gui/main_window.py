@@ -1172,6 +1172,11 @@ class MainWindow(QMainWindow):
             lambda _settings: self.render_current())
         self.data_pane.field_limit_panel.make_asked.connect(
             self.make_field_specification)
+        # the fatigue reading: the toggle and every setting in its pane
+        # redraw it, worked out again only when what it reads changed
+        self.data_pane.fatigue_toggled.connect(
+            lambda _wanted: self.render_current())
+        self.data_pane.fatigue_panel.changed.connect(self._fatigue_chosen)
         # the acts, asked for where their settings are set (Brandon,
         # 2026-08-28): each button is a second entrance to the same
         # verb the bar's act offers, so provenance, badges and the
@@ -1376,6 +1381,16 @@ class MainWindow(QMainWindow):
         #: the settings and the envelope Make Specification writes;
         #: None while it is not up or was refused
         self._field_limit: dict[str, Any] | None = None
+        #: the settings chosen in the fatigue pane, by (name, record), so
+        #: a redraw and a return to the record keep them
+        self._fatigue_settings: dict[tuple[str, int], dict[str, Any]] = {}
+        #: the record the fatigue reading is drawn for, (name, record),
+        #: so a setting chosen in its pane is kept for that record
+        self._fatigue_shown: tuple[str, int] | None = None
+        #: the last fatigue reading worked out, with what it was worked
+        #: out from, so a redraw with nothing changed draws it again
+        #: rather than counting every resonator again
+        self._fatigue_cache: tuple[tuple, Any, Any] | None = None
         #: and the shock windows, the same way
         self.shock_overlays: list[Any] = []
         #: which comparison the plot is drawing, so the compliance table
@@ -14697,6 +14712,192 @@ class MainWindow(QMainWindow):
             + (f', {margin:+g} dB margin' if margin else '')
             + f' — linked to {first}')
 
+
+    #: the most work (samples or integration cells, times natural
+    #: frequencies) a fatigue reading is worked out with on this thread;
+    #: more goes to the worker, so the window keeps painting while every
+    #: resonator is counted
+    FATIGUE_INLINE: ClassVar[int] = 200000
+
+    def _fatigue_source(self, series):
+        """(name, data, record) when the selection is one acceleration
+        record the fatigue reading can read: one record of a PSD or a
+        specification (`core.fatigue.spectrum_refusal`) or one channel of
+        a time history (`core.fatigue.history_refusal`). None otherwise,
+        which is also what hides the button."""
+        from ..core.fatigue import history_refusal, spectrum_refusal
+
+        if len(series) != 1:
+            return None
+        name, data, records = series[0]
+        if name not in self.project:
+            return None
+        if records is not None and len(records) != 1:
+            return None
+        if records is None and getattr(data, 'num_records', 0) != 1:
+            return None
+        record = int(records[0]) if records else 0
+        if isinstance(data, TimeHistory):
+            refused = history_refusal(data, record)
+        elif isinstance(data, Psd):
+            refused = spectrum_refusal(data, record)
+        else:
+            return None
+        return None if refused is not None else (name, data, record)
+
+    def _fatigue_choices(self, name, record):
+        """The records the fatigue reading can set the record against:
+        every other acceleration record in the project it can read, as
+        (words, (name, record))."""
+        from ..core.fatigue import history_refusal, spectrum_refusal
+
+        choices = []
+        for key, value in self.project.items():
+            if isinstance(value, TimeHistory):
+                refusal = history_refusal
+            elif isinstance(value, Psd):
+                refusal = spectrum_refusal
+            else:
+                continue
+            for index in range(value.num_records):
+                if (key, index) == (name, record) or refusal(value, index):
+                    continue
+                words = (key if value.num_records == 1
+                         else f'{key}: {value.record_label(index)}')
+                choices.append((words, (key, index)))
+        return choices
+
+    @staticmethod
+    def _fatigue_cost(data, q):
+        """About how much work reading `data` takes, against
+        `FATIGUE_INLINE`: a time history's samples, or a spectrum's
+        integration cells over three decades, times a hundred natural
+        frequencies."""
+        from ..core.fatigue import CELLS
+
+        if isinstance(data, TimeHistory):
+            return len(data.abscissa) * 100
+        return int(CELLS * q * np.log(1e3) * 100)
+
+    def _fatigue_work(self, name, data, record, settings):
+        """The reading as the settings ask: (field, pair), the pair None
+        without a test. Worked out on the worker when it is more than
+        `FATIGUE_INLINE` of work, and kept, so a redraw with nothing
+        changed costs nothing. Raises what `core.fatigue` raises."""
+        from ..core.fatigue import compared, fatigue_spectra
+
+        against = settings.get('against')
+        test = None if against is None else self.project[against[0]]
+        key = (name, record, id(data), against,
+               None if test is None else id(test),
+               settings['b'], settings['q'], settings['method'],
+               settings['duration'], settings['test_duration'])
+        cached = self._fatigue_cache
+        if cached is not None and cached[0] == key:
+            return cached[1], cached[2]
+        given = {'b': settings['b'], 'q': settings['q'],
+                 'method': settings['method']}
+        cost = self._fatigue_cost(data, settings['q'])
+        if test is None:
+            if isinstance(data, TimeHistory):
+                given.pop('method')
+            verb, args = fatigue_spectra, (data, record)
+            given['duration'] = settings['duration']
+        else:
+            cost += self._fatigue_cost(test, settings['q'])
+            verb, args = compared, (data, test, record, against[1])
+            given['field_duration'] = settings['duration']
+            given['test_duration'] = settings['test_duration']
+        if cost > self.FATIGUE_INLINE:
+            # the worker is handed records and plain numbers only, and
+            # hands back plain results: every Qt object is made, drawn
+            # and freed on this thread
+            found = self._run_long(f'Reading {name} through its '
+                                   'resonators…', verb, *args, **given)
+        else:
+            found = verb(*args, **given)
+        field, pair = (found, None) if test is None else (found.field, found)
+        self._fatigue_cache = (key, field, pair)
+        return field, pair
+
+    def _render_fatigue(self, name, data, record):
+        """The Fatigue reading: the record's extreme response and
+        fatigue damage spectra, against the candidate test chosen in the
+        pane, and the time-compression rule they are read through
+        (`plot.fatigue`), the settings and what they found in the pane
+        beside it. A refusal is said in the pane and on the status line,
+        with nothing drawn that could read as a spectrum. Journaled as
+        its `plot_fatigue` call."""
+        from ..core.progress import Cancelled
+        from ..plot.fatigue import build_fatigue, summary
+
+        pane = self.data_pane
+        panel = pane.fatigue_panel
+        settings = self._fatigue_settings.get((name, record))
+        if settings is None:
+            settings = panel.settings() | {'against': None, 'duration': None,
+                                           'test_duration': None}
+            self._fatigue_settings[(name, record)] = settings
+        choices = self._fatigue_choices(name, record)
+        if settings.get('against') not in [key for _words, key in choices]:
+            settings['against'] = None
+        against = settings['against']
+        test_spectrum = (against is not None
+                         and isinstance(self.project[against[0]], Psd))
+        self._fatigue_shown = (name, record)
+        panel.set_settings(settings, choices,
+                           spectrum=isinstance(data, Psd),
+                           test_spectrum=test_spectrum)
+        panel.show()
+        pane.offer_waterfall(False)
+        pane.show_waterfall(False)
+        pane.graphics.clear()
+        try:
+            field, pair = self._fatigue_work(name, data, record, settings)
+        except Cancelled:
+            panel.show_reading(None, refusal='cancelled')
+            return 'Fatigue: cancelled'
+        except ValueError as refusal:
+            panel.show_reading(None, refusal=str(refusal))
+            return f'No fatigue reading: {refusal}'
+        build_fatigue(pane.graphics, field,
+                      None if pair is None else pair.test, pair=pair,
+                      unit_system=self.unit_system, theme=self.theme_name,
+                      field_name=name,
+                      test_name=None if against is None else against[0])
+        panel.show_reading(field, pair)
+        self._journal_fatigue(name, record, data, settings)
+        return summary(field, pair)
+
+    def _fatigue_chosen(self, settings):
+        """A setting chosen in the fatigue pane: kept for the record the
+        reading is drawn for, and the reading drawn again."""
+        if self._fatigue_shown is None:
+            return
+        self._fatigue_settings[self._fatigue_shown] = dict(settings)
+        self.render_current()
+
+    def _journal_fatigue(self, name, record, data, settings):
+        """The reading, journaled as the headless call that draws it
+        (`_journal_view`), settling in place per object."""
+        prefix = f'visualdynamics.plot.plot_fatigue(project[{name!r}]'
+        said = f', {record}, b={settings["b"]!r}, q={settings["q"]!r}'
+        against = settings.get('against')
+        spectral = isinstance(data, Psd) or (
+            against is not None
+            and isinstance(self.project[against[0]], Psd))
+        if spectral:
+            said += f', method={settings["method"]!r}'
+        if settings.get('duration') is not None:
+            said += f', duration={settings["duration"]!r}'
+        if against is not None:
+            said += (f', against=project[{against[0]!r}], '
+                     f'against_record={against[1]}')
+            if settings.get('test_duration') is not None:
+                said += f', against_duration={settings["test_duration"]!r}'
+        self._journal_view(prefix, f"{prefix}{said}, path='fatigue.png', "
+                                   'show=False)')
+
     def _draw_truncation(self, history):
         """Gray the ends being cut away and put the span beside it.
 
@@ -15097,6 +15298,7 @@ class MainWindow(QMainWindow):
                 filtered)
         history = self._sole_history(series)
         field = self._field_limit_source(series)
+        fatigue = self._fatigue_source(series)
         self.data_pane.show_controls(map_wanted=wants_map, diagonal=diagonal,
                                      cmif=all_frf,
                                      complex_data=complex_series,
@@ -15136,6 +15338,7 @@ class MainWindow(QMainWindow):
                                      _transformation_source(series)
                                      is not None,
                                      field_limit=field is not None,
+                                     fatigue=fatigue is not None,
                                      # a declared unit, as the readings
                                      # require (`core.shaker`)
                                      fit=history is not None and any(
@@ -15161,6 +15364,10 @@ class MainWindow(QMainWindow):
                    and self._notch_source(series))
         if notched:
             return self._render_notch(*notched)
+        # the record read through its resonators replaces its trace,
+        # whichever other reading of it stands
+        if fatigue is not None and self.data_pane.showing('fatigue'):
+            return self._render_fatigue(*fatigue)
         if history is not None and self.data_pane.showing('kurtosis'):
             return self._render_kurtosis(history, series)
         if history is not None:

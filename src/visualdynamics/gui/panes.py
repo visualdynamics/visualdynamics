@@ -45,6 +45,7 @@ from .chance_panel import ChancePanel
 from .confidence_panel import ConfidencePanel
 from .drive_prediction_panel import DrivePredictionPanel
 from .editors import SpinBox
+from .fatigue_panel import FatiguePanel
 from .field_limit_panel import FieldLimitPanel
 from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
@@ -258,6 +259,9 @@ class DataPane(QWidget):
     #: the field limit of a set of spectra was asked for (True) or put
     #: away (False)
     field_limit_toggled = Signal(bool)
+    #: the extreme response and fatigue damage spectra of a record were
+    #: asked for (True) or put away (False)
+    fatigue_toggled = Signal(bool)
     #: a sine specification's sweep-rate reading was asked for (True)
     #: or put away (False)
     sweep_rate_toggled = Signal(bool)
@@ -334,6 +338,7 @@ class DataPane(QWidget):
         self.partial_coherence_wanted: bool = False
         self.transformation_wanted: bool = False
         self.field_limit_wanted: bool = False
+        self.fatigue_wanted: bool = False
         self.sweep_rate_wanted: bool = False
         self.sine_profile_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
@@ -517,6 +522,10 @@ class DataPane(QWidget):
         # Make Specification under the reading
         self.field_limit_panel: FieldLimitPanel = FieldLimitPanel()
         self.field_limit_panel.hide()
+        # the settings the two spectra rest on and the comparison with a
+        # candidate test; read only, nothing to apply
+        self.fatigue_panel: FatiguePanel = FatiguePanel()
+        self.fatigue_panel.hide()
         # the modes a sine sweep is checked against, beside the sweep
         # drawn through their bands; the Sweep Rate reading shows it
         self.sweep_rate_panel: SweepRatePanel = SweepRatePanel()
@@ -608,6 +617,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.partial_coherence_panel)
         plot_row.addWidget(self.transformation_panel)
         plot_row.addWidget(self.field_limit_panel)
+        plot_row.addWidget(self.fatigue_panel)
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.sine_profile_panel)
@@ -1350,6 +1360,20 @@ class DataPane(QWidget):
         self.field_limit_action.triggered.connect(
             lambda checked=False: self._choose_toggle('field_limit', checked))
         toolbar.addAction(self.field_limit_action)
+        # the record read through a resonator at each natural frequency:
+        # the largest response each reaches and the fatigue damage each
+        # does, against a candidate test when one is chosen in the pane
+        self.fatigue_action: QAction = QAction(
+            control_icon('fatigue'), 'Fatigue', self)
+        self.fatigue_action.setCheckable(True)
+        self.fatigue_action.setToolTip(
+            'Read the record through a resonator at each natural '
+            'frequency: the extreme response and fatigue damage spectra, '
+            'against a candidate test, with the time-compression rule and '
+            'its cap')
+        self.fatigue_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('fatigue', checked))
+        toolbar.addAction(self.fatigue_action)
         # a sine specification read against the modes it sweeps
         # through: the time and cycles in each half-power band, and
         # whether the rate lets the mode build. A reading of the
@@ -1436,6 +1460,7 @@ class DataPane(QWidget):
              self.rms_check_action],
             [self.sweep_rate_action, self.sine_profile_action],
             [self.field_limit_action],
+            [self.fatigue_action],
             [self.transmissibility_action],
             [self.conditioning_action, self.realizability_action],
             [self.prediction_action],
@@ -1586,9 +1611,9 @@ class DataPane(QWidget):
     def _choose_toggle(self, key: str, checked: bool) -> None:
         """The octave, tones, transmissibility, confidence, rms check,
         drive prediction, notch prediction, partial coherence, rigid-body
-        residual, field limit or sweep-rate button, each a toggle of its
-        own: remember it, put its panel away when it is unchecked, then
-        say so."""
+        residual, field limit, fatigue or sweep-rate button, each a toggle
+        of its own: remember it, put its panel away when it is unchecked,
+        then say so."""
         setattr(self, f'{key}_wanted', bool(checked))
         if not checked:
             getattr(self, f'{key}_panel').hide()
@@ -2308,7 +2333,8 @@ class DataPane(QWidget):
                       notch: bool = False,
                       partial_coherence: bool = False,
                       transformation: bool = False,
-                      field_limit: bool = False) -> None:
+                      field_limit: bool = False,
+                      fatigue: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -2338,9 +2364,10 @@ class DataPane(QWidget):
         `partial_coherence` the partial and reference coherence behind a
         multiple coherence computed from one, `transformation` the
         rigid-body residual behind a density transformed through rigid
-        shapes, and `residual` the fit's residual CMIF. The pair,
-        3-D, frequency-axis, quantity and page controls are hidden here;
-        the code that draws offers them afterwards.
+        shapes, `fatigue` the extreme response and fatigue damage spectra
+        of one acceleration record, and `residual` the fit's residual
+        CMIF. The pair, 3-D, frequency-axis, quantity and page controls
+        are hidden here; the code that draws offers them afterwards.
         """
         # visibility is settled by `sync_toolbar` at the end, from what
         # is actually on the bar — see the note there
@@ -2412,6 +2439,7 @@ class DataPane(QWidget):
         self._offer('transformation', 'transformation_panel',
                     transformation)
         self._offer('field_limit', 'field_limit_panel', field_limit)
+        self._offer('fatigue', 'fatigue_panel', fatigue)
         self.residual_action.setVisible(residual)
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
@@ -2491,6 +2519,7 @@ class DataPane(QWidget):
                        self.partial_coherence_action,
                        self.transformation_action,
                        self.field_limit_action,
+                       self.fatigue_action,
                        self.sweep_rate_action, self.sine_profile_action,
                        self.confidence_action, self.notch_action,
                        self.sweep_rate_action,

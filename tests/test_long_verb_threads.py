@@ -85,3 +85,22 @@ def test_one_relay_for_the_windows_life(window):
         window._run_long('Reading…', lambda progress=None: progress(1, 1))
     assert window._long_relay is relay
     assert window.findChildren(QEventLoop) == [], 'no loop left behind'
+
+
+def test_what_was_let_go_before_the_verb_is_not_deleted_under_its_loop(
+        window):
+    """With no event loop running (a script, a test), the runner's loop
+    is the first to run, and Qt deletes in it whatever was handed to
+    `deleteLater` before: a pane the report took over, torn down under
+    the input gate while the worker runs. It is deleted before the
+    verb starts instead."""
+    from PySide6.QtWidgets import QLabel, QWidget
+
+    pane = QWidget(window)
+    QLabel('a plot', pane)
+    deleted = []
+    pane.destroyed.connect(lambda: deleted.append(window._importing))
+    pane.deleteLater()
+    del pane
+    window._run_long('Reading…', lambda progress=None: 7)
+    assert deleted == [False], 'deleted before the runner took the loop'

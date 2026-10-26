@@ -8338,13 +8338,26 @@ class MainWindow(QMainWindow):
         it collects (anyone's, from any earlier cycle) is deleted on
         that thread, under the event loop turning here: a crash in the
         loop, on Linux, with the report editor's page live.
+
+        Nothing let go before the verb is deleted under its loop. With
+        no event loop running on this thread (a script or a test driving
+        the window), the loop here is the first to run, and Qt deletes
+        in it every object handed to `deleteLater` since: a pane the
+        report took over, with its plots, torn down widget by widget
+        under the input gate while the worker runs, which crashed in
+        the loop on Linux. Those are deleted here first, before the
+        worker starts, as the application's own loop would have
+        deleted them already.
         """
         import gc
 
         import shiboken6
+        from PySide6.QtCore import QThread
 
         from ..core.progress import Cancelled
 
+        if QThread.currentThread().loopLevel() == 0:
+            QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         relay = self._long_relay
         loop = QEventLoop()
         relay.finished.connect(loop.quit)

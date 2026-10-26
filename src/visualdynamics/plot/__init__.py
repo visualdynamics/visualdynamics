@@ -5373,6 +5373,71 @@ def plot_drive_prediction(frf: Any, specification: Any, *,
                         size=size)
 
 
+def plot_field_limit(data: Any, records: Sequence[int] | None = None, *,
+                     margin_db: float = 0.0,
+                     unit_system: UnitSystem | None = None,
+                     theme: Any = None,
+                     path: str | os.PathLike | None = None,
+                     show: bool = True, title: str | None = None,
+                     size: tuple[int, int] = (1000, 700),
+                     **settings: Any) -> Any:
+    """Draw a set of measured PSDs or SRSs with the limit taken over them
+    and the straight-line envelope written over the limit.
+
+        visualdynamics.plot.plot_field_limit(flights, statistic='tolerance',
+                                             coverage=0.95, confidence=0.5,
+                                             margin_db=3.0,
+                                             path='field_limit.png')
+
+    The set, the limit and the envelope are `core.field_limit.derive`'s
+    with the settings given, and `plot.field_limit` draws them: every
+    record faint, the mean in decibels dotted, the limit heavy, the
+    envelope with its breakpoints numbered, the gap between them
+    hatched with the area it adds, and with a margin the envelope raised
+    by it, dashed. This is the script form of the Field Limit reading
+    on a PSD's or an SRS's bar.
+
+    Parameters
+    ----------
+    data : Psd, Srs, or sequence
+        The set, as `core.field_limit.gather` takes it.
+    records : sequence of int, optional
+        With one object, the records that make the set.
+    margin_db : float, default 0
+        Decibels to draw the envelope raised by.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+    **settings
+        The limit and the fit, as `core.field_limit.derive` takes them
+        (`statistic`, `coverage`, `confidence`, `k`, `sigma_db`, `band`,
+        `max_overshoot_db`, `rms`, `max_breakpoints`); its defaults for
+        any not given.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        As `core.field_limit.derive` raises.
+    """
+    from ..core.field_limit import derive
+    from .field_limit import build_field_limit
+
+    fit = derive(data, records, **settings)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_field_limit(widget, fit, margin_db=margin_db,
+                          unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'Field limit: {fit.limit.describe()}',
+                        size=size)
+
+
 def plot_snr(signal: Any, floor: Any, *,
              records: Sequence[int] | None = None,
              low: float | None = None, theme: Any = None,

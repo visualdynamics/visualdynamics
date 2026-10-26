@@ -40,6 +40,10 @@ from .core.data import (
 from .core.data_index import DataIndex, IndexEntry
 from .core.data_index import digest as digest_file
 from .core.data_index import now as _index_now
+from .core.field_limit import CONFIDENCE as _FIELD_CONFIDENCE
+from .core.field_limit import COVERAGE as _FIELD_COVERAGE
+from .core.field_limit import MAX_BREAKPOINTS as _FIELD_BREAKPOINTS
+from .core.field_limit import OVERSHOOT_DB as _FIELD_OVERSHOOT
 from .core.geometry import Geometry, View
 from .core.matches import MatchedModes
 from .core.photos import Photos
@@ -2208,6 +2212,137 @@ class Project(dict):
             geometry=geometry, narrowband=narrowband, per_octave=per_octave,
             specification=bound, requirement=requirement, scale_db=scale_db,
             unit_system=unit_system)
+
+    def _field_members(self, sources: Any,
+                       records: Sequence[int] | None) -> tuple[Any, list[str]]:
+        """What `core.field_limit.gather` takes for `sources`, and the
+        names of the objects it reads: one name or object (with
+        `records`), a list of them (every record of each), or a list of
+        (name, record) pairs."""
+        if isinstance(sources, (list, tuple)):
+            members, names = [], []
+            for item in sources:
+                if isinstance(item, (list, tuple)):
+                    name = self.name_of(item[0])
+                    members.append((self[name], int(item[1])))
+                else:
+                    name = self.name_of(item)
+                    members.append(self[name])
+                if name not in names:
+                    names.append(name)
+            return members, names
+        name = self.name_of(sources)
+        return self[name], [name]
+
+    def field_limit(self, sources: Any, records: Sequence[int] | None = None,
+                    *, statistic: str = 'tolerance',
+                    coverage: float = _FIELD_COVERAGE,
+                    confidence: float = _FIELD_CONFIDENCE,
+                    k: float | None = None, sigma_db: float | None = None,
+                    band: tuple[float, float] | None = None,
+                    max_overshoot_db: float = _FIELD_OVERSHOOT,
+                    rms: str = 'exceed',
+                    max_breakpoints: int | None = _FIELD_BREAKPOINTS,
+                    progress: Any = None) -> Any:
+        """The statistical limit over a set of measured PSDs or SRSs and
+        the straight-line envelope over it (`core.field_limit.derive`),
+        without adding anything to the project.
+
+        Parameters
+        ----------
+        sources : str, object, or list
+            One PSD or SRS by name or as the object (its records are the
+            set), a list of them (every record of each), or a list of
+            (name, record) pairs.
+        records : sequence of int, optional
+            With one source, the records that make the set.
+        statistic, coverage, confidence, k, sigma_db, band
+            As `core.field_limit.derive` takes them, with its defaults.
+        max_overshoot_db, rms, max_breakpoints
+            As `core.field_limit.fit_envelope` takes them, with its
+            defaults; `max_breakpoints` None for no limit.
+        progress : callable, optional
+            Called with ``(done, total)``.
+
+        Returns
+        -------
+        EnvelopeFit
+            The envelope, its `limit` the limit and `limit.fieldset` the
+            set.
+        """
+        from .core import field_limit as fl
+
+        members, _names = self._field_members(sources, records)
+        return fl.derive(
+            members, records, statistic=statistic, coverage=coverage,
+            confidence=confidence, k=k, sigma_db=sigma_db,
+            band=None if band is None else tuple(band),
+            max_overshoot_db=max_overshoot_db, rms=rms,
+            max_breakpoints=max_breakpoints, progress=progress)
+
+    def derive_specification(self, sources: Any,
+                             records: Sequence[int] | None = None, *,
+                             statistic: str = 'tolerance',
+                             coverage: float = _FIELD_COVERAGE,
+                             confidence: float = _FIELD_CONFIDENCE,
+                             k: float | None = None,
+                             sigma_db: float | None = None,
+                             band: tuple[float, float] | None = None,
+                             max_overshoot_db: float = _FIELD_OVERSHOOT,
+                             rms: str = 'exceed',
+                             max_breakpoints: int | None = _FIELD_BREAKPOINTS,
+                             margin_db: float = 0.0,
+                             dof: str | None = None,
+                             name: str | None = None,
+                             progress: Any = None) -> str:
+        """Write the specification a set of measured PSDs or SRSs gives
+        (Derive Specification): the limit over the set, the
+        straight-line envelope over the limit, and `margin_db` added,
+        as a `Specification` at the breakpoints for PSDs or a
+        `ShockSpecification` for SRSs (`EnvelopeFit.specification`).
+
+        Parameters
+        ----------
+        sources, records, statistic, coverage, confidence, k, sigma_db,
+        band, max_overshoot_db, rms, max_breakpoints
+            As `field_limit` takes them.
+        margin_db : float, default 0
+            Decibels added to every breakpoint, on the set's convention
+            (10 log10 for a PSD, 20 log10 for an SRS).
+        dof : str, optional
+            The DOF the specification is written at; the set's own when
+            it has one.
+        name : str, optional
+            What to call it; the first source's name followed by
+            'Derived Specification' when omitted.
+        progress : callable, optional
+            Called with ``(done, total)``.
+
+        Returns
+        -------
+        str
+            The name it was added under, unique within the project (a
+            name already taken gets a numbered suffix).
+        """
+        settings = {'statistic': statistic, 'coverage': coverage,
+                    'confidence': confidence, 'k': k, 'sigma_db': sigma_db,
+                    'band': None if band is None else list(band),
+                    'max_overshoot_db': max_overshoot_db, 'rms': rms,
+                    'max_breakpoints': max_breakpoints}
+        fit = self.field_limit(sources, records, progress=progress,
+                               **settings)
+        spec = fit.specification(margin_db=margin_db, dof=dof)
+        _members, names = self._field_members(sources, records)
+        listed = ([list(item) if isinstance(item, (list, tuple))
+                   else self.name_of(item) for item in sources]
+                  if isinstance(sources, (list, tuple)) else names[0])
+        params = {'sources': listed,
+                  'records': None if records is None else
+                  [int(r) for r in records],
+                  **settings, 'margin_db': float(margin_db), 'dof': dof}
+        return self._derive(names[0], spec,
+                            name or f'{names[0]} Derived Specification',
+                            recipe=('derive_specification', params))
 
     def compute_octave(self, source: Any, per_octave: int | None = None
                        ) -> str:
@@ -6801,6 +6936,9 @@ class Project(dict):
         'compute_multiple_coherence': 'averaging+roles',
         'compute_srs': 'shocks', 'compute_octave': 'content',
         'make_realizable': 'content',
+        # the levels of the set; only the first source is fingerprinted,
+        # which is the one the result is filed under
+        'derive_specification': 'content',
         # the filter reads the settings riding the source; integration
         # and differentiation read the record's bytes, so refreshing a
         # re-filtered source cascades down the whole motion chain
@@ -7670,7 +7808,7 @@ _JOURNALED_VERBS = (
     'edit_mated_surfaces', 'delete_mated_surfaces',
     'merge_groups', 'set_view', 'set_comparison_scale',
     'read_as_specification', 'read_as_psd',
-    'author_specification',
+    'author_specification', 'derive_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',
     'generate_report', 'report_features', 'report_section',
@@ -7733,7 +7871,20 @@ _RECOMPUTE = {
     'expand': lambda p, s, k: _through(p, s, k, 'to_physical'),
     'compute_modal_responses': lambda p, s, k: _answered(p, s, k),
     'author_specification': lambda p, s, k: _authored(p, s, k),
+    'derive_specification': lambda p, s, k: _derived_again(p, k),
 }
+
+
+def _derived_again(project, params):
+    """The specification a set gives, worked out again from the
+    recipe: what `refresh` does when the set's levels have moved."""
+    settings = {key: params[key] for key in (
+        'statistic', 'coverage', 'confidence', 'k', 'sigma_db', 'band',
+        'max_overshoot_db', 'rms', 'max_breakpoints') if key in params}
+    fit = project.field_limit(params['sources'], params.get('records'),
+                              **settings)
+    return fit.specification(margin_db=params.get('margin_db', 0.0),
+                             dof=params.get('dof'))
 
 
 def _rewritten(spec, draft, comment):

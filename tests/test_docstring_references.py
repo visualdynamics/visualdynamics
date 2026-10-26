@@ -99,6 +99,8 @@ THEORY = {
                        'chi-square scatter each part is judged inside',
     'core.partial_coherence': 'the conditioned spectra, the partial and '
                               'the multiple coherence',
+    'core.field_limit': 'the normal tolerance limit over a set of spectra '
+                        'and the limits a test document names beside it',
 }
 
 #: and methods, where the theory lives on the call rather than the module

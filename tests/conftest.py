@@ -124,6 +124,32 @@ def fixture_path(*parts):
     return os.path.join(TESTDATA, *parts)
 
 
+def left_for_the_collector():
+    """The Python-owned Qt objects still alive that only Python's cyclic
+    collector would free, by type name. PySide deletes such an object on
+    whichever thread frees it, and the collector runs on whichever
+    thread happens to allocate, a long verb's worker among them, so
+    anything listed here can be deleted off its own thread. Collects
+    what is there as it looks, so call `gc.collect()` before the work
+    being checked."""
+    import gc
+
+    import shiboken6
+    from PySide6.QtCore import QObject
+
+    flags = gc.get_debug()
+    gc.set_debug(gc.DEBUG_SAVEALL)
+    try:
+        gc.collect()
+        found = [type(obj).__name__ for obj in gc.garbage
+                 if isinstance(obj, QObject) and shiboken6.isValid(obj)
+                 and shiboken6.ownedByPython(obj)]
+    finally:
+        gc.garbage.clear()
+        gc.set_debug(flags)
+    return found
+
+
 def banded_pair_on_target(cut_at=1000.0, per_octave=6):
     """(banded specification, banded measurement sitting exactly on its
     target): the plate's target cut off above `cut_at` — mid-band, so

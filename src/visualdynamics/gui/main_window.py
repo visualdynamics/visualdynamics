@@ -760,6 +760,21 @@ class _InputGate(QObject):
         return True
 
 
+class _LongVerbRelay(QObject):
+    """The long-verb worker's way back to the window: its progress and
+    its end, emitted on the worker and delivered on the window's thread.
+
+    One per window, made with the window as its parent, so it is
+    deleted with the window on the window's thread. A relay of Python's
+    own would be deleted by whichever thread let go of it last: when a
+    verb raises, the exception's traceback holds the relay in a
+    reference cycle, and Python's collector frees that on whichever
+    thread happens to allocate, often the worker."""
+
+    told = Signal(int, int)
+    finished = Signal()
+
+
 class MainWindow(QMainWindow):
     """The application window: a project tree, and panes that show
     whatever is selected in it.
@@ -1951,6 +1966,9 @@ class MainWindow(QMainWindow):
         self._cancel_button.setToolTip('Stop the running computation (Esc)')
         self._cancel_asked: bool = False
         self._long_worker: Any = None
+        #: the worker's progress and end, back on this thread (`_run_long`)
+        self._long_relay: _LongVerbRelay = _LongVerbRelay(self)
+        self._long_relay.told.connect(self._strip_tick)
         self._cancel_button.clicked.connect(self._ask_cancel)
         strip_row.addWidget(self._cancel_button)
         self._cancel_button.hide()
@@ -8309,18 +8327,26 @@ class MainWindow(QMainWindow):
         raises is raised here, on this thread, so a handler's
         `except ValueError` still reads it. The wait cursor is up for
         the duration and the bar is put away after, success or not.
+
+        No Qt object is made, freed or collected on the worker. The
+        relay back to this thread is the window's own; the loop and the
+        input gate made here are deleted here before this returns, so
+        a verb that raises cannot leave them in a reference cycle; and
+        Python's automatic collection is off while the verb runs,
+        because it runs on whichever thread is allocating, which while
+        a verb runs is mostly the worker, and a Python-owned Qt object
+        it collects (anyone's, from any earlier cycle) is deleted on
+        that thread, under the event loop turning here: a crash in the
+        loop, on Linux, with the report editor's page live.
         """
-        from PySide6.QtCore import QObject, Signal
+        import gc
+
+        import shiboken6
 
         from ..core.progress import Cancelled
 
-        class Relay(QObject):
-            told = Signal(int, int)
-            finished = Signal()
-
-        relay = Relay()
+        relay = self._long_relay
         loop = QEventLoop()
-        relay.told.connect(self._strip_tick)
         relay.finished.connect(loop.quit)
         outcome: list = []
 
@@ -8369,19 +8395,28 @@ class MainWindow(QMainWindow):
 
             self._long_worker = ThreadPoolExecutor(
                 max_workers=1, thread_name_prefix='long-verb')
+        collecting = gc.isenabled()
+        gc.disable()
         try:
             future = self._long_worker.submit(work)
             loop.exec()
             future.result()
         finally:
             app.removeEventFilter(gate)
+            # deleted here, on this thread, whatever the verb did
+            shiboken6.delete(gate)
+            shiboken6.delete(loop)
+            if collecting:
+                # what built up is collected by the next allocation on
+                # this thread: the worker is idle now
+                gc.enable()
             QApplication.restoreOverrideCursor()
             self._cancel_button.hide()
             self._import_progress.hide()
             if not strip_shown:
                 self._import_strip.hide()
             self._importing = was_importing
-        ok, value = outcome[0]
+        ok, value = outcome.pop()
         if not ok:
             raise value
         return value

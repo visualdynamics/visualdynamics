@@ -102,6 +102,9 @@ that is not an alpha.
   envelope or a tolerance limit over a set of measured spectra, what it
   rests on, and the straight-line envelope a specification is written
   from
+- [Fatigue damage, extreme response and time compression](fatigue.md):
+  a record and a candidate test read through the same resonators, and
+  the trade of time for level with its cap
 - [Reading a tone off an ASD](tone-readout.md): why a spike's height
   is not the tone, and the tone in g peak from the lines it leaks into
 - [Reading a tone's amplitude from a record](amplitude-spectrum.md):

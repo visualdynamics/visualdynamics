@@ -144,6 +144,11 @@ correction in the title, the Amplitude reading's plot
 `plot_rms_check(asd, history)` draws an autospectrum with its rms
 check written in the corner, the reading the RMS Check toggle shows
 ([Checking a spectrum against its record](rms-check.md)).
+`plot_fatigue(record, b=7.5, duration=3600.0, against=test,
+against_duration=360.0)` draws a record's extreme response and fatigue
+damage spectra against a candidate test, with the time-compression rule
+and its cap, the reading the Fatigue toggle shows ([Fatigue damage,
+extreme response and time compression](fatigue.md)).
 `plot_replication_segments(...)` draws a replicated run judged segment
 by segment ([Judging a replication by
 segment](replication-segments.md)). A sine specification's sweep

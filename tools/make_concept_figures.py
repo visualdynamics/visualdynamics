@@ -1964,6 +1964,45 @@ def field_limit():
                      size=(1100, 720), path=str(OUT / 'field-limit.png'))
 
 
+def fatigue():
+    """A field record against the test written to stand for it: one
+    minute of a vehicle's floor, taken as a sample of an hour in service,
+    flat at 0.02 g2/Hz from 20 to 80 Hz, 0.04 to 300 Hz and falling to
+    500 Hz; and a specification on the same breakpoints at twice the
+    density for six minutes. At b = 7.5 a time ratio of ten wants 1.85 on
+    the ASD and the test carries 2, so it covers the field's damage, by
+    least where the minute ran hardest, well within the cap of 4."""
+    import numpy as np
+
+    from visualdynamics.core.data import Specification, TimeHistory
+    from visualdynamics.core.fatigue import DENSITY, compared
+    from visualdynamics.plot import plot_fatigue
+
+    rate, seconds, g = 8192.0, 60.0, 9.80665
+    f_break = np.array([20.0, 80.0, 300.0, 500.0])
+    level = np.array([0.02, 0.04, 0.04, 0.04 * (300.0 / 500.0) ** 2]) * g ** 2
+    n = int(rate * seconds)
+    f = np.fft.rfftfreq(n, 1.0 / rate)
+    inside = (f >= f_break[0]) & (f <= f_break[-1])
+    density = np.zeros(f.size)
+    density[inside] = np.exp(np.interp(np.log(f[inside]), np.log(f_break),
+                                       np.log(level)))
+    phase = np.random.default_rng(26).random(f.size)
+    x = np.fft.irfft(np.sqrt(density * rate * n / 2.0)
+                     * np.exp(2j * np.pi * phase), n)
+    field = TimeHistory(np.arange(n) / rate, x[None], response_dof=['1Z+'],
+                        ordinate_dim=['acceleration'], ordinate_unit=['g'])
+    test = Specification(f_break, (2.0 * level)[None], response_dof=['1Z+'],
+                         ordinate_dim=[DENSITY], ordinate_unit=['g'])
+    settings = {'b': 7.5, 'low': 20.0, 'high': 400.0}
+    pair = compared(field, test, field_duration=3600.0, test_duration=360.0,
+                    **settings)
+    print(f'fatigue: {pair.describe()}')
+    plot_fatigue(field, duration=3600.0, against=test, against_duration=360.0,
+                 show=False, size=(1000, 980), path=str(OUT / 'fatigue.png'),
+                 **settings)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -2005,6 +2044,7 @@ def main():
     partial_coherence()
     transformation_residual()
     field_limit()
+    fatigue()
     print('done')
 
 

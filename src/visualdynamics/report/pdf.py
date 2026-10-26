@@ -171,9 +171,15 @@ def print_pdf(page: str, path: str | os.PathLike, *,
 def _stand_down(app: Any, view: Any, web: Any) -> None:
     """Tear the print view down the way the report editor does: stop,
     hide, detach the page, let the widget go, then discard the page, so
-    nothing is left for a destructor to wait on (`ReportEditor.stand_down`)."""
+    nothing is left for a destructor to wait on (`ReportEditor.stand_down`).
+
+    Both are deleted here, on the application's thread, before this
+    returns. Left to Python, a print that raised would keep them in its
+    traceback's reference cycle for the collector, which deletes what it
+    frees on whichever thread runs it, a long verb's worker among them."""
     import contextlib
 
+    import shiboken6
     from PySide6.QtWebEngineCore import QWebEnginePage
 
     view.stop()
@@ -185,7 +191,7 @@ def _stand_down(app: Any, view: Any, web: Any) -> None:
         web.setLifecycleState(QWebEnginePage.LifecycleState.Discarded)
     for _ in range(20):
         app.processEvents()
-    web.deleteLater()
-    view.deleteLater()
+    shiboken6.delete(view)
+    shiboken6.delete(web)
     for _ in range(10):
         app.processEvents()

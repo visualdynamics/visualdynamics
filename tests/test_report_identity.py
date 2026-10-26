@@ -854,6 +854,40 @@ def test_a_page_that_does_not_load_writes_nothing(qt_app, tmp_path,
     assert not target.exists()
 
 
+def test_a_print_failed_from_a_worker_leaves_no_qt_object_for_the_collector(
+        qt_app, tmp_path, monkeypatch):
+    """Asked from a worker, the print runs on the application's thread
+    and its failure travels back in a reference cycle; the view and the
+    page it made are deleted on the application's thread first, not
+    left for the collector to delete on whichever thread runs it."""
+    import gc
+    import threading
+
+    from conftest import left_for_the_collector
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+
+    from visualdynamics.report.pdf import print_pdf
+
+    monkeypatch.setattr(QWebEngineView, 'load',
+                        lambda view, _url: view.page().loadFinished.emit(False))
+    said = []
+
+    def asked():
+        try:
+            print_pdf('<html></html>', tmp_path / 'never.pdf', timeout=5)
+        except OSError as failure:
+            said.append(str(failure))
+
+    gc.collect()
+    worker = threading.Thread(target=asked)
+    worker.start()
+    while worker.is_alive():
+        qt_app.processEvents()
+        worker.join(0.01)
+    assert len(said) == 1 and 'did not load' in said[0]
+    assert left_for_the_collector() == []
+
+
 def test_a_print_that_fails_writes_nothing(qt_app, tmp_path, monkeypatch):
     """The engine reports the print failed: nothing reaches the path,
     whatever was there is kept, and the report stays a draft."""

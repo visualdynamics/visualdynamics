@@ -1164,6 +1164,14 @@ class MainWindow(QMainWindow):
             lambda _wanted: self.render_current())
         self.data_pane.transformation_toggled.connect(
             lambda _wanted: self.render_current())
+        # the field limit: the toggle and every setting redraw the
+        # reading, and Make Specification writes what it shows
+        self.data_pane.field_limit_toggled.connect(
+            lambda _wanted: self.render_current())
+        self.data_pane.field_limit_panel.changed.connect(
+            lambda _settings: self.render_current())
+        self.data_pane.field_limit_panel.make_asked.connect(
+            self.make_field_specification)
         # the acts, asked for where their settings are set (Brandon,
         # 2026-08-28): each button is a second entrance to the same
         # verb the bar's act offers, so provenance, badges and the
@@ -1364,6 +1372,10 @@ class MainWindow(QMainWindow):
         self._held_matrix_check: tuple | None = None
         self._matrix_check_reading_for: tuple | None = None
         self._matrix_check_redraw: bool = False
+        #: the field limit on the plot (`_render_field_limit`): the set,
+        #: the settings and the envelope Make Specification writes;
+        #: None while it is not up or was refused
+        self._field_limit: dict[str, Any] | None = None
         #: and the shock windows, the same way
         self.shock_overlays: list[Any] = []
         #: which comparison the plot is drawing, so the compliance table
@@ -10063,6 +10075,7 @@ class MainWindow(QMainWindow):
         self._clear_matrix_check()
         # a grid still being drawn belongs to the drawing it began in
         self._matrix_drawing = None
+        self._field_limit = None
         # and so does the 3-D surface: the waterfall path raises it
         # again itself, so a photo, a report, a fit or an empty
         # selection never inherits the last selection's 3-D view. Here
@@ -14535,6 +14548,154 @@ class MainWindow(QMainWindow):
             prefix, f"{prefix}, path='transformation_residual.png', "
                     "show=False)")
         return reading.describe()
+    #: the most values (records times lines) a field limit is worked
+    #: out from on this thread; a larger set goes to the worker, so the
+    #: window keeps painting while the envelope is fitted
+    FIELD_INLINE: ClassVar[int] = 20000
+
+    def _field_limit_source(self, series):
+        """The set the Field Limit reading takes from the selection, as
+        (sources, records) for `Project.field_limit`: one plain PSD or
+        SRS and its picked records, or several of one kind as (name,
+        record) pairs. None when the selection is anything else (a
+        specification, a cross spectrum, a mix of kinds), which is also
+        what hides the button."""
+        from ..core.data import Srs, autospectrum
+
+        if not series:
+            return None
+        kinds = set()
+        pairs = []
+        for name, data, records in series:
+            if name not in self.project or isinstance(data, Bounded):
+                return None
+            if isinstance(data, Psd):
+                kinds.add('psd')
+            elif isinstance(data, Srs):
+                kinds.add('srs')
+            else:
+                return None
+            chosen = (list(range(data.num_records)) if records is None
+                      else [int(r) for r in records])
+            for record in chosen:
+                if not autospectrum(data, record):
+                    return None
+                pairs.append((name, record))
+        if len(kinds) != 1 or not pairs:
+            return None
+        if len(series) == 1:
+            name, data, records = series[0]
+            return name, (None if records is None
+                          else [int(r) for r in records])
+        return pairs, None
+
+    def _field_fit(self, sources, records, settings):
+        """The envelope for the reading: on this thread for a small set,
+        on the worker for one over `FIELD_INLINE` values."""
+        names = ([sources] if isinstance(sources, str)
+                 else [name for name, _record in sources])
+        size = sum(np.asarray(self.project[name].ordinate).size
+                   for name in set(names))
+        if size > self.FIELD_INLINE:
+            return self._run_long('Taking the field limit…',
+                                  self.project.field_limit, sources,
+                                  records, **settings)
+        return self.project.field_limit(sources, records, **settings)
+
+    def _render_field_limit(self, sources, records):
+        """The Field Limit reading: the set drawn with the limit taken
+        over it and the straight-line envelope over the limit
+        (`plot.field_limit`), the settings and what they found in the
+        panel beside it. A refusal is said in the panel and on the
+        status line, with nothing drawn that could read as a limit.
+        Journaled as its `plot_field_limit` call."""
+        from ..core.progress import Cancelled
+        from ..plot.field_limit import build_field_limit, summary
+        from ..plot.tone_readout import display_units
+
+        pane = self.data_pane
+        panel = pane.field_limit_panel
+        panel.show()
+        pane.offer_waterfall(False)
+        pane.show_waterfall(False)
+        pane.graphics.clear()
+        settings = panel.settings()
+        margin = settings.pop('margin_db')
+        try:
+            fit = self._field_fit(sources, records, settings)
+        except Cancelled:
+            panel.show_fit(None, refusal='cancelled')
+            return 'Field limit: cancelled'
+        except (ValueError, TypeError) as refusal:
+            panel.show_fit(None, refusal=str(refusal))
+            return f'No field limit: {refusal}'
+        build_field_limit(pane.graphics, fit, margin_db=margin,
+                          unit_system=self.unit_system, theme=self.theme_name)
+        first = sources if isinstance(sources, str) else sources[0][0]
+        record = (records[0] if records else 0) if isinstance(
+            sources, str) else sources[0][1]
+        scale, _dense, unit = display_units(self.project[first], record,
+                                            self.unit_system)
+        panel.show_fit(fit, unit=unit, scale=scale)
+        self._field_limit = {'sources': sources, 'records': records,
+                             'settings': settings, 'margin_db': margin,
+                             'fit': fit}
+        self._journal_field_limit(sources, records, settings, margin)
+        return summary(fit)
+
+    def _journal_field_limit(self, sources, records, settings, margin):
+        """The reading, journaled as the headless call that draws it
+        (`_journal_view`), settling in place per set."""
+        if isinstance(sources, str):
+            data = f'project[{sources!r}]'
+            given = '' if records is None else f', {list(records)!r}'
+        else:
+            data = '[' + ', '.join(f'(project[{name!r}], {record})'
+                                   for name, record in sources) + ']'
+            given = ''
+        prefix = f'visualdynamics.plot.plot_field_limit({data}{given}'
+        said = ''.join(f', {key}={value!r}' for key, value in settings.items())
+        self._journal_view(
+            prefix,
+            f'{prefix}{said}, margin_db={margin!r}, '
+            "path='field_limit.png', show=False)")
+
+    def make_field_specification(self) -> None:
+        """Write the specification the Field Limit reading shows into the
+        project, with the panel's margin (`Project.derive_specification`),
+        on the worker. This is the reading's apply button; it ends the
+        reading and shows what it made."""
+        from ..core.progress import Cancelled
+
+        state = self._field_limit
+        if state is None:
+            self._show_status('No field limit to write: the reading is '
+                              'refused or not up')
+            return
+        sources, records = state['sources'], state['records']
+        try:
+            added = self._run_long(
+                'Deriving the specification…',
+                self.project.derive_specification, sources, records,
+                margin_db=state['margin_db'], **state['settings'])
+        except Cancelled:
+            self._show_status('Derive Specification: cancelled')
+            return
+        except ValueError as why:
+            self._show_status(f'No specification: {why}')
+            return
+        fit = state['fit']
+        pane = self.data_pane
+        if pane.field_limit_action.isChecked():
+            pane.field_limit_action.trigger()
+        self.show_object(added)
+        first = sources if isinstance(sources, str) else sources[0][0]
+        margin = state['margin_db']
+        self._show_status(
+            f'{added}: {fit.breakpoints} breakpoints over the '
+            f'{fit.limit.describe()}'
+            + (f', {margin:+g} dB margin' if margin else '')
+            + f' — linked to {first}')
 
     def _draw_truncation(self, history):
         """Gray the ends being cut away and put the span beside it.
@@ -14935,6 +15096,7 @@ class MainWindow(QMainWindow):
                 'same DOF',
                 filtered)
         history = self._sole_history(series)
+        field = self._field_limit_source(series)
         self.data_pane.show_controls(map_wanted=wants_map, diagonal=diagonal,
                                      cmif=all_frf,
                                      complex_data=complex_series,
@@ -14973,6 +15135,7 @@ class MainWindow(QMainWindow):
                                      transformation=self.
                                      _transformation_source(series)
                                      is not None,
+                                     field_limit=field is not None,
                                      # a declared unit, as the readings
                                      # require (`core.shaker`)
                                      fit=history is not None and any(
@@ -15030,6 +15193,10 @@ class MainWindow(QMainWindow):
         if behind:
             return self._render_transformation(*behind)
         self._held_readings.clear()
+        # the set read as a whole replaces its traces: the limit over
+        # the records and the envelope a specification is written from
+        if field is not None and self.data_pane.showing('field_limit'):
+            return self._render_field_limit(*field)
         if all_frf and self.data_pane.showing_cmif:
             drawn = build_cmif(self.data_pane.graphics, series,
                                unit_system=self.unit_system,

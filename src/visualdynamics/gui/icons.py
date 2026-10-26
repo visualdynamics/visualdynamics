@@ -676,6 +676,37 @@ def _draw_rms_check(painter, color):
     painter.drawLine(QPointF(50, 12), QPointF(50, 22))
 
 
+def _draw_field_limit(painter, color):
+    """Faint ragged spectra under a few straight lines with square
+    breakpoints.
+
+    The reading in miniature: three measured spectra drawn thin and
+    faint, each ragged where the others are not, and over them the
+    envelope a specification is written from, three straight runs whose
+    corners are filled squares.
+    """
+    faint = QColor(color)
+    faint.setAlpha(110)
+    painter.setPen(_pen(faint, 2))
+    for lift in (0, 5, 10):
+        painter.drawPolyline([QPointF(6, 50 - lift * 0.4),
+                              QPointF(14, 36 + lift * 0.3),
+                              QPointF(20, 30 + lift),
+                              QPointF(28, 26 + lift * 0.5),
+                              QPointF(36, 30 + lift * 0.2),
+                              QPointF(44, 24 + lift),
+                              QPointF(52, 38 + lift * 0.3),
+                              QPointF(58, 52 - lift * 0.5)])
+    corners = [QPointF(6, 40), QPointF(20, 20), QPointF(46, 16),
+               QPointF(58, 40)]
+    painter.setPen(_pen(color, 3))
+    painter.drawPolyline(corners)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    for corner in corners:
+        painter.drawRect(QRectF(corner.x() - 3.5, corner.y() - 3.5, 7, 7))
+
+
 def _draw_truncate(painter, color):
     """A trace with its ends grayed away behind two cut lines.
 
@@ -2625,6 +2656,7 @@ def control_icon(name: str) -> QIcon:
      'drive_prediction': _draw_drive_prediction,
      'partial_coherence': _draw_partial_coherence,
      'transformation': _draw_transformation,
+     'field_limit': _draw_field_limit,
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'sweep_rate': _draw_sweep_rate,

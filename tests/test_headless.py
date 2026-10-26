@@ -316,6 +316,7 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_multi_point': 'plot_multi_point',
         '_render_sweep_rate': 'plot_sweep_rate',
         '_render_sine_profile': 'plot_sine_profile',
+        '_render_field_limit': 'plot_field_limit',
         '_render_banded': 'viz.banded.plot_banded_stage',
         '_render_ratio': 'plot.plot_ratio',
         '_render_snr': 'plot.plot_snr',

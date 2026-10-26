@@ -45,6 +45,7 @@ from .chance_panel import ChancePanel
 from .confidence_panel import ConfidencePanel
 from .drive_prediction_panel import DrivePredictionPanel
 from .editors import SpinBox
+from .field_limit_panel import FieldLimitPanel
 from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
 from .instrumentation_panel import InstrumentationPanel
@@ -254,6 +255,9 @@ class DataPane(QWidget):
     #: the rigid-body residual behind a transformed density was asked
     #: for (True) or put away
     transformation_toggled = Signal(bool)
+    #: the field limit of a set of spectra was asked for (True) or put
+    #: away (False)
+    field_limit_toggled = Signal(bool)
     #: a sine specification's sweep-rate reading was asked for (True)
     #: or put away (False)
     sweep_rate_toggled = Signal(bool)
@@ -329,6 +333,7 @@ class DataPane(QWidget):
         self.notch_settings: dict[str, Any] | None = None
         self.partial_coherence_wanted: bool = False
         self.transformation_wanted: bool = False
+        self.field_limit_wanted: bool = False
         self.sweep_rate_wanted: bool = False
         self.sine_profile_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
@@ -508,6 +513,10 @@ class DataPane(QWidget):
         self.transformation_panel: TransformationPanel = \
             TransformationPanel()
         self.transformation_panel.hide()
+        # the limit over a set of spectra and the envelope over it, with
+        # Make Specification under the reading
+        self.field_limit_panel: FieldLimitPanel = FieldLimitPanel()
+        self.field_limit_panel.hide()
         # the modes a sine sweep is checked against, beside the sweep
         # drawn through their bands; the Sweep Rate reading shows it
         self.sweep_rate_panel: SweepRatePanel = SweepRatePanel()
@@ -598,6 +607,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.notch_panel)
         plot_row.addWidget(self.partial_coherence_panel)
         plot_row.addWidget(self.transformation_panel)
+        plot_row.addWidget(self.field_limit_panel)
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.sine_profile_panel)
@@ -1326,6 +1336,20 @@ class DataPane(QWidget):
                                                       checked))
         self.transformation_action.setVisible(False)
         toolbar.addAction(self.transformation_action)
+        # the set of spectra read as a whole: the limit over the records
+        # and the straight-line envelope over the limit, the
+        # specification they write one press away in the panel
+        self.field_limit_action: QAction = QAction(
+            control_icon('field_limit'), 'Field Limit', self)
+        self.field_limit_action.setCheckable(True)
+        self.field_limit_action.setToolTip(
+            'Take a statistical limit over the records (a tolerance limit, '
+            'mean plus k standard deviations, or the envelope) and write '
+            'a straight-line envelope over it, the specification it gives '
+            'one press away')
+        self.field_limit_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('field_limit', checked))
+        toolbar.addAction(self.field_limit_action)
         # a sine specification read against the modes it sweeps
         # through: the time and cycles in each half-power band, and
         # whether the rate lets the mode build. A reading of the
@@ -1411,6 +1435,7 @@ class DataPane(QWidget):
             [self.octave_action, self.tone_action, self.confidence_action,
              self.rms_check_action],
             [self.sweep_rate_action, self.sine_profile_action],
+            [self.field_limit_action],
             [self.transmissibility_action],
             [self.conditioning_action, self.realizability_action],
             [self.prediction_action],
@@ -1561,8 +1586,9 @@ class DataPane(QWidget):
     def _choose_toggle(self, key: str, checked: bool) -> None:
         """The octave, tones, transmissibility, confidence, rms check,
         drive prediction, notch prediction, partial coherence, rigid-body
-        residual or sweep-rate button, each a toggle of its own: remember
-        it, put its panel away when it is unchecked, then say so."""
+        residual, field limit or sweep-rate button, each a toggle of its
+        own: remember it, put its panel away when it is unchecked, then
+        say so."""
         setattr(self, f'{key}_wanted', bool(checked))
         if not checked:
             getattr(self, f'{key}_panel').hide()
@@ -2281,7 +2307,8 @@ class DataPane(QWidget):
                       table: bool = False,
                       notch: bool = False,
                       partial_coherence: bool = False,
-                      transformation: bool = False) -> None:
+                      transformation: bool = False,
+                      field_limit: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -2300,7 +2327,8 @@ class DataPane(QWidget):
         octave bands of a plain density, `tone` the tone readout of a plain
         autospectrum, `transmissibility` the ASD ratio and H1's band
         behind an FRF computed from a time history, `confidence` the
-        chi-square band of an autospectrum, `rms_check` the rms check
+        chi-square band of an autospectrum, `field_limit` the limit
+        over a set of plain PSDs or SRSs, `rms_check` the rms check
         of one with a time history to check against, `conditioning` the
         singular values of an FRF from several references or of a CSD,
         `realizability` the eigenvalues of a CSD's coherence matrix,
@@ -2383,6 +2411,7 @@ class DataPane(QWidget):
                     partial_coherence)
         self._offer('transformation', 'transformation_panel',
                     transformation)
+        self._offer('field_limit', 'field_limit_panel', field_limit)
         self.residual_action.setVisible(residual)
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
@@ -2461,6 +2490,7 @@ class DataPane(QWidget):
                        self.prediction_action,
                        self.partial_coherence_action,
                        self.transformation_action,
+                       self.field_limit_action,
                        self.sweep_rate_action, self.sine_profile_action,
                        self.confidence_action, self.notch_action,
                        self.sweep_rate_action,

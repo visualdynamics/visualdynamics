@@ -101,6 +101,9 @@ THEORY = {
                               'the multiple coherence',
     'core.field_limit': 'the normal tolerance limit over a set of spectra '
                         'and the limits a test document names beside it',
+    'core.fatigue': "the peak distributions of a resonator's response, "
+                    'its expected largest peak, and the time-compression '
+                    'rule',
 }
 
 #: and methods, where the theory lives on the call rather than the module

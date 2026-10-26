@@ -5438,6 +5438,103 @@ def plot_field_limit(data: Any, records: Sequence[int] | None = None, *,
                         size=size)
 
 
+def plot_fatigue(data: Any, record: int = 0, *, b: float | None = None,
+                 duration: float | None = None, q: float | None = None,
+                 method: str | None = None, against: Any = None,
+                 against_record: int = 0,
+                 against_duration: float | None = None,
+                 low: float | None = None, high: float | None = None,
+                 per_octave: int | None = None,
+                 unit_system: UnitSystem | None = None, theme: Any = None,
+                 path: str | os.PathLike | None = None,
+                 show: bool = True, title: str | None = None,
+                 size: tuple[int, int] = (1000, 900)) -> Any:
+    """Draw the extreme response and fatigue damage spectra of a record,
+    against a candidate test when one is given.
+
+        visualdynamics.plot.plot_fatigue(field, b=7.5, duration=3600.0,
+                                         against=specification,
+                                         against_duration=600.0,
+                                         path='fatigue.png')
+
+    One record of a PSD or a time history read by
+    `core.fatigue.fatigue_spectra`, and the test, when given, read on the
+    same natural frequencies (`core.fatigue.compared`); drawn by
+    `plot.fatigue`: the ERS, the FDS, and the time-compression rule at b
+    with its cap and the exaggeration the test carries. This is the
+    script form of the Fatigue reading on a PSD's or a time history's
+    bar.
+
+    Parameters
+    ----------
+    data : Psd or TimeHistory
+        The field record's object, an acceleration.
+    record : int, default 0
+        Which record.
+    b : float
+        The fatigue exponent; never assumed.
+    duration : float, optional
+        The field's seconds; required for a spectrum, a time history's
+        own length when omitted.
+    q : float, optional
+        The resonators' amplification, `srs.DEFAULT_Q` when omitted.
+    method : str, optional
+        How a spectrum's cycles are read, one of
+        `core.fatigue.METHODS`; ignored for a time history.
+    against : Psd or TimeHistory, optional
+        The candidate test.
+    against_record : int, default 0
+        Which record of the test.
+    against_duration : float, optional
+        The test's seconds, as `duration` is the field's.
+    low, high : float, optional
+        The band of natural frequencies, Hz.
+    per_octave : int, optional
+        Natural frequencies to an octave.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        As `core.fatigue.fatigue_spectra` and `core.fatigue.compared`
+        raise.
+    """
+    from ..core.data import TimeHistory
+    from ..core.fatigue import compared, fatigue_spectra
+    from .fatigue import build_fatigue
+
+    settings: dict[str, Any] = {'b': b}
+    for key, value in (('q', q), ('method', method), ('low', low),
+                       ('high', high), ('per_octave', per_octave)):
+        if value is not None:
+            settings[key] = value
+    if against is None:
+        if isinstance(data, TimeHistory):
+            settings.pop('method', None)
+        field = fatigue_spectra(data, record, duration=duration, **settings)
+        test = pair = None
+    else:
+        pair = compared(data, against, record, against_record,
+                        field_duration=duration,
+                        test_duration=against_duration, **settings)
+        field, test = pair.field, pair.test
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_fatigue(widget, field, test, pair=pair,
+                      unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{field.label}: ERS and FDS',
+                        size=size)
+
+
 def plot_snr(signal: Any, floor: Any, *,
              records: Sequence[int] | None = None,
              low: float | None = None, theme: Any = None,

@@ -20465,9 +20465,10 @@ class MainWindow(QMainWindow):
         spec_name, spec = specs[0]
         name, data, records = measured[0]
         picked = [int(i) for i in records] if records else None
+        found = self.project.channel_table_for(name)
         try:
-            channels = control_channels(spec, data, picked,
-                                        self.project._channel_table_of(name))
+            channels = control_channels(
+                spec, data, picked, found[1] if found is not None else None)
         except ValueError:
             return None
         return spec_name, spec, name, data, channels

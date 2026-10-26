@@ -116,8 +116,9 @@ a test document names for summarizing a set of measured spectra.
    and the sampling distributions of a sample mean and variance
    (normal and chi-square) and of the Student t, on which the
    tolerance factor rests.
-2. MIL-STD-810H (2019), *Environmental Engineering Considerations and
-   Laboratory Tests*, Method 514.8 (Vibration), Annex F, Appendix B.
+2. MIL-STD-810H with Change 1 (2022), *Environmental Engineering
+   Considerations and Laboratory Tests*, Method 514.8 (Vibration),
+   Annex F, Appendix B.
    The upper limits a set of measured spectra is summarized by: the
    normal tolerance limit, the envelope, the distribution-free
    tolerance limit and the empirical tolerance limit.

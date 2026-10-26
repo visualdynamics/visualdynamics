@@ -781,7 +781,8 @@ def test_the_window_issues_with_the_print_handed_to_its_thread(
 
     from visualdynamics.report import pdf
 
-    assert 'PySide6.QtPdf' not in sys.modules,         'QtPdf stays out of a process running the web engine (_pdf_pages)'
+    assert 'PySide6.QtPdf' not in sys.modules, \
+        'QtPdf stays out of a process running the web engine (_pdf_pages)'
     window, editor, report, name = editing
     window.project.report_features(name, enable=[ri.FEATURE])
     window.project.report_identity(name, **COMPLETE)

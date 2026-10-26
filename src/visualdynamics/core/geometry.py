@@ -11,6 +11,7 @@ FE descriptor codes of UFF dataset 2412.
 from __future__ import annotations
 
 import os
+import warnings
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -512,6 +513,91 @@ class View:
 DEFAULT_VIEW = View()
 
 
+#: the mass unit a finite element deck in each length unit is written in,
+#: with seconds: the consistent system such a deck almost always uses
+#: (m-kg-s-N-Pa, mm-tonne-s-N-MPa, cm-gram-s-dyne, in-lbf·s²/in-s-lbf-psi,
+#: ft-slug-s-lbf). Any other length takes kilograms unless one is stated.
+DECK_MASS_UNITS: dict[str, str] = {'m': 'kg', 'mm': 'tonne', 'cm': 'gram',
+                                   'in': 'slinch', 'ft': 'slug'}
+
+#: the moduli and densities a structural material can have, in SI: soft
+#: elastomer to diamond, foam to the densest metals. Outside them, the
+#: likelier story is a deck read in the wrong unit system.
+PLAUSIBLE_MODULUS = (1e5, 1.5e12)
+PLAUSIBLE_DENSITY = (5.0, 25000.0)
+
+
+def deck_to_si(properties: Mapping[int, Any], length_unit: str,
+               mass_unit: str, inverse: bool = False) -> dict[int, Any]:
+    """A finite element deck's element group properties converted to SI
+    from the consistent system `length_unit`, `mass_unit` and seconds
+    make (or back, with `inverse`).
+
+    Force is mass times length per second squared, so a modulus scales by
+    mass/length, a density by mass/length³, a thickness by length, a point
+    mass by mass, a spring along an axis (force per length) by mass and a
+    spring about one (force times length per radian) by mass·length². A
+    beam section scales by its powers of length. Names and directions are
+    kept.
+    """
+    from dataclasses import replace
+
+    length = si_transform(length_unit, 'length')[0]
+    mass = si_transform(mass_unit, 'mass')[0]
+    power = -1.0 if inverse else 1.0
+    stress, density = (mass / length) ** power, (mass / length ** 3) ** power
+    lengths, masses = length ** power, mass ** power
+    turning = (mass * length ** 2) ** power
+    out = {}
+    for group, props in properties.items():
+        changes = {}
+        if props.material is not None:
+            m = props.material
+            changes['material'] = replace(
+                m, youngs_modulus=m.youngs_modulus * stress,
+                density=m.density * density,
+                modulus_of_rigidity=(None if m.modulus_of_rigidity is None
+                                     else m.modulus_of_rigidity * stress))
+        if props.thickness is not None:
+            changes['thickness'] = props.thickness * lengths
+        if props.section is not None:
+            sec = props.section
+            changes['section'] = replace(
+                sec, area=sec.area * lengths ** 2, iy=sec.iy * lengths ** 4,
+                iz=sec.iz * lengths ** 4, j=sec.j * lengths ** 4,
+                dimensions=tuple(d * lengths for d in sec.dimensions))
+        if props.mass is not None:
+            changes['mass'] = props.mass * masses
+        if props.stiffness is not None:
+            changes['stiffness'] = tuple(
+                None if k is None else k * (masses if axis < 3 else turning)
+                for axis, k in enumerate(props.stiffness))
+        out[group] = replace(props, **changes) if changes else props
+    return out
+
+
+def implausible_materials(properties: Mapping[int, Any]) -> list[str]:
+    """A sentence for each material whose modulus or density, in SI, is
+    outside what a structural material has (`PLAUSIBLE_MODULUS`,
+    `PLAUSIBLE_DENSITY`)."""
+    notes, seen = [], set()
+    for props in properties.values():
+        m = props.material
+        if m is None or m.name in seen:
+            continue
+        seen.add(m.name)
+        low, high = PLAUSIBLE_MODULUS
+        bad = []
+        if not low <= m.youngs_modulus <= high:
+            bad.append(f'E = {m.youngs_modulus:.3g} Pa')
+        low, high = PLAUSIBLE_DENSITY
+        if not low <= m.density <= high:
+            bad.append(f'density {m.density:.3g} kg/m³')
+        if bad:
+            notes.append(f'{m.name}: {", ".join(bad)}')
+    return notes
+
+
 class Geometry:
     """Nodes, coordinate systems, elements and element groups.
 
@@ -602,10 +688,18 @@ class Geometry:
                  group_id: Ids | None = None,
                  group_name: Sequence[str] | None = None,
                  length_unit: str | None = None,
-                 group_properties: Mapping[int, Any] | None = None) -> None:
+                 group_properties: Mapping[int, Any] | None = None,
+                 from_deck: bool = False,
+                 mass_unit: str | None = None) -> None:
         # coordinates are taken as given; length_unit records what they are
         # in (None = undefined, values are the file's raw numbers)
         self.length_unit: str | None = length_unit
+        # a finite element deck's properties are its own numbers, in the
+        # consistent system its length and mass units make, until those
+        # are declared (`define_units`); mass_unit records the mass unit
+        # declared with the length
+        self.from_deck: bool = bool(from_deck)
+        self.mass_unit: str | None = mass_unit if from_deck else None
         n = len(node_id)
         self.node_id: IdArray = _ids(node_id, 'node ids', unique=True)
         self.node_xyz: NDArray[np.float64] = np.asarray(
@@ -902,7 +996,8 @@ class Geometry:
                              'centroid of')
         return MassProperties(tuple(self.node_xyz.mean(axis=0)))
 
-    def define_units(self, length_unit: str) -> Geometry:
+    def define_units(self, length_unit: str,
+                     mass_unit: str | None = None) -> Geometry:
         """Declare the length unit of the coordinates, converting them to SI.
 
         The node coordinates, the coordinate system origins and the
@@ -910,16 +1005,42 @@ class Geometry:
         original values instead of scaling twice, so a wrong unit can be
         corrected.
 
+        A geometry read from a finite element deck (`from_deck`) also
+        holds the deck's property values, in the consistent system its
+        length unit, a mass unit and seconds make: a thickness is a
+        length, a modulus a force per area, a density a mass per volume,
+        a point mass a mass, a spring a force per length (or, about an
+        axis, a force times a length). Those are converted with the
+        coordinates (`deck_to_si`). The mass unit is `mass_unit`, or the
+        one a deck in that length is written with when it is omitted
+        (`DECK_MASS_UNITS`: tonnes with millimeters, lbf·s²/in with
+        inches). A material whose converted modulus or density is not a
+        structural material's is warned about, since that is what a
+        wrong mass unit looks like.
+
         Parameters
         ----------
         length_unit : str
             The unit the coordinates are in, such as 'm' or 'in'.
+        mass_unit : str, optional
+            The mass unit of a deck's properties, such as 'tonne'.
 
         Returns
         -------
         Geometry
             Self, converted to SI in place.
         """
+        if self.from_deck:
+            mass_unit = mass_unit or DECK_MASS_UNITS.get(length_unit, 'kg')
+            si_transform(mass_unit, 'mass')       # refuse before changing
+            raw = (self.group_properties if self.length_unit is None
+                   else deck_to_si(self.group_properties, self.length_unit,
+                                   self.mass_unit, inverse=True))
+            self.group_properties = deck_to_si(raw, length_unit, mass_unit)
+            self.mass_unit = mass_unit
+        elif mass_unit is not None:
+            raise ValueError('only a geometry read from a finite element '
+                             'deck carries a mass unit')
         scale, _ = si_transform(length_unit, 'length')
         raw = (self.node_xyz if self.length_unit is None
                else from_si(self.node_xyz, self.length_unit, 'length'))
@@ -933,6 +1054,13 @@ class Geometry:
                      else 1.0 / si_transform(self.length_unit, 'length')[0])
         self.solids = [s.scaled(raw_scale * scale) for s in self.solids]
         self.length_unit = length_unit
+        if self.from_deck:
+            notes = implausible_materials(self.group_properties)
+            if notes:
+                warnings.warn(
+                    f'{"; ".join(notes)} — is the deck in another unit '
+                    f'system than {length_unit} and {self.mass_unit}?',
+                    stacklevel=2)
         return self
 
     def undefine_units(self) -> Geometry:
@@ -944,6 +1072,11 @@ class Geometry:
                                           self.length_unit, 'length')
         self.solids = [s.scaled(1.0 / si_transform(self.length_unit, 'length')[0])
                        for s in self.solids]
+        if self.from_deck:
+            self.group_properties = deck_to_si(
+                self.group_properties, self.length_unit, self.mass_unit,
+                inverse=True)
+            self.mass_unit = None
         self.length_unit = None
         return self
 
@@ -2620,7 +2753,9 @@ class Geometry:
                           zip(self.elem_conn, other.elem_conn)))
         names = self.cs_name == other.cs_name
         return (scalar and arrays and ragged and names
-                and self.length_unit == other.length_unit)
+                and self.length_unit == other.length_unit
+                and self.from_deck == other.from_deck
+                and self.mass_unit == other.mass_unit)
 
     def __repr__(self) -> str:
         units = self.length_unit if self.units_defined else 'units undefined'

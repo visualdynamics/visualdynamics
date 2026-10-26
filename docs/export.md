@@ -146,8 +146,18 @@ test can be set beside a model:
   included), CORD2R/C/S coordinate systems with chained references
   resolved, elements, concentrated masses (CONM2), and PLOTELs as
   drawn lines. PSOLID, PSHELL and MAT1 cards become the element
-  groups' materials and thicknesses, with the deck taken to be in SI.
-  CELAS1 and CELAS2 springs are read with their stiffness (a CELAS1's
+  groups' materials and thicknesses. A deck has no units, so its
+  values are kept as written until its units are declared, in the
+  geometry's Units table or with `length_unit=` and `mass_unit=` on
+  import. A deck's units are a length and a mass, with seconds, and
+  force, stress and density follow from them: millimeters with tonnes
+  (newtons and MPa), inches with lbf·s²/in (pounds and psi), meters with
+  kilograms. The mass defaults to that usual one for the length and can
+  be stated otherwise. Declared, the coordinates and every property
+  value (thickness, modulus, density, point masses, springs) are
+  converted to SI together. A material that comes out with a modulus
+  or density no structural material has is reported, since that is
+  what a wrong unit system looks like. CELAS1 and CELAS2 springs are read with their stiffness (a CELAS1's
   from its PELAS), one element group per stiffness and direction, and
   SPC and SPC1 cards become ground points held in their components. A
   deck with more than one SPC set, an SPC that enforces a

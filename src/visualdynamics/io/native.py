@@ -69,6 +69,12 @@ ON_DISK = {'elem_group': 'elem_block', 'group_id': 'block_id'}
 def save_geometry(geom: Geometry, group: h5py.Group) -> None:
     group.attrs['dimension'] = geom.dimension
     group.attrs['length_unit'] = geom.length_unit or ''
+    # a deck's geometry, whose properties convert with its units, and the
+    # mass unit declared for it; absent for any other, so a file from
+    # before them reads back the same (2026-10-26)
+    if getattr(geom, 'from_deck', False):
+        group.attrs['from_deck'] = True
+        group.attrs['mass_unit'] = geom.mass_unit or ''
     # the element groups go to disk under the names they had when the
     # file format was set, 'elem_block', 'block_id' and 'block_name'
     # (2026-10-08: called element groups everywhere else), so every
@@ -234,6 +240,8 @@ def load_geometry(group: h5py.Group) -> Geometry:
     data['elem_conn'] = _read_ragged(group, 'elem_conn')
     data['length_unit'] = group.attrs.get('length_unit', '') or None
     data['group_properties'] = _load_block_properties(group)
+    data['from_deck'] = bool(group.attrs.get('from_deck', False))
+    data['mass_unit'] = group.attrs.get('mass_unit', '') or None
     geometry = Geometry(**data)
     if 'traceline_conn' in group:
         # a file from before 2026-09-30 carried tracelines apart from

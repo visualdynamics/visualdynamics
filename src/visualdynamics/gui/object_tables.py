@@ -337,6 +337,8 @@ def units_table_model(obj: Any, records: Sequence[int] | None = None,
     if isinstance(obj, Psd) and _has_cross_records(obj):
         return _matrix_units_model(obj, records, parent)
     if isinstance(obj, Geometry):
+        if getattr(obj, 'from_deck', False):
+            return _deck_units_model(obj, parent)
         return _one_unit_model(obj, 'Coordinates', 'length', LENGTH_UNITS,
                                'length_unit', parent)
     if isinstance(obj, ShapeSet):
@@ -351,6 +353,59 @@ def units_table_model(obj: Any, records: Sequence[int] | None = None,
                                given=_mass_unit_given,
                                type_label='modal mass')
     return _channel_units_model(obj, records, parent)
+
+
+def _deck_units_model(geometry, parent=None):
+    """A finite element deck's two units: the length its coordinates are
+    in, and the mass its properties are in, which with seconds make the
+    deck's consistent system (`Geometry.define_units`). The mass offers
+    the usual one for the length and takes any other typed."""
+    import warnings
+
+    from ..core.geometry import DECK_MASS_UNITS
+    from ..core.unit_choices import LENGTH_UNITS, MASS_UNITS
+
+    rows = (('Coordinates', 'length', LENGTH_UNITS),
+            ('Deck properties', 'mass', [*MASS_UNITS, 'gram']))
+
+    def declare(obj, length, mass=None):
+        # the window says what is implausible once the unit has landed; a
+        # warning to stderr here would be said to nobody
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            obj.define_units(length, mass)
+
+    def set_unit(obj, row, text):
+        text = text.strip().replace('^', '**')
+        if row == 0:
+            if not text:
+                obj.undefine_units()
+                return
+            si_transform(text, 'length')    # refuse before anything changes
+            # a mass stated apart from the usual one for the old length is
+            # kept; the usual one follows the new length
+            kept = (obj.mass_unit if obj.mass_unit and obj.mass_unit
+                    != DECK_MASS_UNITS.get(obj.length_unit) else None)
+            declare(obj, text, kept)
+            return
+        if obj.length_unit is None:
+            raise ValueError("declare the coordinates' length unit first: "
+                             "a deck's mass unit goes with its length")
+        if text:
+            si_transform(text, 'mass')
+        declare(obj, obj.length_unit, text or None)
+
+    def get_unit(obj, row):
+        return (obj.length_unit if row == 0 else obj.mass_unit) or ''
+
+    columns = [
+        Column('Item', lambda _obj, row: rows[row][0], alignment=LEFT),
+        Column('Type', lambda _obj, row: rows[row][1], alignment=LEFT),
+        Column('Unit', get_unit, set=set_unit, journal=_elsewhere,
+               row_choices=lambda _obj, row: rows[row][2],
+               choices_editable=True, alignment=LEFT),
+    ]
+    return TableModel(geometry, columns, lambda _obj: len(rows), parent)
 
 
 def _mass_unit_given(text):

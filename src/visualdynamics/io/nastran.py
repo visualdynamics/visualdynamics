@@ -44,9 +44,15 @@ What is not read:
 - Any other `C` card shaped like an element is refused with its name,
   so an element is never dropped without a word.
 
-A deck has no units, so positions are read as written and
-`length_unit` declares their unit, as with a universal file without a
-dataset 164. The property, mass and stiffness values are taken as SI.
+A deck has no units, so positions and properties are read as written,
+and the geometry is marked as a deck's (`Geometry.from_deck`).
+`length_unit` declares the length the deck is written in and `mass_unit`
+its mass, with seconds: the consistent system a deck uses, from which
+force, stress and density follow (mm with tonnes is N and MPa, inches
+with lbf·s²/in is lbf and psi). The mass unit may be left out for the
+usual one with that length (`geometry.DECK_MASS_UNITS`). Declared here or
+later on the geometry (`Geometry.define_units`), the coordinates and every
+property value are converted to SI together.
 
 `save` writes coordinate systems as CORD2 cards, grids as large-field
 GRID* cards (full precision, where a small field holds about five
@@ -197,7 +203,8 @@ def _cs_matrix(a, b, c):
     return np.vstack([x, y, z, a])
 
 
-def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
+def load(path: str | os.PathLike, length_unit: str | None = None,
+         mass_unit: str | None = None) -> Any:
     path = str(path)
     lines = _bulk_lines(path)
     cards = _cards(lines)
@@ -391,13 +398,20 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
                                             else '')
                     for pid in sorted({e[3] for e in elements})],
         group_properties=properties,
+        # the properties are the deck's own numbers until its units are
+        # declared (2026-10-26: they were taken as SI, so a deck in mm
+        # read 2 mm shells as 2 m and steel at 200 kPa)
+        from_deck=True,
     )
     # the PLOTELs are one drawn line — an element group of two-node line
     # elements with no properties — chained where they join
     if tracelines:
         geometry.attach_drawn_lines([('PLOTEL', 1, tracelines)])
     if length_unit:
-        geometry.define_units(length_unit)
+        geometry.define_units(length_unit, mass_unit)
+    elif mass_unit:
+        raise ValueError('a mass unit is declared with a length unit: the '
+                         "deck's consistent system is the two together")
     return geometry
 
 
@@ -405,9 +419,9 @@ def _block_properties(materials: dict, solids: dict, shells: dict) -> dict:
     """What the deck's own property cards say each element group is made of:
     a PSOLID names a material, a PSHELL a material and a thickness, a
     MAT1 the numbers. An element group whose cards are not all there carries
-    nothing, and the Element Groups table asks (2026-09-30). The deck is taken
-    to be in SI: Nastran has no units, and a deck in inches and pounds
-    reads the same as one in meters and kilograms."""
+    nothing, and the Element Groups table asks (2026-09-30). The numbers are
+    the deck's own, converted when its units are declared
+    (`Geometry.define_units`)."""
     from ..core.fem import GroupProperties, Material
 
     def material(mid: int) -> Material | None:

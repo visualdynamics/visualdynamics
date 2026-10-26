@@ -6202,6 +6202,17 @@ class MainWindow(QMainWindow):
             item.setToolTip(0, self._object_tooltip(item.text(0), obj))
             self._refresh_child_badges(item, obj)
         self.render_current()
+        if (isinstance(obj, Geometry) and getattr(obj, 'from_deck', False)
+                and obj.units_defined):
+            from ..core.geometry import implausible_materials
+
+            # what a wrong mass unit looks like, said where it was declared
+            notes = implausible_materials(obj.group_properties)
+            if notes:
+                self._show_status(
+                    f'{name}: {"; ".join(notes)} — is the deck in another '
+                    f'unit system than {obj.length_unit} and '
+                    f'{obj.mass_unit}?')
 
     def _journal_units(self, name, obj):
         """The object's declared units, as the one call that replays
@@ -6222,6 +6233,10 @@ class MainWindow(QMainWindow):
             unit = (obj.length_unit if isinstance(obj, Geometry)
                     else obj.mass_unit)
             line = f'project[{name!r}].define_units({unit!r})'
+            if getattr(obj, 'from_deck', False):
+                # a deck's system is its length and its mass together
+                line = (f'project[{name!r}].define_units({unit!r}, '
+                        f'{obj.mass_unit!r})')
             prefix = f'project[{name!r}].define_units('
             journal = self.project.journal
             if journal and journal[-1].startswith(prefix):

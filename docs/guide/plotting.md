@@ -186,6 +186,10 @@ draws a sine profile, or a specification's tone read as one, three
 ways with its crossovers marked, the reading the Sine Profile toggle on
 a sine specification's bar shows ([Writing a sine profile in
 segments](sine-profile.md)).
+`plot_field_limit(flights)` draws a set of measured PSDs or SRSs with
+the limit taken over them and the straight-line envelope over the
+limit, the reading the Field Limit toggle shows ([Deriving a
+specification from field data](field-limit.md)).
 `plot_import_preview('run.csv')` draws each channel of a delimited text
 import as read, its missing samples crossed and a dead channel named,
 the preview the import dialog shows ([Importing a time history from

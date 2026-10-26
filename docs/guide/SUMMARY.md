@@ -25,6 +25,7 @@
     - [Writing a random specification by slope](breakpoint-slopes.md)
     - [Judging a multi-point control run](multi-point.md)
     - [Checking a spectrum against its record](rms-check.md)
+    - [Deriving a specification from field data](field-limit.md)
     - [Reading a tone off an ASD](tone-readout.md)
     - [Reading a tone's amplitude from a record](amplitude-spectrum.md)
     - [The two transmissibilities, and what H1 is worth](transmissibility.md)

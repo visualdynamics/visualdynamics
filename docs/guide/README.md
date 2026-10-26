@@ -98,6 +98,10 @@ that is not an alpha.
 - [Checking a spectrum against its record](rms-check.md): the rms from
   the area under an ASD beside the rms of its time history, and the
   scaling errors the gap names
+- [Deriving a specification from field data](field-limit.md): the
+  envelope or a tolerance limit over a set of measured spectra, what it
+  rests on, and the straight-line envelope a specification is written
+  from
 - [Reading a tone off an ASD](tone-readout.md): why a spike's height
   is not the tone, and the tone in g peak from the lines it leaks into
 - [Reading a tone's amplitude from a record](amplitude-spectrum.md):

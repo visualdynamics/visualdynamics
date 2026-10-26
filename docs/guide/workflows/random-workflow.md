@@ -108,6 +108,12 @@ controller can be checked against the run the same way, and a scaling
 error shows as a gap the check names (see [Checking a spectrum against
 its record](../rms-check.md)).
 
+Where the PSDs are field data rather than a test (one per flight, run
+or segment), **Field Limit** on the bar takes a statistical limit over
+them and writes the straight-line envelope a specification is written
+from (see [Deriving a specification from field
+data](../field-limit.md)).
+
 ### 3. Band onto sixth octaves
 
 A random report always includes the octave-band PSD and the

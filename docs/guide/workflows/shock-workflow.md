@@ -121,6 +121,12 @@ in the Shocks view (2)](../images/shock-srs-click.png)
 ![The computed SRS: all four events at the corner channel, the
 channel drop-down reaching the others](../images/shock-srs.png)
 
+A series of measured shocks can also be the start of a requirement:
+**Field Limit** on the SRS's bar takes the envelope or a tolerance
+limit over the events and writes the straight-line envelope a shock
+specification is written from, at the spectra's own Q (see [Deriving a
+specification from field data](../field-limit.md)).
+
 ### 4. The requirement, and the comparison
 
 A shock specification is an SRS with a tolerance band around it, the

@@ -1928,6 +1928,42 @@ def transformation_residual():
     print(headings[:4], rows[3][:4], rows[3][-1])
 
 
+def field_limit():
+    """Eight flights' spectra on sixth-octave lines from 20 to 2000 Hz,
+    each a rising, flat and falling profile with a resonance near 300 Hz
+    and 1.5 dB of log-normal scatter from flight to flight; the normal
+    tolerance limit P95/50 over them, the straight-line envelope within
+    3 dB of it, and that envelope with 3 dB of margin."""
+    import numpy as np
+
+    from visualdynamics.core.data import Psd
+    from visualdynamics.core.field_limit import derive
+    from visualdynamics.plot import plot_field_limit
+    from visualdynamics.units import DEFAULT_SYSTEM
+
+    g = 9.80665
+    # 41 lines over the two decades: about six to the octave
+    f = np.geomspace(20.0, 2000.0, 41)
+    profile = (0.02 * np.minimum(1.0, f / 120.0)
+               * np.minimum(1.0, (900.0 / f) ** 2)
+               * (1.0 + 3.0 / (1.0 + ((f - 300.0) / 40.0) ** 2)))
+    rng = np.random.default_rng(2608)
+    scatter = rng.normal(0.0, 1.5, (8, f.size))
+    flights = Psd(f, profile * 10.0 ** (scatter / 10.0) * g * g,
+                  response_dof='101Z+',
+                  ordinate_dim='acceleration**2/frequency',
+                  ordinate_unit='g',
+                  block=[f'flight {k + 1}' for k in range(8)])
+    fit = derive(flights, statistic='tolerance', coverage=0.95,
+                 confidence=0.5)
+    print(f'  {fit.limit.describe()}; {fit.describe()}')
+    print(f'  breakpoints {np.round(fit.frequencies, 1)}')
+    plot_field_limit(flights, statistic='tolerance', coverage=0.95,
+                     confidence=0.5, margin_db=3.0,
+                     unit_system=DEFAULT_SYSTEM, show=False,
+                     size=(1100, 720), path=str(OUT / 'field-limit.png'))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -1968,6 +2004,7 @@ def main():
     multi_point()
     partial_coherence()
     transformation_residual()
+    field_limit()
     print('done')
 
 

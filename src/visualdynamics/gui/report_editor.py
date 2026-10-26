@@ -988,7 +988,8 @@ class ReportEditor(QWidget):
             # a skeleton section's one-step None, or who interpreted:
             # through the one function a script calls, which refuses
             index = int(operation.get('at', -1))
-            if not 0 <= index < report.num_blocks or                     'section' not in report.blocks[index]:
+            if (not 0 <= index < report.num_blocks
+                    or 'section' not in report.blocks[index]):
                 return
             from ..report.skeleton import write
 

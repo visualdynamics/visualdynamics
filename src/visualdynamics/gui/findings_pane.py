@@ -67,7 +67,8 @@ class FindingsPane(QWidget):
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._loading = True
-        self.entries = list(entries)
+        #: the register's findings, in its order, as `report.findings` reads them
+        self.entries: list[Mapping[str, Any]] = list(entries)
         chosen = [entry for entry in self.entries
                   if entry['number'] == selected]
         #: the finding whose fields are shown, or None

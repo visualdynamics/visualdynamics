@@ -1364,6 +1364,19 @@ def paired_density_blocks(loud: str, quiet: str,
             for quantity in quantity_order(shared)]
 
 
+def _lands_on(geometry: Any, dofs: Sequence[str]) -> bool:
+    """Whether any of `dofs` is at a node of `geometry` and has an
+    axis, so a DOF scene would draw an arrow for it."""
+    from .data import parse_dof
+
+    nodes = {int(n) for n in geometry.node_id}
+    for dof in dofs:
+        node, direction = parse_dof(dof)
+        if node is not None and int(node) in nodes and direction.strip():
+            return True
+    return False
+
+
 def front_matter(objects: Mapping[str, Any],
                  object_groups: Sequence[Mapping[str, Any]] | None,
                  dofs_source: str) -> list[dict[str, Any]]:
@@ -1404,6 +1417,17 @@ def front_matter(objects: Mapping[str, Any],
     if source is not None and hasattr(source, 'known_dim'):
         held = set(series_dof_quantities([('', source, None)]))
         scenes = [quantity for quantity in scenes if quantity in held]
+        drawn_on = objects.get(resolve_binding(geometry, objects,
+                                               object_groups) or '')
+        if drawn_on is not None and hasattr(drawn_on, 'node_id'):
+            # and only where some of them land on the geometry: a scene
+            # with no arrow is not drawn, and the prose citing it
+            # (`dof_references`) would cite a figure that is not there
+            # (2026-10-27: a shock run's voltage channels on nodes the
+            # plate does not have)
+            scenes = [quantity for quantity in scenes
+                      if _lands_on(drawn_on, series_quantity_dofs(
+                          [('', source, None)], quantity))]
     for quantity in scenes:
         role = ('Excitation' if quantity in EXCITATION_QUANTITIES
                 else 'Response')

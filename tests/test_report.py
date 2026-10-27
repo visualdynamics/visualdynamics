@@ -428,22 +428,29 @@ def test_text_placeholders_fill_from_the_live_objects(project):
 def test_figure_references_follow_the_numbering(project):
     """{{figure:<start of caption>}} in text reads the number the
     figure carries right now — insert a figure above it and the
-    reference renumbers itself on the next render."""
+    reference renumbers itself on the next render. A sentence citing a
+    figure that is not there is left out of the reading page and marked
+    on the edit page (2026-10-27; it was left as written before, and
+    reached readers as '{{figure:...}}')."""
     report = Report('R', [
         {'kind': 'text', 'text': 'See {{figure:Auto-MAC}} and '
-         '{{table:Modes}}; {{figure:Nothing here}} stays.'},
+         '{{table:Modes}}. {{figure:Nothing here}} is gone.'},
         {'kind': 'plot', 'source': 'Shape Set', 'mode': 'mac',
          'caption': 'Auto-MAC of the shapes'},
         {'kind': 'table', 'source': 'Shape Set', 'caption': 'Modes'},
     ])
     text = _payload(render_html(report, project))['blocks'][0]['html']
-    assert 'See Figure 1 and Table 1;' in text
-    assert '{{figure:Nothing here}} stays' in text, (
-        'an unmatched reference stays visible as written')
+    assert 'See Figure 1 and Table 1.' in text
+    assert 'Nothing here' not in text and 'is gone' not in text, (
+        'the sentence citing a missing figure is left out')
+    edited = _payload(render_html(report, project, edit=True))
+    [html] = [b['html'] for b in edited['blocks'] if b['kind'] == 'text']
+    assert 'no figure starts' in html and 'is gone' in html, (
+        'the editor marks it instead')
     report.add({'kind': 'scene', 'geometry': 'Geometry', 'shapes': '',
                 'caption': 'The geometry'}, at=1)
     text = _payload(render_html(report, project))['blocks'][0]['html']
-    assert 'See Figure 2 and Table 1;' in text, (
+    assert 'See Figure 2 and Table 1.' in text, (
         'the reference renumbered with the new figure above it')
 
 

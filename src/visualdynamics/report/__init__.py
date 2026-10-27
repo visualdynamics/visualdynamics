@@ -299,7 +299,7 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     for built in payload['blocks']:
         if built['kind'] == 'text':
             built['html'] = to_html(
-                _resolve_figures(built.pop('text'), labeled),
+                _resolve_figures(built.pop('text'), labeled, edit),
                 tables=skeleton)
     if skeleton:
         from .skeleton import finish
@@ -538,20 +538,63 @@ _FIGURE = re.compile(r'\{\{\s*(figure|table)\s*:\s*([^{}]+?)\s*\}\}',
                      re.IGNORECASE)
 
 
-def _resolve_figures(text, labeled):
+#: where one sentence of prose ends and the next begins: a full stop,
+#: question or exclamation mark, then space and a capital or an opening
+#: bracket. A decimal point has no space after it, so '1.0 means' stays
+#: one sentence.
+_SENTENCE_END = re.compile(r'(?<=[.!?])\s+(?=[A-Z(\[{])')
+
+
+def _resolve_figures(text, labeled, edit=False):
     """{{figure:<start of caption>}} becomes 'Figure 3' — whatever
-    number that figure carries right now. Same for {{table:...}}. An
-    unmatched reference stays visible as written."""
-    def swap(match: re.Match) -> str:
+    number that figure carries right now. Same for {{table:...}}.
+
+    A reference that matches no figure never reaches a reader. On the
+    reading page the sentence holding it is left out: a sentence that
+    cites a figure is about that figure, and without it the sentence
+    describes a plot that is not there. A line that is not prose (a
+    heading, a table row) keeps its words and loses only the reference.
+    On the edit page the reference is marked in place instead, so a
+    person who typed a caption wrong sees it rather than losing the
+    sentence.
+    """
+    # Brandon, 2026-10-27: the report printed '({{figure:Excitation
+    # degrees of freedom (force)}})' for a figure a run without force
+    # channels never built. The templates now name what they built
+    # (core.report.dof_references); this is the guard for anything
+    # that still does not, text typed in the editor included.
+    def label_of(match: re.Match) -> str | None:
         wanted = match.group(1).lower()
         target = match.group(2).strip().lower()
         for label, caption in labeled:
             if (label.lower().startswith(wanted)
                     and caption.lower().startswith(target)):
                 return label
-        return match.group(0)
+        return None
 
-    return _FIGURE.sub(swap, text)
+    def mark(match: re.Match) -> str:
+        found = label_of(match)
+        if found is not None:
+            return found
+        if edit:
+            return f'[no {match.group(1).lower()} starts "{match.group(2).strip()}"]'
+        return ''
+
+    if edit:
+        return _FIGURE.sub(mark, text)
+
+    def prose(line: str) -> str:
+        if not _FIGURE.search(line):
+            return line
+        if line.lstrip().startswith(('#', '|')):
+            # not a sentence to drop: the words stay, the reference goes
+            return re.sub(r'\s*\(\s*\)', '', _FIGURE.sub(mark, line)).rstrip()
+        kept = [sentence for sentence in _SENTENCE_END.split(line)
+                if all(label_of(m) is not None
+                       for m in _FIGURE.finditer(sentence))]
+        return _FIGURE.sub(mark, ' '.join(kept))
+
+    return '\n'.join(prose(line) for line in text.split('\n'))
 
 
 def _build_block(block, objects, us, object_groups=None):

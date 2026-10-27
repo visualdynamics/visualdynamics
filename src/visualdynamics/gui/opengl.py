@@ -181,7 +181,8 @@ QUICK_BACKEND = 'QSG_RHI_BACKEND'
 
 
 def one_graphics_system() -> None:
-    """Have Qt Quick draw with OpenGL, as the 3-D views do.
+    """Have Qt Quick draw with OpenGL, as the 3-D views do, and every
+    OpenGL context be the one format the 3-D views need.
 
     Qt composes each window with one graphics system. The 3-D views are
     OpenGL widgets, and the report's web view is drawn by Qt Quick, which
@@ -190,7 +191,26 @@ def one_graphics_system() -> None:
     drawing normally. Set before the first Qt Quick window exists, which
     is the first web view; a value already in the environment is left
     as it is.
+
+    The format is the desktop OpenGL 3.2 core profile VTK draws with,
+    made the default before the first window. A 3-D view sets it as the
+    default when it is built, and a 3-D view is built when it is first
+    needed, after the window exists; Qt had by then chosen how to
+    compose the window for the format before, and its compositor's
+    shaders failed to compile against the new one.
     """
+    # A Mac running 0.1.0a74 (Brandon, 2026-10-27): importing an nc4
+    # printed QBackingStoreDefaultCompositor's '#version 120' shader
+    # refused ("version '120' is not supported", the core profile takes
+    # 150 and up) and the application crashed; the same import worked
+    # on the next launch. pyvistaqt's own format, not a copy of it: each
+    # 3-D view sets the default again when it is built, and a format
+    # that differed in any field would change it under the window as
+    # before.
+    from PySide6.QtGui import QSurfaceFormat
+    from pyvistaqt.rwi import _default_format
+
+    QSurfaceFormat.setDefaultFormat(_default_format())
     # pyvistaqt 0.13 made the 3-D view a QOpenGLWidget composed by Qt;
     # 0.12's was a native window of its own, which never met Qt Quick.
     # Measured on screen 2026-10-21 (Brandon: no 3-D view drew in the

@@ -169,3 +169,37 @@ def test_qt_quick_draws_with_opengl_as_the_3d_views_do(monkeypatch, qt_app):
     monkeypatch.setenv(opengl.QUICK_BACKEND, 'metal')
     opengl.one_graphics_system()
     assert os.environ[opengl.QUICK_BACKEND] == 'metal', 'a choice made stands'
+
+
+def test_every_context_is_the_3d_views_format_from_the_start(qt_app):
+    """A 3-D view makes OpenGL 3.2 core the default format when it is
+    built, and it is built when first needed, after the window exists.
+    On a Mac the window's compositor had chosen GLSL 1.20 shaders for
+    the format before, which the core profile refuses, and the
+    application crashed importing an nc4 (Brandon, 2026-10-27). The
+    launcher and a window a script builds both set the 3-D views' own
+    format first, so building a 3-D view changes nothing."""
+    from PySide6.QtGui import QSurfaceFormat
+    from pyvistaqt.rwi import _default_format
+
+    from visualdynamics.gui import before_application
+    from visualdynamics.gui.main_window import MainWindow
+
+    before = QSurfaceFormat.defaultFormat()
+    try:
+        QSurfaceFormat.setDefaultFormat(QSurfaceFormat())
+        before_application()
+        made = QSurfaceFormat.defaultFormat()
+        assert made == _default_format(), 'the launcher'
+        assert made.profile() == QSurfaceFormat.OpenGLContextProfile.CoreProfile
+        assert (made.majorVersion(), made.minorVersion()) == (3, 2)
+        QSurfaceFormat.setDefaultFormat(QSurfaceFormat())
+        window = MainWindow(offscreen_3d=True)
+        try:
+            assert QSurfaceFormat.defaultFormat() == _default_format(), (
+                'a window a script builds without the launcher')
+        finally:
+            window.close()
+            window.deleteLater()
+    finally:
+        QSurfaceFormat.setDefaultFormat(before)

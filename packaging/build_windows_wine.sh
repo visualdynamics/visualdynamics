@@ -40,12 +40,12 @@ export WINEPREFIX="$HOME/.wine-visualdynamics"
 export WINEDEBUG=-all
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 WINREPO="Z:${REPO//\//\\}"
-PY='C:\Python313\python.exe'
+PY='C:\Python314\python.exe'
 ISCC='C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
 MESA_DLLS=(opengl32.dll libgallium_wgl.dll)
 
 WINE_URL=https://github.com/Gcenx/macOS_Wine_builds/releases/download/11.16/wine-devel-11.16-osx64.tar.xz
-PYTHON_NUPKG=https://globalcdn.nuget.org/packages/python.3.13.7.nupkg
+PYTHON_NUPKG=https://globalcdn.nuget.org/packages/python.3.14.10.nupkg
 INNO_URL=https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
 MESA_URL=https://github.com/pal1000/mesa-dist-win/releases/download/26.2.0/mesa3d-26.2.0-release-msvc.7z
 
@@ -66,11 +66,11 @@ setup() {
         WINE="$WINE" PATH="$(dirname "$WINE"):$PATH" winetricks -q vcrun2022
     fi
 
-    if [[ ! -e "$WINEPREFIX/drive_c/Python313/python.exe" ]]; then
+    if [[ ! -e "$WINEPREFIX/drive_c/Python314/python.exe" ]]; then
         echo '== Windows Python (NuGet zip: the real installer no-ops here)'
         curl -sL -o "$work/python.nupkg" "$PYTHON_NUPKG"
         ( cd "$work" && unzip -oq python.nupkg tools/'*' )
-        cp -R "$work/tools" "$WINEPREFIX/drive_c/Python313"
+        cp -R "$work/tools" "$WINEPREFIX/drive_c/Python314"
     fi
 
     echo '== the project and its build tools, into Windows Python'

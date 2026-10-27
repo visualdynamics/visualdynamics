@@ -118,7 +118,7 @@ properdocs build --strict           # the docs site, if you changed docstrings o
 ```
 
 CI runs the same checks on every pull request, on every push to `main`,
-once a week, and on demand, on Python 3.12 and 3.13. Nothing reaches `main` except through a pull
+once a week, and on demand, on Python 3.12, 3.13 and 3.14. Nothing reaches `main` except through a pull
 request with its checks green (the tests on each Python, the
 documentation build and the branch name), and that holds for the owner
 too.

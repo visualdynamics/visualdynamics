@@ -36,7 +36,7 @@ COLLECTED = [
     ('libxcb-glx.so.0', '/usr/lib/x86_64-linux-gnu/libxcb-glx.so.0', 'BINARY'),
     ('PySide6/Qt/lib/libQt6Core.so.6', '/w/libQt6Core.so.6', 'BINARY'),
     ('vtkmodules/libvtkCommonCore.so', '/w/libvtkCommonCore.so', 'BINARY'),
-    ('libpython3.13.so.1.0', '/usr/lib/libpython3.13.so.1.0', 'BINARY'),
+    ('libpython3.14.so.1.0', '/usr/lib/libpython3.14.so.1.0', 'BINARY'),
 ]
 
 
@@ -64,7 +64,7 @@ def test_what_the_application_needs_survives(strip):
     names = kept(strip, 'linux')
     assert 'PySide6/Qt/lib/libQt6Core.so.6' in names
     assert 'vtkmodules/libvtkCommonCore.so' in names
-    assert 'libpython3.13.so.1.0' in names
+    assert 'libpython3.14.so.1.0' in names
 
 
 @pytest.mark.parametrize('platform', ['darwin', 'win32'])

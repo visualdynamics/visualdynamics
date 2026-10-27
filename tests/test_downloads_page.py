@@ -221,7 +221,7 @@ def test_ci_runs_on_every_push_to_main_and_both_pythons():
     assert 'pull_request' in on and 'workflow_dispatch' in on
     assert on['schedule'] == [{'cron': '0 13 * * 1'}], 'weekly'
     matrix = workflow['jobs']['test']['strategy']['matrix']
-    assert matrix['python-version'] == ['3.12', '3.13']
+    assert matrix['python-version'] == ['3.12', '3.13', '3.14']
 
 
 def test_the_publish_job_waits_for_every_build():

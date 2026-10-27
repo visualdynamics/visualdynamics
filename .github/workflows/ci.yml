@@ -56,10 +56,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # both, every run: `requires-python` promises 3.12, and now
+        # all three, every run: `requires-python` promises 3.12, and now
         # that the minutes are free there is no bill to halve by
-        # testing it only on demand (2026-09-14)
-        python-version: ['3.12', '3.13']
+        # testing it only on demand (2026-09-14). 3.14 joined, and took
+        # the coverage and the docs, when the desk and the release
+        # builds moved to it (Brandon, 2026-10-27)
+        python-version: ['3.12', '3.13', '3.14']
 
     steps:
       - uses: actions/checkout@v7
@@ -106,7 +108,7 @@ jobs:
           # on a run of the better part of half an hour, and the number does not differ
           # between them. `--cov-report=` writes the data and prints
           # nothing; the report is assembled once, after the demo step.
-          COV: ${{ matrix.python-version == '3.13'
+          COV: ${{ matrix.python-version == '3.14'
                    && '--cov=visualdynamics --cov-report=' || '' }}
         # --durations: the run takes the better part of half an hour here against three and a
         # half on the machine it was written on, and twice a hosted
@@ -133,7 +135,7 @@ jobs:
       - name: Test the demonstration model
         env:
           QTWEBENGINE_CHROMIUM_FLAGS: --no-sandbox --disable-gpu
-          COV: ${{ matrix.python-version == '3.13'
+          COV: ${{ matrix.python-version == '3.14'
                    && '--cov=visualdynamics --cov-append --cov-report=' || '' }}
         run: xvfb-run -a python -m pytest tests -q -m slow -n auto $COV
 
@@ -141,7 +143,7 @@ jobs:
       # `demo/drone.py` at 12% and call the speedup a regression: the
       # demonstration model is tested, just not on every edit.
       - name: Coverage
-        if: matrix.python-version == '3.13'
+        if: matrix.python-version == '3.14'
         run: |
           total=$(python -m coverage report --format=total)
           {
@@ -165,7 +167,7 @@ jobs:
           python -m coverage report --fail-under=90 > /dev/null
 
       - name: Keep the coverage report
-        if: matrix.python-version == '3.13'
+        if: matrix.python-version == '3.14'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-html
@@ -214,7 +216,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.13'
+          python-version: '3.14'
           cache: pip
 
       - name: Install visualdynamics and the documentation tools

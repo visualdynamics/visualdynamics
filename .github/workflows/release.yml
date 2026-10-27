@@ -91,7 +91,7 @@ jobs:
       - uses: actions/checkout@v7
         with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
-        with: {python-version: '3.13', cache: pip}
+        with: {python-version: '3.14', cache: pip}
       # The same list packaging/build_linux.sh reads, so a runner and a
       # container install the same thing. A hand-copied list here is
       # what made the first two attempts fail on binutils and libkrb5-3.
@@ -126,7 +126,7 @@ jobs:
       - uses: actions/checkout@v7
         with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
-        with: {python-version: '3.13', cache: pip}
+        with: {python-version: '3.14', cache: pip}
       # [step]: the CAD kernel ships in every packaged build (the spec
       # collects OCP only if it is installed — without the extra the
       # runner's package silently lacked STEP/IGES import, 2026-09-03)
@@ -171,7 +171,7 @@ jobs:
       - uses: actions/checkout@v7
         with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
-        with: {python-version: '3.13', cache: pip}
+        with: {python-version: '3.14', cache: pip}
       # [step]: the CAD kernel ships in every packaged build (the spec
       # collects OCP only if it is installed — without the extra the
       # runner's package silently lacked STEP/IGES import, 2026-09-03)
@@ -370,7 +370,7 @@ jobs:
       - uses: actions/checkout@v7
         with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
-        with: {python-version: '3.13', cache: pip}
+        with: {python-version: '3.14', cache: pip}
       - run: pip install -e '.[docs]'
       - name: Build the documentation into the site
         env:
@@ -438,7 +438,7 @@ jobs:
       id-token: write
     steps:
       - uses: actions/setup-python@v7
-        with: {python-version: '3.13'}
+        with: {python-version: '3.14'}
       - name: Build the placeholder
         run: |
           mkdir -p placeholder/visualdynamics
@@ -497,7 +497,7 @@ jobs:
       - uses: actions/checkout@v7
         with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
-        with: {python-version: '3.13'}
+        with: {python-version: '3.14'}
       - run: pip install -q build
       - run: python -m build
       - uses: pypa/gh-action-pypi-publish@release/v1

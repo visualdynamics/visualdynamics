@@ -19,17 +19,19 @@ VENV=".venv-x86_64"
 # the interpreter, kept level with the arm64 venv's pyenv build: moving
 # it is this line and nothing else — a different version on disk is
 # replaced, and the venv built on it with it (2026-10-10, 3.13.15 ->
-# 3.13.16, when the arm64 side left 3.13.2)
-PY_VERSION=3.13.16
-PBS_TAG=20261009
+# 3.13.16, when the arm64 side left 3.13.2; 2026-10-27, 3.13.16 ->
+# 3.14.10). The interpreter is called python3, not python3.X, so a
+# move between minor versions finds the old one too.
+PY_VERSION=3.14.10
+PBS_TAG=20261026
 PBS=https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_TAG/cpython-$PY_VERSION%2B$PBS_TAG-x86_64-apple-darwin-install_only.tar.gz
 
-if [[ -x "$BASE/python/bin/python3.13" ]] && [[ "$("$BASE/python/bin/python3.13" \
+if [[ -x "$BASE/python/bin/python3" ]] && [[ "$("$BASE/python/bin/python3" \
         -c 'import platform; print(platform.python_version())')" != "$PY_VERSION" ]]; then
     echo "== replacing the x86_64 CPython with $PY_VERSION"
     rm -rf "$BASE" "$VENV"
 fi
-if [[ ! -x "$BASE/python/bin/python3.13" ]]; then
+if [[ ! -x "$BASE/python/bin/python3" ]]; then
     echo '== x86_64 CPython (python-build-standalone; no installer)'
     work=$(mktemp -d)
     curl -sL -o "$work/python.tar.gz" "$PBS"
@@ -37,12 +39,12 @@ if [[ ! -x "$BASE/python/bin/python3.13" ]]; then
     tar -xzf "$work/python.tar.gz" -C "$BASE"
     rm -rf "$work"
 fi
-"$BASE/python/bin/python3.13" -c \
+"$BASE/python/bin/python3" -c \
     'import platform; assert platform.machine() == "x86_64", platform.machine()'
 
 if [[ ! -x "$VENV/bin/python" ]]; then
     echo '== the x86_64 venv'
-    "$BASE/python/bin/python3.13" -m venv "$VENV"
+    "$BASE/python/bin/python3" -m venv "$VENV"
 fi
 echo '== the project and its build tools, as x86_64 wheels'
 "$VENV/bin/python" -m pip install -q --prefer-binary '.[step,app]' pyinstaller pillow

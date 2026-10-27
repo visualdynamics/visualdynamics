@@ -37,7 +37,7 @@ rsync -a --delete -e "ssh ${SSH_OPTS[*]}" \
 # root-owned and a plain rm is refused next round — sudo clears them
 ssh $SSH_OPTS bzwink@$HOST 'cd vd-build && sudo rm -rf dist build && \
   docker run --rm --cpus 3 --memory 8g -v "$PWD":/work -w /work \
-    -e APPIMAGE_EXTRACT_AND_RUN=1 python:3.13-slim-bookworm bash -c '\''
+    -e APPIMAGE_EXTRACT_AND_RUN=1 python:3.14-slim-bookworm bash -c '\''
       set -e
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq

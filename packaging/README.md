@@ -12,11 +12,11 @@ last is what deploys the site and publishes to PyPI).
 | Windows | `build_windows.ps1` | Inno Setup `.exe` installer | **yes** — installed and launched on a `windows-latest` runner by the release workflow's smoke test (2026-09-01); `build_windows_wine.sh` is the local loop |
 
 Two of the three are built and *launched*, not merely produced. Linux
-was done in a `python:3.13-slim-bookworm` container on an x86_64 Debian
+was done in a `python:3.14-slim-bookworm` container on an x86_64 Debian
 box, which is also how to repeat it:
 
     docker run --rm --cpus 3 --memory 8g -v "$PWD":/work -w /work \
-      -e APPIMAGE_EXTRACT_AND_RUN=1 python:3.13-slim-bookworm bash -c '
+      -e APPIMAGE_EXTRACT_AND_RUN=1 python:3.14-slim-bookworm bash -c '
         set -e
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq

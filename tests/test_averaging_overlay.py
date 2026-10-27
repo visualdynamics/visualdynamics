@@ -63,9 +63,10 @@ def band_gradient(band):
 
 
 def bands_of(overlaid):
-    """[(low, high)] each band covers."""
-    return [(item.getData()[0][0], item.getData()[0][-1])
-            for item in overlaid.bands]
+    """[(low, high)] each band covers, as an array: pytest.approx
+    compares arrays of pairs, and refuses a list of tuples since 9.2."""
+    return np.array([(item.getData()[0][0], item.getData()[0][-1])
+                     for item in overlaid.bands])
 
 
 def band_tops(overlaid):
@@ -88,7 +89,7 @@ def test_a_band_sits_on_every_frame(qt_app):
     averaging = Averaging(frame_length=1024, overlap=0.5, frames=4)
     overlaid, _plot = overlay(qt_app, averaging)
     assert len(overlaid.bands) == 4
-    assert bands_of(overlaid) == pytest.approx(averaging.frame_bounds(RATE))
+    assert bands_of(overlaid) == pytest.approx(np.asarray(averaging.frame_bounds(RATE)))
 
 
 def test_overlapping_frames_overlap_on_the_plot(qt_app):
@@ -451,7 +452,7 @@ def test_dragging_the_middle_moves_the_analysis(qt_app):
     moved = drag(overlaid, 2.0, 4.0)
     assert moved.start == pytest.approx(2.0)
     assert moved.frames == 2, 'the same analysis, further along'
-    assert bands_of(overlaid) == pytest.approx(moved.frame_bounds(RATE))
+    assert bands_of(overlaid) == pytest.approx(np.asarray(moved.frame_bounds(RATE)))
 
 
 def test_dragging_an_edge_out_adds_whole_frames(qt_app):
@@ -534,7 +535,7 @@ def test_a_locked_overlay_cannot_be_dragged(qt_app):
     overlaid, _plot = overlay(
         qt_app, Averaging.for_records(1024), samples=1024, locked=True)
     assert not overlaid.region.movable
-    assert bands_of(overlaid) == pytest.approx([(0.0, 1.0)])
+    assert bands_of(overlaid) == pytest.approx(np.asarray([(0.0, 1.0)]))
 
 
 # ---- taking it away -----------------------------------------------------
@@ -572,7 +573,7 @@ def test_setting_an_averaging_redraws_the_marks(qt_app):
     wider = Averaging(frame_length=2048, overlap=0.0, window='blackman',
                       frames=3, start=0.5)
     overlaid.set_averaging(wider)
-    assert bands_of(overlaid) == pytest.approx(wider.frame_bounds(RATE))
+    assert bands_of(overlaid) == pytest.approx(np.asarray(wider.frame_bounds(RATE)))
     assert overlaid.region.getRegion() == pytest.approx(
         (0.5, wider.stop(RATE)))
 

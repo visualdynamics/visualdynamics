@@ -1,5 +1,5 @@
 """Solids in the app (Brandon, 2026-10-11): the Solids row under every
-geometry, Add Solid Block and Add Cylinder in the add pane, the
+geometry, Add Block and Add Cylinder in the add pane, the
 booleans on picked parts, Take Apart, Delete, and the parts drawn
 see-through in the view.
 
@@ -74,14 +74,15 @@ def test_the_solids_row_adds_blocks_and_cylinders_in_the_pane(window, pump):
     # no Add Hole: a hole is a cylinder subtracted (Brandon, 2026-10-20)
     assert list(_acts(window)) == ['add_solid_block', 'add_solid_cylinder',
                                    'add_solid_cone', 'add_solid_sphere',
-                                   'add_solid_section']
+                                   'add_solid_section', 'add_solid_plate',
+                                   'add_solid_disk']
     panel = _add(window, pump, 'add_solid_block', center=(0, 0, -0.25),
                  widths=(4, 4, 0.5), group='plate')
-    assert panel.title.text() == 'Add Solid Block'
+    assert panel.title.text() == 'Add Block'
     assert panel.group_label.text() == 'Name'
-    assert panel.size.isHidden() and panel.radius.isHidden()
+    assert panel.radius.isHidden()
     assert panel.reading_label.text() == (
-        'A solid block 4 by 4 by 0.5 in, 8 in³ — a shape, meshed later.')
+        'A block 4 by 4 by 0.5 in, 8 in³ — a shape, meshed later.')
     assert 'plane-preview' in window.scene.plotter.actors
     panel.add_button.click()
     pump()
@@ -263,7 +264,7 @@ def test_a_solid_block_takes_a_corner_radius_in_the_pane(window, pump):
     assert not panel.corner.isHidden()
     assert panel.corner_label.text() == 'Corner radius [in]'
     assert panel.reading_label.text().startswith(
-        'A solid block 3.375 by 5 by 0.5 in, its corners rounded to 0.138 in, ')
+        'A block 3.375 by 5 by 0.5 in, its corners rounded to 0.138 in, ')
     panel.add_button.click()
     pump()
     assert window.project.journal[-1].endswith("corner=0.138)")
@@ -292,7 +293,7 @@ def test_a_solids_pencil_opens_the_pane_on_it_and_apply_changes_it(window, pump)
     assert plate_row.toolTip(1) == 'Move it, turn it or change its size'
     _pencil(window, pump, plate_row)
     panel = window.scene.mesh_panel
-    assert panel.isVisibleTo(window) and panel.title.text() == 'Edit Solid Block'
+    assert panel.isVisibleTo(window) and panel.title.text() == 'Edit Block'
     assert panel.add_button.text() == 'Apply'
     values = panel.values()
     assert values['center'] == pytest.approx((0, 0, -0.25))
@@ -519,3 +520,13 @@ def test_a_holes_pencil_opens_on_through_and_gives_it_a_depth(window, pump):
         "project.edit_solid('Part', 1, dimensions=(0.25, 0.75, 0.0, 0.0), unit='in')")
     assert geometry.solids[0].dimensions[1] == pytest.approx(0.75 * INCH)
 
+
+
+def test_a_solids_gimbal_is_a_fifth_of_its_widest_side(window, pump):
+    """Brandon (2026-10-26): the gimbal came in about five times too
+    large. Its rings were 1.2 times the box across, around the box."""
+    _part(window, pump)
+    _add(window, pump, 'add_solid_block', center=(0, 0, 0),
+         widths=(3.375, 5, 0.5))
+    assert window._ring_radius() == pytest.approx(0.12 * 5)
+    assert window._arrow_length() == pytest.approx(1.6 * 0.12 * 5)

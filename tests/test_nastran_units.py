@@ -275,3 +275,92 @@ def test_a_built_geometry_keeps_its_one_row(window, pump):
     window.add_object('Frame', Geometry([1, 2], [[0, 0, 0], [1, 0, 0]]))
     pump()
     assert _open_units(window, pump, 'Frame').rowCount() == 1
+
+
+# ---- a property card on two element shapes -----------------------------------
+
+MIXED = """BEGIN BULK
+GRID,1,,0.,0.,0.
+GRID,2,,1.,0.,0.
+GRID,3,,1.,1.,0.
+GRID,4,,0.,1.,0.
+GRID,5,,2.,0.,0.
+CQUAD4,1,10,1,2,3,4
+CTRIA3,2,10,2,5,3
+PSHELL,10,20,0.061
+MAT1,20,3190800.,,0.13,1.6898-4
+ENDDATA
+"""
+
+
+def test_triangles_sharing_the_quads_pshell_carry_it(tmp_path):
+    """A student's board: quads and triangles both PSHELL 1. Split into a
+    group per element shape, the triangles' group had no properties."""
+    path = tmp_path / 'mixed.nas'
+    path.write_text(MIXED)
+    geometry = visualdynamics.import_file(path, length_unit='in')
+    names = dict(zip(geometry.group_name, geometry.group_id))
+    quads = geometry.group_properties[names['property 10']]
+    triangles = geometry.group_properties[names['property 10 triangles']]
+    assert triangles == quads
+    assert triangles.thickness == pytest.approx(0.061 * 0.0254)
+
+
+def test_the_table_shows_an_undeclared_decks_own_numbers(window, pump,
+                                                         tmp_path):
+    from PySide6.QtCore import Qt
+
+    from visualdynamics.gui.object_tables import element_group_table_model
+
+    path = tmp_path / 'mixed.nas'
+    path.write_text(MIXED)
+    geometry = visualdynamics.import_file(path)
+
+    def cells(model):
+        rows = {str(model.headerData(r, Qt.Orientation.Vertical)): r
+                for r in range(model.rowCount())}
+        return {name: float(model.index(row, 0).data())
+                for name, row in rows.items()
+                if name.startswith(('E ', 'Thickness'))}
+
+    raw = cells(element_group_table_model(geometry, window.unit_system))
+    assert raw['E [deck units]'] == pytest.approx(3190800.0)
+    assert raw['Thickness [deck units]'] == pytest.approx(0.061)
+    geometry.define_units('in')
+    declared = cells(element_group_table_model(geometry, window.unit_system))
+    assert declared['E [psi]'] == pytest.approx(3190800.0)
+    assert declared['Thickness [in]'] == pytest.approx(0.061)
+
+
+def test_declared_units_clear_the_element_groups_badges(window, pump,
+                                                       tmp_path):
+    """Brandon (2026-10-26): inches declared on a deck, and every element
+    group under its family row still wore the no-units badge."""
+    from PySide6.QtCore import Qt
+
+    from visualdynamics.gui.icons import child_icon
+
+    path = tmp_path / 'mixed.nas'
+    path.write_text(MIXED)
+    window.add_object('Board', visualdynamics.import_file(path))
+    pump()
+    top = window._item_for_object('Board')
+    top.setExpanded(True)
+    pump()
+    groups = [top.child(i).child(j) for i in range(top.childCount())
+              for j in range(top.child(i).childCount())
+              if top.child(i).child(j).text(0).startswith('property 10')]
+    assert len(groups) == 2
+
+    def image(icon):
+        return icon.pixmap(32, 32).toImage()
+
+    badged = image(child_icon('groups', 'Geometry', False))
+    clear = image(child_icon('groups', 'Geometry', True))
+    assert all(image(g.icon(0)) == badged for g in groups)
+    model = _open_units(window, pump, 'Board')
+    model.setData(model.index(0, model.columnCount() - 1), 'in',
+                  Qt.ItemDataRole.EditRole)
+    window._restate_after_units()
+    pump()
+    assert all(image(g.icon(0)) == clear for g in groups)

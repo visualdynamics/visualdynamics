@@ -1371,7 +1371,8 @@ class Geometry:
 
         The group keeps its first family, and each other family is moved
         into a new element group named with the old name and the
-        family, such as 'wing quads'. A file without element groups (UNV
+        family, such as 'wing quads', with the old group's properties. A
+        file without element groups (UNV
         dataset 2412, the sdynpy layout) puts every element in one group,
         so this is applied when such a file is read.
 
@@ -1394,6 +1395,11 @@ class Geometry:
                     zip(self.elem_type, self.elem_group))
                     if int(b) == group and element_family(int(code)) == family]
                 self.elem_group[rows] = new
+                # the same property card made both shapes, so the split
+                # carries it (2026-10-26: a deck's PSHELL on quads and
+                # triangles left the triangles with nothing)
+                if group in self.group_properties:
+                    self.group_properties[new] = self.group_properties[group]
                 made.setdefault(group, []).append(new)
         return made
 

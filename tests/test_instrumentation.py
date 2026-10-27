@@ -19,6 +19,7 @@ import pytest
 
 import visualdynamics
 from visualdynamics.core import instrumentation as ins
+from visualdynamics.core import mesh
 from visualdynamics.core.fem import MATERIALS, GroupProperties, Model
 from visualdynamics.core.geometry import Geometry
 from visualdynamics.core.shapes import ShapeSet
@@ -153,7 +154,8 @@ def test_a_cylinder_side_is_one_place_per_node_facing_out():
 def test_a_plate_offers_every_node_once():
     project = visualdynamics.Project('p')
     name = project.new_geometry('Plate', unit='in')
-    project.add_plane(name, (0, 0, 0), (4, 0, 0), (0, 2, 0), 0.5, 'plate', unit='in')
+    mesh.join(project[name], mesh.plane((0, 0, 0), (4, 0, 0), (0, 2, 0), 0.5, 'plate',
+                                        unit='in'))
     geometry = project[name]
     plan = ins.candidates(geometry)
     assert sorted(plan.source.tolist()) == sorted(geometry.node_id.tolist())
@@ -334,14 +336,15 @@ def test_plates_point_away_from_the_middle_and_a_flat_one_up_its_axis():
     for corner, a, b in [((0, 0, 0), (2, 0, 0), (0, 2, 0)), ((0, 0, 2), (2, 0, 0), (0, 2, 0)),
                          ((0, 0, 0), (2, 0, 0), (0, 0, 2)), ((0, 2, 0), (2, 0, 0), (0, 0, 2)),
                          ((0, 0, 0), (0, 2, 0), (0, 0, 2)), ((2, 0, 0), (0, 2, 0), (0, 0, 2))]:
-        project.add_plane(name, corner, a, b, 1.0, 'skin', unit='in')
+        mesh.join(project[name], mesh.plane(corner, a, b, 1.0, 'skin', unit='in'))
     plan = ins.candidates(project[name])
     middle = np.full(3, 1.0 * INCH)
     outward = np.einsum('ij,ij->i', plan.frames[:, 2], plan.geometry.node_xyz - middle)
     assert (outward > 0).all()
     flat = visualdynamics.Project('q')
     name = flat.new_geometry('Plate', unit='in')
-    flat.add_plane(name, (0, 0, 0), (0, 2, 0), (2, 0, 0), 1.0, 'plate', unit='in')
+    mesh.join(flat[name], mesh.plane((0, 0, 0), (0, 2, 0), (2, 0, 0), 1.0, 'plate',
+                                     unit='in'))
     normals = ins.candidates(flat[name]).frames[:, 2]
     assert np.allclose(normals, [0, 0, 1]), 'up, whichever way its corners run'
 

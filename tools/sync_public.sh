@@ -91,7 +91,10 @@ if ! gh pr view "$branch" --repo "$REPO" > /dev/null 2>&1; then
     gh pr create --repo "$REPO" --base main --head "$branch" \
         --title "$TITLE" --body "Synced from the working tree by tools/sync_public.sh; merges itself once the checks are green." > /dev/null
 fi
-gh pr merge "$branch" --repo "$REPO" --auto --rebase --delete-branch > /dev/null
+# merged through the queue (2026-10-25): the queue sets the method
+# (rebase) and refuses --delete-branch; the repository deletes a merged
+# pull request's branch itself
+gh pr merge "$branch" --repo "$REPO" --auto > /dev/null
 url=$(gh pr view "$branch" --repo "$REPO" --json url -q .url)
 echo "pull request $url — waiting on the checks"
 # the checks take a moment to be reported after the pull request opens,
@@ -103,11 +106,12 @@ for i in $(seq 1 30); do
 done
 gh pr checks "$branch" --repo "$REPO" --watch --fail-fast > /dev/null || {
     echo "a check failed — the pull request stays open: $url" >&2; exit 1; }
-# GitHub merges on its own once the checks are green; wait for it
-for i in $(seq 1 60); do
+# green, the pull request enters the merge queue, which tests it again on
+# top of main and merges it: up to the queue's 90-minute check timeout
+for i in $(seq 1 120); do
     state=$(gh pr view "$branch" --repo "$REPO" --json state -q .state)
     [[ $state == MERGED ]] && break
-    sleep 5
+    sleep 60
 done
 [[ $state == MERGED ]] || { echo "green, but not merged yet: $url" >&2; exit 1; }
 git checkout -q main && git fetch -q origin && git reset -q --hard origin/main

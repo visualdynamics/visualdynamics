@@ -46,7 +46,7 @@ A Python install needs Python 3.12 or newer. The dependencies are
 installed with the package: numpy, scipy, pandas, h5py, netCDF4, pint,
 vtk, pyvista, pyvistaqt, PySide6, pyqtgraph, openpyxl, certifi and
 truststore. One part is optional: the geometry kernel that solids
-(Add Solid Block, Mesh Solids and the rest) and the STEP/IGES importer
+(Add Block, Mesh Solids and the rest) and the STEP/IGES importer
 use. The compiled packages include it, and a Python install adds it
 with `pip install "visualdynamics[step]"`.
 

@@ -331,7 +331,7 @@ BEAM_SOLID = ((0.0, 5.0625, 1.5), (5.0, 0.125, 1.0))
 
 def _parts(project: Any, name: str, part: str) -> list[int]:
     """The parts as solids, the way a person makes them in the app (Add
-    Solid Block, then Subtract), in the order they are meshed: the box,
+    Block, then Subtract), in the order they are meshed: the box,
     the right channel, the left channel, the beam."""
     parts = []
     if part == 'BARC':

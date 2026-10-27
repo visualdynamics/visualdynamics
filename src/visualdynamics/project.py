@@ -3001,8 +3001,9 @@ class Project(dict):
     def new_geometry(self, name: str = 'Geometry', *,
                      unit: str = 'm') -> str:
         """Add an empty geometry to build a model in (the project's +
-        button). Planes are added with `add_plane`, and links in the
-        app's add mode.
+        button). Its parts are added as solids (`add_solid_plate`,
+        `add_solid_block` and the rest) and meshed with `mesh_solids`,
+        and links in the app's add mode.
 
         Parameters
         ----------
@@ -3108,65 +3109,6 @@ class Project(dict):
             raise TypeError('view must be a View, or None for the default')
         geometry.view = view
 
-    def add_plane(self, source: Any, corner: Any, edge_a: Any, edge_b: Any,
-                  size: float, group: str = '', *, unit: str = 'm',
-                  tolerance: float | None = None, apart: bool = False) -> dict:
-        """Add a meshed rectangle of plates to a geometry (Add Plane),
-        given a corner, two perpendicular edges and an element size.
-
-        Each edge is divided evenly into the whole number of elements
-        nearest that size (`mesh.plane`). A new node that falls on an
-        existing node is replaced by it, so planes that meet along a
-        line are tied there, and the existing nodes keep their ids
-        (`mesh.join`).
-
-        Planes given the same element group name are one element group.
-        The five walls of a box, each named 'box', are the box, and its
-        material is set once in the Element Groups table.
-
-        Parameters
-        ----------
-        source : str or object
-            The geometry, by name or as the object itself.
-        corner : array_like
-            One corner, (x, y, z).
-        edge_a, edge_b : array_like
-            The two edges from that corner, as perpendicular vectors.
-        size : float
-            The target element size.
-        group : str, optional
-            The element group the plates go in, by name: an existing
-            element group of that name, or a new one.
-        unit : str, default 'm'
-            The unit the lengths above are in. A geometry whose units
-            are not defined takes them as given.
-        tolerance : float, optional
-            How close a new node must be to an existing one to be
-            replaced by it, in meters. Defaults to a millionth of the
-            size of the two together.
-        apart : bool, default False
-            Join only to the element group's own nodes, so the plane
-            keeps nodes of its own where it touches another part, to be
-            merged later at the places picked (`mesh.join`).
-
-        Returns
-        -------
-        dict
-            'added', the nodes added; 'shared', the plane's nodes that
-            fell on nodes already there; 'elements', the plates added;
-            'groups', the element group they went into.
-        """
-        from .core import mesh
-
-        name = self.name_of(source)
-        geometry = self[name]
-        if not isinstance(geometry, Geometry):
-            raise TypeError(f'{name!r} is not a geometry')
-        defined = geometry.units_defined or not geometry.num_nodes
-        part = mesh.plane(corner, edge_a, edge_b, size, group,
-                          unit=unit if defined else None)
-        return mesh.join(geometry, part, tolerance, apart)
-
     def tie_elements(self, source: Any, elements: Any, to: Any,
                      group: str | None = None) -> dict:
         """Tie a patch of a geometry's elements rigidly to the part under
@@ -3232,75 +3174,6 @@ class Project(dict):
         if not isinstance(geometry, Geometry):
             raise TypeError(f'{name!r} is not a geometry')
         return geometry.merge_groups([int(b) for b in groups])
-
-    def add_block(self, source: Any, corner: Any, edge_a: Any, edge_b: Any,
-                  edge_c: Any, size: float, group: str = '', *,
-                  unit: str = 'm', holes: Any = (),
-                  hole_group: str | None = None,
-                  tolerance: float | None = None, apart: bool = False) -> dict:
-        """Add a meshed box of solid bricks to a geometry (Add Block),
-        given a corner, three perpendicular edges and an element size.
-
-        Each edge is divided evenly into the whole number of elements
-        nearest that size (`mesh.block`), and cylindrical holes are cut
-        the way a structured mesh cuts them. A new node that falls on an
-        existing node is replaced by it, so blocks that meet over a face
-        are tied there (`mesh.join`).
-
-        Blocks given the same element group name are one element group.
-        The rails and uprights of a frame, each named 'frame', are the
-        frame, and its material is set once in the Element Groups table.
-
-        Parameters
-        ----------
-        source : str or object
-            The geometry, by name or as the object itself.
-        corner : array_like
-            One corner, (x, y, z).
-        edge_a, edge_b, edge_c : array_like
-            The three edges from that corner, as perpendicular vectors.
-        size : float
-            The target element size.
-        group : str, optional
-            The element group the bricks go in, by name: an existing
-            group of that name, or a new one.
-        unit : str, default 'm'
-            The unit the lengths above are in. A geometry whose units
-            are not defined takes them as given.
-        holes : sequence of tuple, optional
-            Holes as `mesh.block` takes them: (center, radius, axis) or
-            (center, radius, axis, depth).
-        hole_group : str, optional
-            The element group the bricks inside the holes go to (an
-            insert, for example), or None to leave them out.
-        tolerance : float, optional
-            How close a new node must be to an existing one to be
-            replaced by it, in meters. Defaults to a millionth of the
-            size of the two together.
-        apart : bool, default False
-            Join only to the element group's own nodes, so the box keeps
-            nodes of its own where it touches another part (a channel's
-            foot on the box it is bolted to), to be merged later at the
-            places picked (`mesh.join`).
-
-        Returns
-        -------
-        dict
-            'added', the nodes added; 'shared', the box's nodes that
-            fell on nodes already there; 'elements', the bricks added;
-            'groups', the element groups they went into.
-        """
-        from .core import mesh
-
-        name = self.name_of(source)
-        geometry = self[name]
-        if not isinstance(geometry, Geometry):
-            raise TypeError(f'{name!r} is not a geometry')
-        defined = geometry.units_defined or not geometry.num_nodes
-        part = mesh.block(corner, edge_a, edge_b, edge_c, size, group,
-                          unit=unit if defined else None, holes=holes,
-                          hole_name=hole_group)
-        return mesh.join(geometry, part, tolerance, apart)
 
     def _solid_geometry(self, source: Any) -> tuple[str, Geometry]:
         name = self.name_of(source)
@@ -3467,6 +3340,86 @@ class Project(dict):
         scale = self._solid_scale(geometry, unit)
         return solids.add_sphere(geometry, np.asarray(center, dtype=float) * scale,
                                  float(radius) * scale, name)
+
+    def add_solid_plate(self, source: Any, center: Any, widths: Any,
+                        angles: Any = (0.0, 0.0, 0.0), name: str = '', *,
+                        unit: str = 'm') -> int:
+        """Add a plate to a geometry's solids (`core.solids.add_plate`): a
+        flat rectangle `widths` across along its own X and Y, centered at
+        `center`.
+
+        With no `angles` it lies in the geometry's XY plane. A plate has
+        no thickness of its own: it is meshed into plates (`mesh_solids`
+        with shells), and their element group takes the thickness. A
+        cylinder subtracted from it (`combine_solids`) makes a hole.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        center : array_like
+            Three numbers, in `unit`.
+        widths : array_like
+            Two numbers, in `unit`: along its own X, then Y.
+        angles : array_like, default (0, 0, 0)
+            Degrees about the geometry's X, then Y, then Z axes.
+        name : str, optional
+            What to call it.
+        unit : str, default 'm'
+            The unit the lengths are in. A geometry whose units are not
+            defined takes them as given.
+
+        Returns
+        -------
+        int
+            The solid's id.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        scale = self._solid_scale(geometry, unit)
+        return solids.add_plate(geometry, np.asarray(center, dtype=float) * scale,
+                                np.ravel(np.asarray(widths, dtype=float))[:2] * scale,
+                                angles, name)
+
+    def add_solid_disk(self, source: Any, center: Any, radius: float,
+                       angles: Any = (0.0, 0.0, 0.0), name: str = '', *,
+                       unit: str = 'm') -> int:
+        """Add a disk to a geometry's solids (`core.solids.add_disk`): a
+        flat circle of `radius` in its own XY plane, centered at
+        `center`.
+
+        With no `angles` it lies in the geometry's XY plane. As a
+        plate's, its thickness is set on the element group it is meshed
+        into (`mesh_solids` with shells).
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        center : array_like
+            Three numbers, in `unit`.
+        radius : float
+            In `unit`.
+        angles : array_like, default (0, 0, 0)
+            Degrees about the geometry's X, then Y, then Z axes.
+        name : str, optional
+            What to call it.
+        unit : str, default 'm'
+            The unit the lengths are in. A geometry whose units are not
+            defined takes them as given.
+
+        Returns
+        -------
+        int
+            The solid's id.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        scale = self._solid_scale(geometry, unit)
+        return solids.add_disk(geometry, np.asarray(center, dtype=float) * scale,
+                               float(radius) * scale, angles, name)
 
     def add_solid_section(self, source: Any, shape: str, center: Any,
                           dimensions: Any, length: float,
@@ -3635,7 +3588,8 @@ class Project(dict):
         angles and corner; a cylinder's center, radius, length and
         angles; a cone's center, radius (at its base), top radius,
         length (its height) and angles; a sphere's center and radius; a
-        section's center, dimensions, length and angles; a
+        plate's center, widths and angles; a disk's center, radius and
+        angles; a section's center, dimensions, length and angles; a
         hole's center, dimensions and angles; a pattern's counts and
         spacing; and any solid's name. A boolean the solid is part of
         changes with it. A mesh made from it does not, until Mesh Solids
@@ -3746,6 +3700,33 @@ class Project(dict):
         _name, geometry = self._solid_geometry(source)
         return solids.combine(geometry, operation, ids, name)
 
+    def reorder_solids(self, source: Any, ids: Any, *,
+                       within: int | None = None) -> None:
+        """Put a geometry's solids in a new order (a drag in the tree):
+        its parts, or with `within` one boolean's own solids. A
+        subtraction cuts every solid after its first from the first, so
+        the order decides what is cut (`core.solids.reorder`).
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        ids : sequence of int
+            Every one of the solids being ordered, in the new order.
+        within : int, optional
+            The boolean or pattern whose solids these are; the parts
+            when omitted.
+
+        Returns
+        -------
+        None
+            The geometry is changed in place.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        solids.reorder(geometry, ids, within)
+
     def copy_solids(self, source: Any, ids: Any, *,
                     into: Any = None) -> list[int]:
         """Copy a geometry's solids, recipe and all, into the same
@@ -3818,8 +3799,8 @@ class Project(dict):
                     unit: str = 'm', apart: bool = False,
                     parts_apart: bool = False, elements: str = 'hexes',
                     progress: Any = None, sizes: Any = None) -> dict:
-        """Mesh a geometry's solids into bricks or tetrahedra (Mesh
-        Solids). Each part becomes an element group named for it.
+        """Mesh a geometry's solids into bricks, tetrahedra or shells
+        (Mesh Solids). Each part becomes an element group named for it.
 
         With `elements` 'hexes', parts that are an extrusion along X, Y
         or Z are meshed on one grid cut at every flat face, with their
@@ -3830,7 +3811,13 @@ class Project(dict):
         other shape on a grid fitted to it (`core.hexmesh.overlay_mesh`);
         `core.solids.brick_mesh` picks. With 'tetras', the parts are
         meshed into ten-node tetrahedra from their recipe's signed
-        distance (`core.tetmesh.tet_mesh`). Parts
+        distance (`core.tetmesh.tet_mesh`). With 'quads' or 'triangles'
+        they are meshed into shells (`core.shells.shell_mesh`): a plate
+        or a disk, with what is cut from it, on its plane, and a solid
+        with a volume on its outer surface, the surface of its bricks
+        for quads and of its tetrahedra for triangles; the thickness is
+        set on the element group. A plate or a disk is meshed into
+        shells only. Parts
         meshed together share nodes where they touch. The solids are
         kept so they can be meshed again, and a part meshed again
         replaces its earlier mesh: the elements in the element group of
@@ -3844,7 +3831,8 @@ class Project(dict):
             The parts, by id: solids no other solid uses.
         size : float, optional
             The target element size, in `unit`. Defaults to half the
-            thinnest feature (`core.solids.mesh_size`).
+            thinnest feature (`core.solids.mesh_size`; a plate's or a
+            disk's measured across its plane, `core.shells.mesh_size`).
         unit : str, default 'm'
             The unit the size is in. A geometry whose units are not
             defined takes it as given.
@@ -3857,9 +3845,10 @@ class Project(dict):
             touch each other. They are still on one grid, so their nodes
             coincide and can be merged later where bolts go. Bricks
             only.
-        elements : {'hexes', 'tetras'}, default 'hexes'
+        elements : {'hexes', 'tetras', 'quads', 'triangles'}, default 'hexes'
             The element type, as the tree names the families; 'bricks'
-            and 'tets' are taken to mean the same.
+            and 'tets' are taken to mean the same. 'quads' and
+            'triangles' are shells.
         progress : callable, optional
             Called with ``(done, total)`` as the mesh goes
             (`core.solids.extrusion_mesh`, `core.tetmesh.tet_mesh`). The
@@ -3877,7 +3866,7 @@ class Project(dict):
             by rigid links and 'seams' the mated surfaces that join
             them); for tetrahedra, 'tets', 'nodes', 'steps', 'quality',
             'poor', 'slivers' and 'shortest' as `tet_mesh` gives them;
-            and either way 'added', 'shared' and 'groups' as `mesh.join`
+            for shells, what `shell_mesh` gives; and every way 'added', 'shared' and 'groups' as `mesh.join`
             gives them, 'replaced', how many elements of the parts'
             earlier mesh were replaced, 'mates_dropped', how many
             mated surfaces on that mesh went with it, and 'cleared',
@@ -3885,17 +3874,28 @@ class Project(dict):
             solids went into that carried a section, a thickness or an
             orientation (solids take a material alone, which is kept).
         """
-        from .core import mesh, solids, tetmesh
+        from .core import mesh, shells, solids, tetmesh
 
         elements = {'bricks': 'hexes', 'tets': 'tetras'}.get(elements, elements)
-        if elements not in ('hexes', 'tetras'):
-            raise ValueError(f"elements is 'hexes' or 'tetras', not {elements!r}")
+        if elements not in ('hexes', 'tetras', 'quads', 'triangles'):
+            raise ValueError("elements is 'hexes', 'tetras', 'quads' or 'triangles', "
+                             f'not {elements!r}')
         _name, geometry = self._solid_geometry(source)
         ids = [int(i) for i in ids]
-        held = (solids.mesh_size(geometry, ids) if size is None
+        shell = elements in ('quads', 'triangles')
+        flat = [i for i in ids if solids.is_flat(geometry, i)]
+        if flat and not shell:
+            raise ValueError(f'{solids.piece_name(geometry, flat[0])} is flat: a plate '
+                             'or a disk is meshed into shells, quads or triangles')
+        held = ((shells.mesh_size if shell else solids.mesh_size)(geometry, ids)
+                if size is None
                 else float(size) * self._solid_scale(geometry, unit))
         scale = self._solid_scale(geometry, unit)
-        if elements == 'tetras':
+        if shell:
+            part, made = shells.shell_mesh(geometry, ids, held,
+                                           triangles=elements == 'triangles',
+                                           progress=progress)
+        elif elements == 'tetras':
             part, made = tetmesh.tet_mesh(geometry, ids, held, progress=progress)
         else:
             part, made = solids.brick_mesh(
@@ -6441,15 +6441,16 @@ _VERB_APPLIES: tuple = (
     # the groups picked, as it does the merge (2026-10-20)
     ('mate_surfaces', lambda p, o: (isinstance(o, Geometry)
                                     and len(o.group_id) > 1 and len(o.elem_conn) > 0)),
-    # a plane or a block goes into any geometry, an empty one above all
-    ('add_plane', lambda p, o: isinstance(o, Geometry)),
-    ('add_block', lambda p, o: isinstance(o, Geometry)),
-    # solids go into any geometry too (2026-10-11)
+    # solids go into any geometry, an empty one above all (2026-10-11;
+    # Add Plane and Add Block, which put elements straight in, retired
+    # 2026-10-26 for plates and blocks meshed by Mesh Solids)
     ('add_solid_block', lambda p, o: isinstance(o, Geometry)),
     ('add_solid_cylinder', lambda p, o: isinstance(o, Geometry)),
     ('add_solid_cone', lambda p, o: isinstance(o, Geometry)),
     ('add_solid_sphere', lambda p, o: isinstance(o, Geometry)),
     ('add_solid_section', lambda p, o: isinstance(o, Geometry)),
+    ('add_solid_plate', lambda p, o: isinstance(o, Geometry)),
+    ('add_solid_disk', lambda p, o: isinstance(o, Geometry)),
     ('set_view', lambda p, o: isinstance(o, Geometry)),
     # a channel table takes rows, an empty one above all (2026-10-22)
     ('add_channels', lambda p, o: isinstance(o, ChannelTable)),
@@ -6620,12 +6621,12 @@ _JOURNALED_VERBS = (
     'generate_signal', 'compute_modal_responses',
     'plan_instrumentation',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry',
-    'new_channel_table', 'add_channels', 'add_plane',
-    'add_block', 'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',
-    'add_solid_sphere', 'add_solid_section',
+    'new_channel_table', 'add_channels',
+    'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',
+    'add_solid_sphere', 'add_solid_section', 'add_solid_plate', 'add_solid_disk',
     'add_solid_hole', 'combine_solids',
     'delete_solids', 'separate_solids', 'mesh_solids', 'pattern_solids',
-    'copy_solids',
+    'copy_solids', 'reorder_solids',
     'edit_solid', 'move_solids', 'delete_elements', 'delete_element_groups',
     'tie_elements', 'mate_surfaces', 'add_mated_surfaces',
     'edit_mated_surfaces', 'delete_mated_surfaces',

@@ -1213,27 +1213,29 @@ def set_group(window, name, group, **fields):
     return row
 
 
-#: the BARC's planes as the page's table types them: element group,
-#: center and widths, inches
-BARC_PLANES = [
-    ('box', (0, -2.875, 1.5), (5.75, 0, 3)),
-    ('box', (2.875, 0, 1.5), (0, 5.75, 3)),
-    ('box', (-2.875, 0, 1.5), (0, 5.75, 3)),
-    ('box', (-1.5625, 2.875, 1.5), (2.625, 0, 3)),
-    ('box', (1.5625, 2.875, 1.5), (2.625, 0, 3)),
-    ('right channel', (1.96875, 3.0625, 1.5), (0.9375, 0, 1)),
-    ('right channel', (1.96875, 4.9375, 1.5), (0.9375, 0, 1)),
-    ('right channel', (2.4375, 4, 1.5), (0, 1.875, 1)),
-    ('left channel', (-2, 3.0625, 1.53125), (1, 0, 0.9375)),
-    ('left channel', (-2, 4.9375, 1.53125), (1, 0, 0.9375)),
-    ('left channel', (-2, 4, 1.0625), (1, 1.875, 0)),
-    ('beam', (0, 5.0625, 1.5), (5, 0, 1)),
+#: the BARC's plates as the page's table types them: name, center,
+#: widths and rotation, inches and degrees; a plate lies in its own X-Y
+#: plane, turned a quarter about X into X-Z or about Y into Y-Z
+ACROSS, UP = (90, 0, 0), (0, 90, 0)
+BARC_PLATES = [
+    ('box', (0, -2.875, 1.5), (5.75, 3), ACROSS),
+    ('box', (2.875, 0, 1.5), (3, 5.75), UP),
+    ('box', (-2.875, 0, 1.5), (3, 5.75), UP),
+    ('box', (-1.5625, 2.875, 1.5), (2.625, 3), ACROSS),
+    ('box', (1.5625, 2.875, 1.5), (2.625, 3), ACROSS),
+    ('right channel', (1.96875, 3.0625, 1.5), (0.9375, 1), ACROSS),
+    ('right channel', (1.96875, 4.9375, 1.5), (0.9375, 1), ACROSS),
+    ('right channel', (2.4375, 4, 1.5), (1, 1.875), UP),
+    ('left channel', (-2, 3.0625, 1.53125), (1, 0.9375), ACROSS),
+    ('left channel', (-2, 4.9375, 1.53125), (1, 0.9375), ACROSS),
+    ('left channel', (-2, 4, 1.0625), (1, 1.875), (0, 0, 0)),
+    ('beam', (0, 5.0625, 1.5), (5, 1), ACROSS),
 ]
 
 
 def fem():
-    """The BARC page: a plate model typed plane by plane, tied at its
-    bolts, given its properties and solved; then the same structure
+    """The BARC page: a plate model typed plate by plate and meshed into
+    shells, tied at its bolts, given its properties and solved; then the same structure
     from solid blocks, meshed apart and bolted with Mate Surfaces."""
     import numpy as np
     from PySide6.QtCore import QItemSelectionModel, QPoint, Qt
@@ -1258,29 +1260,39 @@ def fem():
     # opens z up, and a person turns it
     upright(window, name, barc.VIEW)
 
-    quads = family_row(window, name, 'Quads')
-    pick(window, [quads])
-    window.add_plane_act()
+    holder = family_row(window, name, 'Solids')
+    pick(window, [holder])
+    window.add_solid_plate_act()
     pump(20)
     panel = window.scene.mesh_panel
-    group, center, widths = BARC_PLANES[0]
-    panel.set_values(group=group, center=center, widths=widths, size=0.125)
+    plate, center, widths, turn = BARC_PLATES[0]
+    panel.set_values(group=plate, center=center, widths=(*widths, 0), angles=turn)
     show_scene(window)
-    shoot(window, 'fem-add-plane-click',
-          marks=[quads, act(window, 'Add Plane'), panel.add_button])
+    shoot(window, 'fem-add-plate-click',
+          marks=[holder, act(window, 'Add Plate'), panel.add_button])
     panel.add_button.click()
     pump(5)
     window.close_mesh_pane()
-    # the rest by the verb each Add records: the pane's fields hold four
-    # decimals, and 1.96875 typed there is 1.9688, which leaves the
-    # channels' flanges off their webs
-    for group, center, widths in BARC_PLANES[1:]:
-        across = [np.eye(3)[i] * w for i, w in enumerate(widths) if w]
-        corner = np.subtract(center, np.sum(across, axis=0) / 2)
-        window.project.add_plane(name, tuple(corner), tuple(across[0]),
-                                 tuple(across[1]), 0.125, group, unit='in')
-    window._refresh_item(window._item_for_object(name), window.objects[name])
-    window.render_current()
+    # the rest by the verb each Add records
+    for plate, center, widths, turn in BARC_PLATES[1:]:
+        window.project.add_solid_plate(name, center, widths, turn, plate, unit='in')
+    window._solids_changed(name)
+    pump(10)
+    parts = top_solids(window, name)
+    pick(window, parts)
+    window.mesh_solids_act()
+    pump(20)
+    meshing = window.scene.mesh_solids_panel
+    meshing.size.setValue(0.125)
+    # the preview waits for typing to settle; the picture should not
+    window._mesh_solids_refresh()
+    pump(20)
+    show_scene(window)
+    shoot(window, 'fem-plates-mesh-click',
+          marks=[parts[0], parts[-1], act(window, 'Mesh Solids'),
+                 meshing.mesh_button])
+    meshing.mesh_button.click()
+    pump(30)
     pick(window, [window._item_for_object(name)])
     show_scene(window)
     shoot(window, 'fem-planes')
@@ -1388,7 +1400,7 @@ def fem():
             show_scene(window)
             shoot(window, 'fem-bricks-block-click',
                   marks=[family_row(window, name, 'Solids'),
-                         act(window, 'Add Solid Block'), panel.add_button])
+                         act(window, 'Add Block'), panel.add_button])
         panel.add_button.click()
         pump(10)
     window.close_mesh_pane()
@@ -1541,7 +1553,7 @@ def fem_solids():
     show_scene(window)
     shoot(window, 'fem-solids-block-click',
           marks=[family_row(window, name, 'Solids'),
-                 act(window, 'Add Solid Block'), panel.add_button])
+                 act(window, 'Add Block'), panel.add_button])
     opening = added(panel)
     panel = add_solid(window, name, 'add_solid_cylinder',
                       center=(-7.75, -2.75, -0.25), radius=0.1451, length=1.0,

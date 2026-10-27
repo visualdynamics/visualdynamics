@@ -2388,8 +2388,8 @@ class ScenePane(QWidget):
         # read against the model it is moving, and both want the height
         self.modes_panel: ModesPanel = ModesPanel()
         self.modes_panel.hide()
-        #: Add Block's and Add Plane's fields, beside the view rather than in
-        #: a window of their own (2026-10-02)
+        #: the solids' fields, beside the view rather than in a window of
+        #: their own (2026-10-02)
         self.mesh_panel: MeshPanel = MeshPanel()
         self.mesh_panel.hide()
         #: Merge Coincident Nodes' tolerance and its Merge (2026-10-11)

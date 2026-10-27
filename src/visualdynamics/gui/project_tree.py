@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import atexit
 import datetime
+import json
 import pathlib
 import shutil
 import tempfile
@@ -107,6 +108,15 @@ SELF_MIME = 'application/x-visualdynamics-from-this-tree'
 #: ItemIsDragEnabled by default, so reading that made a geometry's Nodes
 #: draggable too.
 ROLE_DRAGGABLE = Qt.ItemDataRole.UserRole + 9
+
+#: what a row points at: `(kind, object name, detail)`, such as
+#: `('solid', 'Frame', 3)` for a geometry's solid
+ROLE_REFERENCE = Qt.ItemDataRole.UserRole + 1
+
+#: a drag of solid rows among their siblings, to put them in a new order:
+#: JSON of the geometry, the boolean they are part of (None for the
+#: parts) and their ids
+SOLIDS_MIME = 'application/x-visualdynamics-solids'
 
 #: on a project type's gray placeholder row, which side of the skeleton
 #: it is a slot for. A slot is a drop target like an object row is: the
@@ -325,6 +335,10 @@ class ProjectTree(QTreeWidget):
     #: objects were dragged onto another object (or onto nothing, which
     #: is None): the window moves them between object groups
     objects_moved = Signal(list, object)
+    #: solid rows were dropped among their siblings: the geometry, the
+    #: boolean they are part of (None for the parts), every sibling's id
+    #: in its new order, and the dragged ids
+    solids_reordered = Signal(str, object, list, list)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -438,6 +452,16 @@ class ProjectTree(QTreeWidget):
         refuses a move-only drag, and Move is what a drop inside the
         tree means.
         """
+        solids = self._solid_payload()
+        if solids is not None:
+            # solid rows only ever move among their siblings, so the drag
+            # carries nothing a file manager could take
+            mime = QMimeData()
+            mime.setData(SOLIDS_MIME, json.dumps(solids).encode('utf-8'))
+            drag = QDrag(self)
+            drag.setMimeData(mime)
+            drag.exec(Qt.DropAction.MoveAction, Qt.DropAction.MoveAction)
+            return
         payload = self._selection_payload()
         if payload is None:
             return
@@ -528,6 +552,17 @@ class ProjectTree(QTreeWidget):
         drag between two of visualdynamics's own widgets, or one from another
         application — carry on to whoever it was meant for.
         """
+        if event.mimeData().hasFormat(SOLIDS_MIME):
+            landing = self._solid_landing(event.mimeData(),
+                                          event.position().toPoint())
+            if landing is None:
+                self._aim(None)
+                event.ignore()
+            else:
+                self._aim(SOLIDS_MIME, [landing[2]])
+                event.setDropAction(Qt.DropAction.MoveAction)
+                event.acceptProposedAction()
+            return
         names = dragged_objects(event.mimeData())
         if names:
             target = self._target_at(event.position().toPoint())
@@ -565,6 +600,21 @@ class ProjectTree(QTreeWidget):
             self.viewport().update()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        if event.mimeData().hasFormat(SOLIDS_MIME):
+            landing = self._solid_landing(event.mimeData(),
+                                          event.position().toPoint())
+            self._aim(None)
+            if landing is None:
+                event.ignore()
+                return
+            payload, order, _line = landing
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.acceptProposedAction()
+            if order != payload['siblings']:
+                self.solids_reordered.emit(payload['geometry'],
+                                           payload['within'], order,
+                                           payload['ids'])
+            return
         names = dragged_objects(event.mimeData())
         if names:
             target = self._target_at(event.position().toPoint())
@@ -697,7 +747,13 @@ class ProjectTree(QTreeWidget):
         painter.setPen(QPen(QColor('#4c8dff'), 2))
         right = self.viewport().width() - 2
         for below in self._drop_lines:
-            if below is not None:
+            if isinstance(below, tuple):
+                # ('under', row): after the last of a run of siblings
+                rect = self.visualItemRect(below[1])
+                if rect.height() <= 0:
+                    continue
+                left, y = rect.left(), rect.bottom() + 1
+            elif below is not None:
                 rect = self.visualItemRect(below)
                 if rect.height() <= 0:
                     continue
@@ -712,6 +768,70 @@ class ProjectTree(QTreeWidget):
                 left = min(rect.left() for rect in rects)
                 y = max(rect.bottom() for rect in rects) + 1
             painter.drawLine(left, y, right, y)
+
+    # ---- putting solids in order -------------------------------------------
+
+    @staticmethod
+    def _solid_parent(item):
+        """(geometry, the boolean id or None for the parts, the parent
+        row) for a solid row, else None."""
+        reference = item.data(0, ROLE_REFERENCE) if item is not None else None
+        parent = item.parent() if item is not None else None
+        if not reference or reference[0] != 'solid' or parent is None:
+            return None
+        above = parent.data(0, ROLE_REFERENCE) or (None,)
+        if above[0] == 'solids':
+            return reference[1], None, parent
+        if above[0] == 'solid':
+            return reference[1], int(above[2]), parent
+        return None
+
+    def _solid_payload(self):
+        """The selection as a drag of solids among their siblings: the
+        geometry, the boolean they are part of, their ids and every
+        sibling's, or None unless every selected row is a solid under one
+        parent."""
+        rows = self.selectedItems()
+        places = [self._solid_parent(row) for row in rows]
+        if not rows or any(place is None for place in places):
+            return None
+        if len({id(place[2]) for place in places}) != 1:
+            return None
+        geometry, within, parent = places[0]
+        siblings = [int(parent.child(i).data(0, ROLE_REFERENCE)[2])
+                    for i in range(parent.childCount())]
+        dragged = [int(row.data(0, ROLE_REFERENCE)[2]) for row in rows]
+        return {'geometry': geometry, 'within': within,
+                'ids': [i for i in siblings if i in dragged],
+                'siblings': siblings}
+
+    def _solid_landing(self, mime: QMimeData, position: QPoint):
+        """Where solid rows dropped here would go: (the payload, every
+        sibling's id in the new order, the landing line), or None when
+        the row under the cursor is not one of their siblings (or a
+        solid inside one)."""
+        payload = json.loads(bytes(mime.data(SOLIDS_MIME)).decode('utf-8'))
+        item = self.itemAt(position)
+        while item is not None:
+            place = self._solid_parent(item)
+            if (place is not None and place[0] == payload['geometry']
+                    and place[1] == payload['within']):
+                break
+            item = item.parent()
+        if item is None:
+            return None
+        parent = place[2]
+        rows = [parent.child(i) for i in range(parent.childCount())]
+        at = rows.index(item)
+        if position.y() > self.visualItemRect(item).center().y():
+            at += 1                       # the lower half: after the row
+        dragged = payload['ids']
+        before = [int(r.data(0, ROLE_REFERENCE)[2]) for r in rows[:at]]
+        after = [int(r.data(0, ROLE_REFERENCE)[2]) for r in rows[at:]]
+        order = ([i for i in before if i not in dragged] + dragged
+                 + [i for i in after if i not in dragged])
+        line = rows[at] if at < len(rows) else ('under', rows[-1])
+        return payload, order, line
 
     def _every_item(self):
         root = self.invisibleRootItem()

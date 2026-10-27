@@ -262,8 +262,8 @@ def landing(geometry: Geometry, part: Geometry,
     """Which of `part`'s nodes fall on a node of `geometry`, and on which
     one.
 
-    This is the matching `join` does, without the join, so Add Plane's
-    reading can say how many nodes a plane would share before it is added.
+    This is the matching `join` does, without the join, so a reading can
+    say how many nodes a part would share before it is added.
 
     Parameters
     ----------
@@ -358,27 +358,6 @@ def _solid_cells(geometry: Geometry) -> set[tuple]:
             if element_family(int(t)) in SOLID_FAMILIES}
 
 
-def already_there(geometry: Geometry, part: Geometry,
-                  tolerance: float | None = None, apart: bool = False) -> int:
-    """How many of `part`'s solid elements `join` would leave out because
-    they are already there (every corner on a node already there and the
-    cell already filled), so a reading can say it before the Add."""
-    import numpy as np
-
-    on, nearest = landing(geometry, part, tolerance, apart)
-    if not on.any():
-        return 0
-    ids = {int(part.node_id[k]): int(geometry.node_id[nearest[k]])
-           for k in np.flatnonzero(on)}
-    there = _solid_cells(geometry)
-    count = 0
-    for element, code in zip(part.elem_conn, part.elem_type):
-        renamed = [ids.get(int(n)) for n in element]
-        if None not in renamed and (int(code), tuple(sorted(renamed))) in there:
-            count += 1
-    return count
-
-
 def join(geometry: Geometry, part: Geometry,
          tolerance: float | None = None, apart: bool = False) -> dict:
     """Put `part` into `geometry`, in place.
@@ -387,7 +366,7 @@ def join(geometry: Geometry, part: Geometry,
     that node, the rest are added after the highest id, and the part's
     elements follow them. The nodes already there keep their ids, because
     data linked to the geometry refers to them by id, so this is how a
-    plane is added to a model under construction (Add Plane) as well as
+    part is added to a model under construction (Mesh Solids) as well as
     how `assemble` builds one. A solid element of the part that would fill
     a cell already filled is left out, so the overlap of two crossing bars
     is counted once.

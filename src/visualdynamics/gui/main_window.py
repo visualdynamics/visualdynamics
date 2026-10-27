@@ -197,6 +197,9 @@ EXTEND_KEYS = 'Shift or Cmd' if sys.platform == 'darwin' else 'Shift or Ctrl'
 #: solids copied from a geometry's rows, as JSON on the clipboard
 SOLIDS_MIME = 'application/x-visualdynamics-solids'
 
+#: a solid's gimbal: its rings' radius as a fraction of the box's widest
+#: side, the arrows 1.6 times that
+GIZMO_BOX_FRACTION = 0.12
 #: how long the Mesh Solids size box rests before its preview is meshed
 MESH_PREVIEW_SETTLE_MS = 250
 #: how long the Generate Signal pane rests before an SRS synthesis is
@@ -224,7 +227,6 @@ OVERLOAD_INLINE_SAMPLES = 300_000
 from ..core.report import OTHER_SIDE
 from ..names import display_name
 from ..project import TYPE_ORDER, Project, describe, type_rank
-from .mesh_panel import SOLID_KINDS
 from .object_tables import (
     ENTITY_TABLES,
     channel_table_model,
@@ -250,6 +252,7 @@ from .project_tree import (
     ROLE_ACTIVE,
     ROLE_DRAGGABLE,
     ROLE_DROP_SLOT,
+    ROLE_REFERENCE,
     ROLE_WHOLE_PROJECT,
     ProjectTree,
 )
@@ -257,7 +260,6 @@ from .record_grid import RecordGrid, channel_quantities
 from .tables import CopyPasteTableView
 
 ROLE_ORIGINAL_NAME = Qt.ItemDataRole.UserRole       # top-level, for renames
-ROLE_REFERENCE = Qt.ItemDataRole.UserRole + 1       # what an item points at
 ROLE_POPULATED = Qt.ItemDataRole.UserRole + 2       # lazy children built yet?
 ROLE_PENCIL_ON = Qt.ItemDataRole.UserRole + 3       # column 1: its table open?
 
@@ -336,12 +338,13 @@ DRAWN_AS = {'groups': 'elements'}
 #: a solid's row: what it is called when it has no name, and its icon
 #: (`core.solids`, 2026-10-11)
 SOLID_LABELS = {'block': 'Block', 'cylinder': 'Cylinder', 'cone': 'Cone',
-                'sphere': 'Sphere', 'union': 'Union',
+                'sphere': 'Sphere', 'plate': 'Plate', 'disk': 'Disk', 'union': 'Union',
                 'subtract': 'Subtraction', 'intersect': 'Intersection',
                 'pattern': 'Pattern', 'hole': 'Hole',
                 **{shape: f'{shape[:1].upper()}{shape[1:]}' for shape in SECTIONS}}
 SOLID_ICONS = {'block': 'solid_block', 'cylinder': 'solid_cylinder',
                'cone': 'solid_cone', 'sphere': 'solid_sphere',
+               'plate': 'solid_plate', 'disk': 'solid_disk',
                'union': 'solid_union', 'subtract': 'solid_subtract',
                'intersect': 'solid_intersect', 'pattern': 'solid_pattern',
                'hole': 'solid_hole', **dict.fromkeys(SECTIONS, 'solid_section')}
@@ -900,8 +903,7 @@ class MainWindow(QMainWindow):
         self._hovered = None
         self._hover_mesh = None
         self._picked_mesh = None
-        #: the box Add Block or Add Plane is placing, while its pane is
-        #: open: kind, geometry name, the display unit and whether the
+        #: the solid the add pane is placing, while it is open: kind, geometry name, the display unit and whether the
         #: geometry has one, and the frame (basis rows and the center)
         #: the box is drawn in, in the display unit (2026-10-02)
         self._mesh: dict | None = None
@@ -1674,6 +1676,7 @@ class MainWindow(QMainWindow):
         # queued at all
         self.tree.files_dropped.connect(self._import_after_drop)
         self.tree.objects_moved.connect(self._move_objects)
+        self.tree.solids_reordered.connect(self._reorder_solids)
         self.tree.landing_for = self._landing_of
         self.tree.write_for_drag = self._write_for_drag
         # column 1 carries the refresh badge of a stale object and the
@@ -3215,7 +3218,7 @@ class MainWindow(QMainWindow):
 
     def _solid_acts(self):
         """The acts a Solids row or picked solid rows take, or None when
-        the selection is neither: Add Solid Block and Add Cylinder on the
+        the selection is neither: Add Block and Add Cylinder on the
         row; the booleans on two parts or more, Take Apart on booleans."""
         picked = self.selected_references()
         if len(picked) == 1 and picked[0][0] == 'solids':
@@ -3298,6 +3301,18 @@ class MainWindow(QMainWindow):
         `add_solid_sphere`."""
         self._open_mesh_pane('solid_sphere')
 
+    def add_solid_plate_act(self) -> None:
+        """Open the add pane for a plate in the selected geometry: a
+        center, two widths in its own X-Y plane, three angles and a
+        name. Each Add runs the project's `add_solid_plate`."""
+        self._open_mesh_pane('solid_plate')
+
+    def add_solid_disk_act(self) -> None:
+        """Open the add pane for a disk in the selected geometry: a
+        center, a radius in its own X-Y plane, three angles and a name.
+        Each Add runs the project's `add_solid_disk`."""
+        self._open_mesh_pane('solid_disk')
+
     def _solids_changed(self, name: str, pick=()) -> None:
         """The tree and the view after the solids changed, `pick`'s rows
         selected again — the rebuilt rows lose the selection."""
@@ -3327,6 +3342,31 @@ class MainWindow(QMainWindow):
         if first is not None:
             self.tree.setCurrentItem(first, 0,
                                      QItemSelectionModel.SelectionFlag.NoUpdate)
+
+    def _reorder_solids(self, name: str, within, order: list,
+                        dragged: list) -> None:
+        """Solid rows dragged among their siblings: the parts, or one
+        boolean's own solids, in the order they were dropped in, with
+        the project's `reorder_solids` (Brandon, 2026-10-26: the second
+        volume is always subtracted from the first, so the order has to
+        be the user's to set)."""
+        from ..core import solids
+
+        try:
+            self.project.reorder_solids(name, order, within=within)
+        except ValueError as refusal:
+            self._show_status(f'{name}: {refusal}')
+            return
+        self._solids_changed(name, dragged if within is None else [within])
+        if within is None:
+            self._show_status(f'{name}: the solids in a new order')
+            return
+        made = solids.solid(self.objects[name], within)
+        first = solids.solid(self.objects[name], order[0])
+        label = first.name.strip() or f'{SOLID_LABELS[first.kind]} {first.id}'
+        self._show_status(
+            f'{name}: {label} first'
+            + (', the rest cut from it' if made.kind == 'subtract' else ''))
 
     def combine_solids_act(self, operation: str) -> None:
         """Combine the picked solids into one by `operation` ('union',
@@ -3393,7 +3433,9 @@ class MainWindow(QMainWindow):
         # the size a mesh is likely to hold at, the one Detect Element
         # Size gives (Brandon, 2026-10-19: the pane opened at 0.95 in on
         # a block with 1 in holes, a wall misread)
-        size = self._mesh_size_likely(geometry, ids, 'hexes')
+        # a plate or a disk among them takes shells only (2026-10-26)
+        flat = any(solids.is_flat(geometry, i) for i in ids)
+        size = self._mesh_size_likely(geometry, ids, 'quads' if flat else 'hexes')
         shown = (float(self.unit_system.from_si(size, 'length')) if defined
                  else size)
         names = [(s.name.strip() or f'{SOLID_LABELS[s.kind]} {s.id}')
@@ -3401,7 +3443,7 @@ class MainWindow(QMainWindow):
         self._meshing = {'name': name, 'ids': ids, 'defined': defined,
                          'unit': unit}
         panel = self.scene.mesh_solids_panel
-        panel.open_for(unit, shown, ', '.join(names), len(ids))
+        panel.open_for(unit, shown, ', '.join(names), len(ids), flat=flat)
         self._mesh_pieces_layout()
         panel.show()
         self._mesh_solids_refresh()
@@ -3472,6 +3514,9 @@ class MainWindow(QMainWindow):
         panel = self.scene.mesh_solids_panel
         geometry = self.objects.get(meshing['name'])
         tets = panel.element_kind == 'tetras'
+        if panel.element_kind in ('quads', 'triangles'):
+            self._shells_refresh(meshing, geometry)
+            return
         # the size per piece, or the one box, as the elements say
         self._mesh_pieces_layout()
         try:
@@ -3551,6 +3596,58 @@ class MainWindow(QMainWindow):
             f'along {"XYZ"[made["axis"]]}.{rounded} The shortest edge is '
             f'{shortest:.4g} {meshing["unit"]}.{replacing}', True)
 
+    def _shells_refresh(self, meshing, geometry) -> None:
+        """Shells' preview: the plates the parts make, drawn and said,
+        or counted past `MESH_PREVIEW_BRICKS` from the area and not
+        drawn."""
+        from ..core import shells, solids, tetmesh
+
+        panel = self.scene.mesh_solids_panel
+        self._mesh_pieces_layout()
+        size = self._mesh_solids_size()
+        triangles = panel.element_kind == 'triangles'
+        try:
+            flat = [i for i in meshing['ids'] if solids.is_flat(geometry, i)]
+            rest = [i for i in meshing['ids'] if i not in flat]
+            expected = sum(solids.area(geometry, i) for i in flat) / size ** 2
+            if expected > MESH_PREVIEW_BRICKS:
+                self._draw_plane_preview(None)
+                panel.show_reading(
+                    f'About {int(expected):,} plates at this size. The preview stops '
+                    f'past {MESH_PREVIEW_BRICKS:,}; press Mesh to make them.', True)
+                return
+            # an outer surface is taken from a volume mesh: its count is
+            # what the preview waits on
+            if rest:
+                inside, budget, what = (
+                    (tetmesh.tet_count(geometry, rest, size), MESH_PREVIEW_TETS,
+                     'tetrahedra') if triangles else
+                    (solids.brick_count(geometry, rest, size), MESH_PREVIEW_BRICKS, 'bricks'))
+                if inside > budget:
+                    self._draw_plane_preview(None)
+                    panel.show_reading(
+                        f'About {inside:,} {what} under the surface at this size. The '
+                        f'preview stops past {budget:,}; press Mesh to make them.', True)
+                    return
+            part, made = shells.shell_mesh(geometry, meshing['ids'], size,
+                                           triangles=triangles)
+        except ValueError as refusal:
+            self._draw_plane_preview(None)
+            text = str(refusal)
+            panel.show_reading(f'{text[:1].upper()}{text[1:]}.', False)
+            return
+        self._draw_plane_preview(part)
+        earlier = len(solids.meshed_elements(geometry, part.group_name))
+        replacing = (f' It replaces the {earlier:,} elements meshed before.'
+                     if earlier else '')
+        noun = 'three-node triangles' if triangles else 'four-node plates'
+        where = ' and '.join(
+            [w for w, n in (('on their plane', made['flat']),
+                            ('on the outer surface', made['surfaces'])) if n])
+        panel.show_reading(
+            f'{made["elements"]:,} {noun} {where}, {made["nodes"]:,} nodes. Their '
+            f'thickness is set on the element group.{replacing}', True)
+
     def _mesh_solids_detect(self) -> None:
         """Detect Element Size: the size the mesh is likely to hold at
         (`hexmesh.suggested_size`, or `solids.mesh_size` for an
@@ -3607,10 +3704,13 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _mesh_size_likely(geometry, ids, elements: str) -> float:
         """The size a mesh of the parts is likely to hold at: an
-        extrusion's half-the-thinnest-feature for bricks, and otherwise
-        `hexmesh.suggested_size` for the element type."""
-        from ..core import hexmesh, solids
+        extrusion's half-the-thinnest-feature for bricks, a flat part's
+        measured across its plane for shells (`shells.mesh_size`), and
+        otherwise `hexmesh.suggested_size` for the element type."""
+        from ..core import hexmesh, shells, solids
 
+        if elements in ('quads', 'triangles'):
+            return shells.mesh_size(geometry, ids)
         if elements == 'hexes':
             try:
                 solids.extrusion_axis(geometry, ids)
@@ -3737,6 +3837,7 @@ class MainWindow(QMainWindow):
         unit = (self.unit_system.unit('length') if meshing['defined'] else 'm')
         self._mesh_settle.stop()
         tets = panel.element_kind == 'tetras'
+        shell = panel.element_kind in ('quads', 'triangles')
         try:
             # on the worker with the bar up: a fine mesh of a large part
             # is seconds of ownership, rounding and joining, and a
@@ -3745,11 +3846,14 @@ class MainWindow(QMainWindow):
                 f'Meshing {name} at {panel.size.value():g} {meshing["unit"]}…',
                 self.project.mesh_solids,
                 name, meshing['ids'], panel.size.value(), unit=unit,
-                **({'sizes': panel.piece_sizes()} if panel.piece_ids and not tets else {}),
+                **({'sizes': panel.piece_sizes()}
+                   if panel.piece_ids and panel.element_kind == 'hexes' else {}),
                 **({'apart': True} if panel.apart.isChecked() else {}),
                 **({'parts_apart': True}
-                   if panel.parts_apart.isChecked() and not tets else {}),
-                **({'elements': 'tetras'} if tets else {}))
+                   if panel.parts_apart.isChecked() and panel.element_kind == 'hexes'
+                   else {}),
+                **({'elements': panel.element_kind}
+                   if panel.element_kind != 'hexes' else {}))
         except ValueError as refusal:
             self._show_status(f'{name}: {refusal}')
             return
@@ -3761,7 +3865,9 @@ class MainWindow(QMainWindow):
         replaced = (f', replacing the {found["replaced"]:,} meshed before'
                     if found.get('replaced') else '')
         what = (f'{found["tets"]:,} tetrahedra' if tets
-                else f'{found["bricks"]:,} bricks')
+                else f'{found["elements"]:,} '
+                     f'{"triangles" if panel.element_kind == "triangles" else "plates"}'
+                if shell else f'{found["bricks"]:,} bricks')
         # a section, thickness or orientation the solids' group carried
         # was taken off, and said (Brandon, 2026-10-20)
         cleared = ''.join(f'; {held} taken off {group}, solids taking a material alone'
@@ -4543,9 +4649,9 @@ class MainWindow(QMainWindow):
         ('mate_surfaces', 'Mate Surfaces', 'mate_surfaces', 'mate_surfaces_act'),
         ('plan_instrumentation', 'Plan Instrumentation', 'plan_instrumentation',
          'plan_instrumentation_act'),
-        ('add_plane', 'Add Plane', 'plane', 'add_plane_act'),
-        ('add_block', 'Add Block', 'block', 'add_block_act'),
-        ('add_solid_block', 'Add Solid Block', 'solid_block',
+        # Add Solid Block until the meshed Add Block retired (Brandon,
+        # 2026-10-26)
+        ('add_solid_block', 'Add Block', 'solid_block',
          'add_solid_block_act'),
         ('add_solid_cylinder', 'Add Cylinder', 'solid_cylinder',
          'add_solid_cylinder_act'),
@@ -4553,6 +4659,8 @@ class MainWindow(QMainWindow):
         ('add_solid_sphere', 'Add Sphere', 'solid_sphere', 'add_solid_sphere_act'),
         ('add_solid_section', 'Add Section', 'solid_section',
          'add_solid_section_act'),
+        ('add_solid_plate', 'Add Plate', 'solid_plate', 'add_solid_plate_act'),
+        ('add_solid_disk', 'Add Disk', 'solid_disk', 'add_solid_disk_act'),
         ('set_view', 'Set Default View', 'set_view', 'set_view_act'),
         ('add_channels', 'Add Channel', 'add_channel', 'add_channel_act'),
         ('read_as_specification', 'Read as Specification',
@@ -4560,18 +4668,15 @@ class MainWindow(QMainWindow):
         ('read_as_psd', 'Read as PSD', 'as_psd', 'read_as_psd_act'),
     )
 
-    #: the acts offered on a family's row rather than the geometry's: what
-    #: they add is elements of that family, a plane quads and a block
-    #: hexes, into an element group of them (Brandon, 2026-10-10)
-    FAMILY_ACTS: ClassVar[dict] = {'quads': 'add_plane', 'hexes': 'add_block'}
-
     #: the acts offered on a geometry's Solids row: the shapes a part is
     #: built from before it is meshed (Brandon, 2026-10-11)
     # Add Hole came off (Brandon, 2026-10-20): a hole was a cylinder, or
     # two for a counterbore, to subtract; a cone and a sphere went on
+    # and a plate and a disk, flat, meshed into shells (Brandon, 2026-10-26)
     SOLID_ACTS: ClassVar[tuple] = ('add_solid_block', 'add_solid_cylinder',
                                    'add_solid_cone', 'add_solid_sphere',
-                                   'add_solid_section')
+                                   'add_solid_section', 'add_solid_plate',
+                                   'add_solid_disk')
 
     #: the acts offered on element groups picked in the tree rather than
     #: the geometry's row: merging every coincident node of a whole model
@@ -4648,7 +4753,7 @@ class MainWindow(QMainWindow):
                         ('new_geometry', 'New Geometry', 'new_geometry',
                          self.new_geometry_act,
                          ('An empty geometry, in the display units, to '
-                          'add planes to')),
+                          'build a part in from solids')),
                         # and a channel table to fill in by hand
                         # (Brandon, 2026-10-22)
                         ('new_channel_table', 'New Channel Table',
@@ -4657,16 +4762,6 @@ class MainWindow(QMainWindow):
             solid_acts = self._solid_acts()
             if solid_acts is not None:
                 return solid_acts
-            picked = self.selected_references()
-            if (len(picked) == 1 and picked[0][0] == 'family'
-                    and picked[0][3] in self.FAMILY_ACTS):
-                _kind, name, _obj, family = picked[0]
-                verb = self.FAMILY_ACTS[family]
-                applicable = dict(self.project.selection_verbs(name))
-                return [(verb, label, icon, getattr(self, handler),
-                         applicable[verb])
-                        for verb_, label, icon, handler in self.ACTS
-                        if verb_ == verb and verb in applicable]
             references = self.selected_references()
             names = list(dict.fromkeys(
                 name for kind, name, _obj, _detail in references
@@ -4685,8 +4780,7 @@ class MainWindow(QMainWindow):
         if not names:
             return []
         applicable = dict(self.project.selection_verbs(*names))
-        elsewhere = (set(self.FAMILY_ACTS.values()) | self.GROUP_ACTS
-                     | set(self.SOLID_ACTS))
+        elsewhere = self.GROUP_ACTS | set(self.SOLID_ACTS)
         acts = [(verb, label, icon, getattr(self, handler),
                  applicable[verb])
                 for verb, label, icon, handler in self.ACTS
@@ -6298,6 +6392,12 @@ class MainWindow(QMainWindow):
                 elif kind == 'family':
                     empty = not any(element_family(int(code)) == detail
                                     for code in obj.elem_type)
+                    # and the element groups under it (Brandon,
+                    # 2026-10-26: inches declared, every group still
+                    # wore the no-units badge until the tree was rebuilt)
+                    for j in range(child.childCount()):
+                        child.child(j).setIcon(0, child_icon(
+                            'groups', 'Geometry', obj.units_defined))
                 else:
                     continue
                 child.setIcon(0, child_icon(detail, 'Geometry',
@@ -6872,7 +6972,7 @@ class MainWindow(QMainWindow):
 
     def _rotating_frame(self):
         """(row, the coordinate system's 4x3 matrix) being turned — or,
-        while Add Block's pane is open, ('mesh', the box's frame)."""
+        while the add pane is open, ('mesh', the solid's frame)."""
         if self._mesh is not None:
             return 'mesh', self._mesh['frame']
         row = self._turnable_row()
@@ -6917,8 +7017,11 @@ class MainWindow(QMainWindow):
 
     def _ring_radius(self):
         if self._mesh is not None:
-            # the box's own size, so the rings sit around it
-            return 0.6 * (max(self.scene.mesh_panel.values()['widths']) or 1.0)
+            # a fifth of what it was (Brandon, 2026-10-26: the gimbal
+            # came in about five times too large): rings around the
+            # whole box hid the box they turn
+            return GIZMO_BOX_FRACTION * (
+                max(self.scene.mesh_panel.values()['widths']) or 1.0)
         _points, _unit = display_points(self.objects[self.editing[0]],
                                         self.unit_system)
         span = np.ptp(_points, axis=0).max() if len(_points) > 1 else 1.0
@@ -17166,13 +17269,13 @@ class MainWindow(QMainWindow):
 
     def new_geometry_act(self) -> None:
         """Add an empty geometry to the project, in the display length
-        unit, and select it. Its Quads row offers Add Plane and its Hexes
-        row Add Block."""
+        unit, and select it. Its Solids row offers the shapes a part is
+        built from, plates and disks among them."""
         unit = self.unit_system.unit('length')
         name = self.project.new_geometry('Geometry', unit=unit)
         self.show_object(name)
         self._show_status(f'{name}: an empty geometry, lengths in {unit} — '
-                          'select its Quads to Add Plane, its Hexes to Add Block')
+                          'select its Solids row to add a plate, a block or another shape')
 
     def new_channel_table_act(self) -> None:
         """Add an empty channel table to the project and select it. Its
@@ -17200,20 +17303,6 @@ class MainWindow(QMainWindow):
             self.table.scrollTo(model.index(row, 0))
         self._show_status(f'{name}: added channel {number}')
 
-    def add_plane_act(self) -> None:
-        """Open the add pane (`MeshPanel`) beside the view for a plane of
-        plates in the selected geometry: a center, widths with one of
-        them zero, and an element size. Each Add runs the project's
-        `add_plane`."""
-        # The pane beside the view: 2026-10-02.
-        self._open_mesh_pane('plane')
-
-    def add_block_act(self) -> None:
-        """Open the same pane for a block of bricks in the selected
-        geometry: a center, three widths and an element size. Each Add
-        runs the project's `add_block`."""
-        self._open_mesh_pane('block')
-
     def _open_mesh_pane(self, kind: str, editing=None) -> None:
         """Open the pane for the selected geometry, the box's preview in
         the view, and the rings and arrows around it — the coordinate
@@ -17223,8 +17312,7 @@ class MainWindow(QMainWindow):
         numbers, to change it (`edit_solid_pane`)."""
         obj = self.current_object()
         if not isinstance(obj, Geometry):
-            noun = 'a block' if kind == 'block' else 'a plane'
-            self._show_status(f'Select a geometry to add {noun} to')
+            self._show_status('Select a geometry to add a solid to')
             return
         if self.rotate_action.isChecked():
             self.rotate_action.setChecked(False)
@@ -17234,9 +17322,7 @@ class MainWindow(QMainWindow):
         unit = self.unit_system.unit('length') if defined else None
         label = self.unit_system.label_text('length') if defined else 'units'
         panel = self.scene.mesh_panel
-        panel.open_for(kind, label, list(obj.group_name),
-                       default=self._mesh_default_group(obj, kind),
-                       editing=editing is not None)
+        panel.open_for(kind, label, editing=editing is not None)
         before = None
         if editing is not None:
             before = self._solid_values(obj, editing[1], unit or 'm')
@@ -17273,6 +17359,7 @@ class MainWindow(QMainWindow):
             return
         kind = ({'block': 'solid_block', 'cylinder': 'solid_cylinder',
                  'cone': 'solid_cone', 'sphere': 'solid_sphere',
+                 'plate': 'solid_plate', 'disk': 'solid_disk',
                  solids.HOLE: 'solid_hole'}.get(item.kind)
                 or ('solid_section' if item.kind in solids.SECTIONS else 'solid_part'))
         self._open_mesh_pane(kind, editing=(name, solid_id))
@@ -17300,31 +17387,11 @@ class MainWindow(QMainWindow):
         return {'center': tuple(np.asarray(item.center) / scale),
                 'angles': tuple(item.angles),
                 'widths': (tuple(np.asarray(item.widths) / scale)
-                           if item.kind == 'block' else (1.0, 1.0, 1.0)),
+                           if item.kind in ('block', 'plate') else (1.0, 1.0, 1.0)),
                 'radius': item.radius / scale, 'length': item.length / scale,
                 'corner': item.corner / scale, 'group': item.name,
                 **({'top': solids._top(item) / scale} if item.kind == 'cone' else {}),
                 **shaped}
-
-    def _mesh_default_group(self, geometry, kind: str) -> str:
-        """The element group the pane opens on: the last of the geometry's
-        groups of the family it adds, so plates keep joining plates, else
-        a name not yet taken. It opened on the geometry's first group of
-        any family, and a plate added after a block went into the block's
-        bricks (Brandon, 2026-10-02)."""
-        from ..core import mesh
-
-        family = 'hexes' if kind == 'block' else 'quads'
-        for k in range(len(geometry.group_id) - 1, -1, -1):
-            if mesh.group_families(geometry, int(geometry.group_id[k])) == {family}:
-                return str(geometry.group_name[k])
-        stem = 'block' if kind == 'block' else 'plate'
-        taken = set(geometry.group_name)
-        name, n = stem, 1
-        while name in taken:
-            n += 1
-            name = f'{stem} {n}'
-        return name
 
     def close_mesh_pane(self) -> None:
         """Close the add pane, removing its preview and the gizmo."""
@@ -17370,36 +17437,11 @@ class MainWindow(QMainWindow):
         self._show_status('Squared the box up with the geometry\'s axes')
 
     def _mesh_call(self):
-        """(verb, the call's numbers) the fields and the frame make: the
-        corner and edges `add_block` and `add_plane` take, in the
-        display unit. Raises ValueError, said in a sentence, for widths
-        that make no box or no plate."""
-        values = self.scene.mesh_panel.values()
-        frame, kind = self._mesh['frame'], self._mesh['kind']
-        widths = np.asarray(values['widths'], dtype=float)
-        if kind in SOLID_KINDS:
-            return self._solid_call(values, frame, kind)
-        if kind == 'block':
-            if np.any(widths <= 0.0):
-                raise ValueError('a block needs a width along all three axes')
-            used = [0, 1, 2]
-        else:
-            if int(np.sum(widths == 0.0)) != 1:
-                raise ValueError('a plate lies in a plane: leave exactly one '
-                                 'width at zero, the axis it faces')
-            used = [i for i in range(3) if widths[i] > 0.0]
-        edges = [widths[i] * frame[i] for i in used]
-        corner = frame[3] - 0.5 * np.sum(edges, axis=0)
-
-        def tidy(vector):
-            # turned frames leave 6e-17 where a zero belongs; a journal
-            # line reads what a person would have typed
-            return tuple(float(v) + 0.0 for v in np.round(vector, 12))
-
-        return ('add_block' if kind == 'block' else 'add_plane',
-                {'corner': tidy(corner), 'edges': [tidy(e) for e in edges],
-                 'size': values['size'], 'group': values['group'],
-                 'apart': values['apart']})
+        """(verb, the call's numbers) the fields and the frame make, in
+        the display unit. Raises ValueError, said in a sentence, for
+        numbers that make no solid."""
+        return self._solid_call(self.scene.mesh_panel.values(), self._mesh['frame'],
+                                self._mesh['kind'])
 
     @staticmethod
     def _solid_call(values, frame, kind):
@@ -17434,6 +17476,14 @@ class MainWindow(QMainWindow):
                                  "block's narrower width across")
             return 'add_solid_block', {**call, 'widths': tidy(values['widths']),
                                        'corner': float(values['corner'])}
+        if kind == 'solid_plate':
+            if min(values['widths'][:2]) <= 0.0:
+                raise ValueError('a plate needs a width along its X and its Y')
+            return 'add_solid_plate', {**call, 'widths': tidy(values['widths'][:2])}
+        if kind == 'solid_disk':
+            if values['radius'] <= 0.0:
+                raise ValueError('a disk needs a radius')
+            return 'add_solid_disk', {**call, 'radius': float(values['radius'])}
         if kind == 'solid_sphere':
             return 'add_solid_sphere', {'center': call['center'],
                                         'radius': float(values['radius']),
@@ -17488,6 +17538,12 @@ class MainWindow(QMainWindow):
                                        call['length'], call['angles'])
             elif verb == 'add_solid_sphere':
                 made = solids.add_sphere(scratch, call['center'], call['radius'])
+            elif verb == 'add_solid_plate':
+                made = solids.add_plate(scratch, call['center'], call['widths'],
+                                        call['angles'])
+            elif verb == 'add_solid_disk':
+                made = solids.add_disk(scratch, call['center'], call['radius'],
+                                       call['angles'])
             else:
                 made = solids.add_cylinder(scratch, call['center'], call['radius'],
                                            call['length'], call['angles'])
@@ -17520,7 +17576,7 @@ class MainWindow(QMainWindow):
             w = call['widths']
             rounded = (f', its corners rounded to {call["corner"]:.4g} {label}'
                        if call['corner'] else '')
-            what = (f'A solid block {w[0]:.4g} by {w[1]:.4g} by {w[2]:.4g} '
+            what = (f'A block {w[0]:.4g} by {w[1]:.4g} by {w[2]:.4g} '
                     f'{label}{rounded}')
         elif verb == 'add_solid_cone':
             what = (f'A cone {call["length"]:.4g} {label} high, '
@@ -17528,6 +17584,22 @@ class MainWindow(QMainWindow):
                     f'{2 * call["top"]:.4g} {label} at its top')
         elif verb == 'add_solid_sphere':
             what = f'A sphere {2 * call["radius"]:.4g} {label} across'
+        elif verb in ('add_solid_plate', 'add_solid_disk'):
+            # flat: an area, and the thickness its shells' group takes
+            w = call.get('widths')
+            what = (f'A plate {w[0]:.4g} by {w[1]:.4g} {label}' if w is not None
+                    else f'A disk {2 * call["radius"]:.4g} {label} across')
+            area = solids.area(scratch, made)
+            if before is None:
+                panel.show_reading(f'{what}, {area:.4g} {label}² — flat, meshed later '
+                                   'into shells, their thickness set on the element '
+                                   'group.', True)
+                return
+            changes = self._solid_changes(call)
+            panel.show_reading(f'{what}, {area:.4g} {label}².'
+                               + ('' if changes else ' As it is: change a number, '
+                                  'or drag it, to apply.'), bool(changes))
+            return
         else:
             what = (f'A cylinder {2 * call["radius"]:.4g} {label} across and '
                     f'{call["length"]:.4g} {label} long')
@@ -17561,6 +17633,12 @@ class MainWindow(QMainWindow):
         block = kind == 'solid_block'
         if kind == 'solid_sphere':
             now = {'center': call['center'], 'radius': call['radius'], 'name': call['name']}
+        elif kind == 'solid_plate':
+            now = {'center': call['center'], 'widths': call['widths'],
+                   'angles': call['angles'], 'name': call['name']}
+        elif kind == 'solid_disk':
+            now = {'center': call['center'], 'angles': call['angles'],
+                   'radius': call['radius'], 'name': call['name']}
         elif kind == 'solid_cone':
             now = {'center': call['center'], 'angles': call['angles'],
                    'radius': call['radius'], 'top_radius': call['top'],
@@ -17626,74 +17704,15 @@ class MainWindow(QMainWindow):
              f'As it is: drag it or type where it goes to move it, with the '
              f'{count} solids it is made of.'), bool(said))
 
-    def _mesh_part(self):
-        from ..core import mesh
-
-        verb, call = self._mesh_call()
-        unit = self._mesh['unit'] if self._mesh['defined'] else None
-        build = mesh.block if verb == 'add_block' else mesh.plane
-        return build(call['corner'], *call['edges'], call['size'],
-                     call['group'], unit=unit)
-
     def _mesh_refresh(self) -> None:
         """Ask what the fields would add; say it, draw it, and allow Add
         only when it can be added."""
-        from ..core import mesh
-
-        panel = self.scene.mesh_panel
-        if self._mesh is None:
-            return
-        if self._mesh['kind'] in SOLID_KINDS:
+        if self._mesh is not None:
             self._solid_refresh()
-            return
-        obj = self.objects.get(self._mesh['name'])
-        try:
-            part = self._mesh_part()
-        except ValueError as refusal:
-            self._draw_plane_preview(None)
-            text = str(refusal)
-            panel.show_reading(f'{text[:1].upper()}{text[1:]}.', False)
-            return
-        refusal = mesh.group_refusal(obj, part)
-        if refusal is not None:
-            self._draw_plane_preview(None)
-            panel.show_reading(f'{refusal[:1].upper()}{refusal[1:]}.', False)
-            return
-        self._draw_plane_preview(part)
-        # kept apart applies only once there is something to keep it from
-        panel.apart.setVisible(bool(obj.num_nodes))
-        apart = bool(obj.num_nodes) and panel.values()['apart']
-        on, _rows = mesh.landing(obj, part, apart=apart)
-        first = part.node_xyz[part.node_index(part.elem_conn[0])]
-        if self._mesh['defined']:
-            first = self.unit_system.from_si(first, 'length')
-        label = self._mesh['label']
-        if self._mesh['kind'] == 'block':
-            across = [float(np.linalg.norm(first[1] - first[0])),
-                      float(np.linalg.norm(first[3] - first[0])),
-                      float(np.linalg.norm(first[4] - first[0]))]
-            what = (f'{len(part.elem_conn)} bricks of {across[0]:.4g} by '
-                    f'{across[1]:.4g} by {across[2]:.4g} {label}')
-        else:
-            across = [float(np.linalg.norm(first[1] - first[0])),
-                      float(np.linalg.norm(first[2] - first[1]))]
-            what = (f'{len(part.elem_conn)} plates of {across[0]:.4g} by '
-                    f'{across[1]:.4g} {label}')
-        group = panel.values()['group']
-        where = (f'element group {group!r}' if group in obj.group_name else
-                 f'a new element group {group!r}' if group else
-                 'an unnamed element group of its own')
-        shared = int(on.sum())
-        doubled = mesh.already_there(obj, part, apart=apart)
-        overlap = (f' {doubled} of the elements are already there where it '
-                   'overlaps, and are left out.' if doubled else '')
-        panel.show_reading(
-            f'{what}, into {where}: {part.num_nodes - shared} nodes to add, '
-            f'{shared} on nodes already there.{overlap}', True)
 
     def _mesh_add(self) -> None:
-        """Add the box: the project's verb, and the pane stays open for
-        the next, since a model is several and each is usually the last
+        """Add the solid: the project's verb, and the pane stays open for
+        the next, since a part is several and each is usually the last
         one moved."""
         if self._mesh is None:
             return
@@ -17707,64 +17726,52 @@ class MainWindow(QMainWindow):
         if self._mesh.get('editing') is not None:
             self._apply_solid_edit(verb, call)
             return
-        if verb in ('add_solid_block', 'add_solid_cylinder', 'add_solid_section',
-                    'add_solid_hole', 'add_solid_cone', 'add_solid_sphere'):
-            extra = {k: v for k, v in call.items() if k not in ('center', 'name')}
-            if verb == 'add_solid_section':
-                new = self.project.add_solid_section(
-                    name, extra['shape'], call['center'], extra['dimensions'],
-                    extra['length'], call['angles'], call['name'],
-                    unit=self._mesh['unit'])
-            elif verb == 'add_solid_hole':
-                # the keywords only when used, so a journal line reads plain
-                optional = {'counterbore': extra['counterbore']} if extra['counterbore'] else {}
-                new = self.project.add_solid_hole(
-                    name, call['center'], extra['diameter'], extra['depth'],
-                    call['angles'], call['name'], unit=self._mesh['unit'], **optional)
-            elif verb == 'add_solid_block':
-                # the keyword only when used, so a journal line reads plain
-                corner = ({'corner': extra['corner']} if extra['corner'] else {})
-                new = self.project.add_solid_block(
-                    name, call['center'], extra['widths'], call['angles'],
-                    call['name'], unit=self._mesh['unit'], **corner)
-            elif verb == 'add_solid_cone':
-                new = self.project.add_solid_cone(
-                    name, call['center'], extra['radius'], extra['top'], extra['length'],
-                    call['angles'], call['name'], unit=self._mesh['unit'])
-            elif verb == 'add_solid_sphere':
-                new = self.project.add_solid_sphere(
-                    name, call['center'], extra['radius'], call['name'],
-                    unit=self._mesh['unit'])
-            else:
-                new = self.project.add_solid_cylinder(
-                    name, call['center'], extra['radius'], extra['length'],
-                    call['angles'], call['name'], unit=self._mesh['unit'])
-            self._refresh_item(self._item_for_object(name), obj)
-            self.render_current()
-            from ..core import solids
-
-            added = solids.solid(obj, new)
-            self._show_status(
-                f'{name}: added {(added.name.strip() or SOLID_LABELS[added.kind]).lower()} '
-                f'— solid {new}, {len(solids.top_level(obj))} in all')
-            self._mesh_refresh()
-            self._draw_rings()
-            return
-        # the keyword only when used, so a journal line reads as before
-        apart = {'apart': True} if call['apart'] and obj.num_nodes else {}
-        found = getattr(self.project, verb)(
-            name, call['corner'], *call['edges'], call['size'], call['group'],
-            unit=self._mesh['unit'], **apart)
+        extra = {k: v for k, v in call.items() if k not in ('center', 'name')}
+        if verb == 'add_solid_section':
+            new = self.project.add_solid_section(
+                name, extra['shape'], call['center'], extra['dimensions'],
+                extra['length'], call['angles'], call['name'],
+                unit=self._mesh['unit'])
+        elif verb == 'add_solid_hole':
+            # the keywords only when used, so a journal line reads plain
+            optional = {'counterbore': extra['counterbore']} if extra['counterbore'] else {}
+            new = self.project.add_solid_hole(
+                name, call['center'], extra['diameter'], extra['depth'],
+                call['angles'], call['name'], unit=self._mesh['unit'], **optional)
+        elif verb == 'add_solid_block':
+            # the keyword only when used, so a journal line reads plain
+            corner = ({'corner': extra['corner']} if extra['corner'] else {})
+            new = self.project.add_solid_block(
+                name, call['center'], extra['widths'], call['angles'],
+                call['name'], unit=self._mesh['unit'], **corner)
+        elif verb == 'add_solid_cone':
+            new = self.project.add_solid_cone(
+                name, call['center'], extra['radius'], extra['top'], extra['length'],
+                call['angles'], call['name'], unit=self._mesh['unit'])
+        elif verb == 'add_solid_sphere':
+            new = self.project.add_solid_sphere(
+                name, call['center'], extra['radius'], call['name'],
+                unit=self._mesh['unit'])
+        elif verb == 'add_solid_plate':
+            new = self.project.add_solid_plate(
+                name, call['center'], extra['widths'], call['angles'],
+                call['name'], unit=self._mesh['unit'])
+        elif verb == 'add_solid_disk':
+            new = self.project.add_solid_disk(
+                name, call['center'], extra['radius'], call['angles'],
+                call['name'], unit=self._mesh['unit'])
+        else:
+            new = self.project.add_solid_cylinder(
+                name, call['center'], extra['radius'], extra['length'],
+                call['angles'], call['name'], unit=self._mesh['unit'])
         self._refresh_item(self._item_for_object(name), obj)
         self.render_current()
-        noun = 'bricks' if verb == 'add_block' else 'plates'
-        doubled = found.get('duplicates', 0)
-        overlap = (f', {doubled} more already there where it overlaps'
-                   if doubled else '')
+        from ..core import solids
+
+        added = solids.solid(obj, new)
         self._show_status(
-            f'{name}: added {found["elements"]} {noun}{overlap} — '
-            f'{found["added"]} nodes, {found["shared"]} shared with '
-            f'the geometry; {obj.num_nodes} nodes in all')
+            f'{name}: added {(added.name.strip() or SOLID_LABELS[added.kind]).lower()} '
+            f'— solid {new}, {len(solids.top_level(obj))} in all')
         # the redraw took the preview and the gizmo with it
         self._mesh_refresh()
         self._draw_rings()
@@ -17818,10 +17825,11 @@ class MainWindow(QMainWindow):
         self._mark_pencils([self._item_for_object(name)])
 
     def _draw_plane_preview(self, part) -> None:
-        """The plane Add Plane, or the block Add Block, would add, drawn
-        over the scene in the highlight color — or taken away. Drawn
-        from `display_points`, the one rule for where a node sits in the
-        view; a block by its skin, as the scene draws solids."""
+        """The solid the add pane would add, as triangles, or the mesh Mesh
+        Solids would make, drawn over the scene in the highlight color —
+        or taken away. A mesh is drawn from `display_points`, the one
+        rule for where a node sits in the view; bricks by their skin, as
+        the scene draws solids."""
         import pyvista as pv
 
         from ..viz.geometry import display_points, solid_faces

@@ -60,9 +60,10 @@ geometry files, MATLAB files in the project layout, ESCDF files, and
 and `add_coordinate_system`; `delete_nodes`, `delete_elements`,
 `delete_groups` and `delete_coordinate_systems`; `renumber_node`,
 `renumber_group` and `renumber_coordinate_system`; `missing_dofs`
-against a data object; `extent`; `validate`; `save`. Meshed planes and
-blocks are added through the project (`project.add_plane`,
-`project.add_block`), described below.
+against a data object; `extent`; `validate`; `save`. Plates, blocks
+and the other solids are added and meshed through the project
+(`project.add_solid_plate`, `project.mesh_solids` and the rest),
+described below.
 
 ### Rigid-body modes and the default view
 
@@ -250,31 +251,21 @@ properties of the wrong kind for its elements, is refused by name.
 ### Building a mesh
 
 *New Geometry* (the **+** on the project row's bar) starts an empty
-geometry (`project.new_geometry`). *Add Plane*, on the bar of a
-geometry's **Quads** row, meshes one rectangle of plates at its
-mid-thickness. A pane beside the 3-D view takes a center, the widths
-(one left at zero to name the plane the rectangle lies in) and an
-element size, all in the display unit, and the plane is drawn as you
-type. Turn it by typing angles about X, Y and Z or by dragging the
-rings around the preview, which turn it a degree at a time, and slide
-it onto the grid with its arrows. *Square Up* turns it back to the
-geometry's axes, keeping its center. Each edge is divided into the
-whole number of elements nearest the element size. The plates go into
-the element group named in the pane, and the new nodes that fall on
-nodes already there become those nodes (`project.add_plane`; in
-[`mesh`](../api/visualdynamics.core.mesh.md), `mesh.plane`, `mesh.join`
-and `mesh.assemble`).
+geometry (`project.new_geometry`). Its parts are built on its
+**Solids** row and meshed with *Mesh Solids*, both described under
+[Solids](#solids) below: *Add Plate* and *Add Disk* for parts meshed
+into shells, *Add Block* and the other shapes for parts meshed
+into bricks or tetrahedra. Each part becomes an element group named for
+it, and the new nodes that fall on nodes already there become those
+nodes. The BARC is built this way, twelve plates meshed into quads
+([the finite element workflow](workflows/fem-workflow.md)).
 
-*Add Block*, on the **Hexes** row's bar, is the same pane with all
-three widths: a box meshed into eight-node solid bricks, for a part
-that is neither a beam nor a plate (`project.add_block`, `mesh.block`).
-In a script, `mesh.block` also cuts cylindrical holes along one of the
-block's edges, rounded the way *Mesh Solids* rounds them.
-
-Ticking *Keep apart from other groups* in the pane joins a plane or a
-block only to the nodes of its own element group. Two parts that touch,
-such as a channel's foot and the box it is bolted to, then keep their
-own nodes there, to be merged later at the bolts (`apart=True`).
+In a script, [`mesh`](../api/visualdynamics.core.mesh.md) also builds a
+mesh directly: `mesh.plane` meshes a rectangle of plates from a corner,
+two edges and an element size, `mesh.block` a box of eight-node bricks,
+with cylindrical holes along one of its edges, and `mesh.join` and
+`mesh.assemble` put the pieces together, sharing the nodes where they
+meet.
 
 ### Merging and aligning meshes
 
@@ -369,7 +360,7 @@ patches, and `project.add_mated_surfaces`, `edit_mated_surfaces` and
 
 Solids are the shapes a part is built from before it is meshed. They
 are listed on a geometry's **Solids** row, which is there before the
-first solid is added. *Add Solid Block*, *Add Cylinder*, *Add Cone*
+first solid is added. *Add Block*, *Add Cylinder*, *Add Cone*
 and *Add Sphere* on that row open the add pane on a solid centered on
 the origin. A block is a center, three widths, three angles and an
 optional corner radius, which rounds its four edges along its own Z so
@@ -393,9 +384,13 @@ Pick two parts or more in the tree and the bar offers *Union*,
 *Subtract* and *Intersect*. *Subtract* takes the others from the one
 first in the tree, which its tooltip names, so a plate with holes is
 the plate added first, its holes after, all of them picked, and
-*Subtract*. A boolean lists the solids it is made of under its own row;
-one picked there is drawn over it, so a hole's cylinder shows inside
-the plate. *Pattern*, on picked solids, makes copies of them in rows,
+*Subtract*. Drag a solid's row up or down among the rows beside it to
+change the order: the parts among the parts before a boolean is made,
+or a boolean's own solids under its row afterward, which changes what an
+existing subtraction cuts. A blue line shows where the row will land;
+a row only moves among its own siblings. A boolean lists the solids it
+is made of under its own row; one picked there is drawn over it, so a
+hole's cylinder shows inside the plate. *Pattern*, on picked solids, makes copies of them in rows,
 columns and layers: how many along X, Y and Z and how far apart, up to
 10,000 copies. The result is one solid with the originals under it,
 and the copies follow any change to the originals. A pattern can be
@@ -424,12 +419,32 @@ kernel, which is in every packaged build (`pip install
 shapes themselves, their volumes and their surfaces are in
 [`core.solids`](../api/visualdynamics.core.solids.md).
 
+*Add Plate* and *Add Disk* add flat shapes. A plate is a center, two
+widths in its own X-Y plane and three angles, and a disk is a center, a
+radius and three angles. Neither has a thickness: they are meshed into
+shells, and the thickness is typed for their element group in the
+Element Groups table. A block, a cylinder, a section or a hole
+subtracted from a plate cuts it where it crosses the plate's plane, so
+a plate less some cylinders is a plate with holes. A union is of flat
+shapes or of solid ones, not both, since the two mesh into different
+elements.
+
 ### Mesh Solids
 
 *Mesh Solids*, on the bar when parts are picked, meshes them into
-eight-node bricks or ten-node tetrahedra, each part an element group
-named for it. The element type is yours to choose in the pane:
-*Hexes* for the parts that are an extrusion, *Tetras* for any shape.
+eight-node bricks, ten-node tetrahedra or shells, each part an element
+group named for it. The element type is yours to choose in the pane:
+*Hexes* for the parts that are an extrusion, *Tetras* for any shape,
+and *Shells (quads)* or *Shells (triangles)* for plates.
+
+A plate or a disk is meshed into shells on its own plane, with its
+holes round, the same way bricks are rounded; with a plate or a disk
+among the parts, only the two shell types are offered. A solid with a
+volume meshed into shells is meshed on its outer surface only: the
+quads are the outside faces of its brick mesh, and the triangles the
+outside faces of its tetrahedral mesh. Triangles on a plate are its
+quads, each split on its shorter diagonal. Shells take a material and
+a thickness in the Element Groups table before the model is solved.
 
 Bricks mesh an extrusion best: every block square to the geometry's
 axes, and every cylinder and rounded corner along one axis. That
@@ -535,7 +550,7 @@ bar should be preferred.
 
 Parts meshed together share nodes where they touch (a frame and the
 inserts in its holes). *Keep apart from other groups* lands the bricks
-only on their own groups' nodes, as it does in *Add Block*. With two
+only on their own groups' nodes. With two
 parts or more picked, *Keep the parts apart from each other* meshes
 them on one grid with each part keeping its own nodes where it touches
 another, so parts to be bolted lie node on node, ready for *Merge
@@ -823,7 +838,7 @@ and linked to its source in one call:
 | on | verbs |
 | --- | --- |
 | a time history | `filter_data`, `truncate_data`, `detect_shocks`, `compute_spectra`, `compute_psds`, `compute_cpsds`, `compute_srs`; `compute_frfs` and `compute_multiple_coherence` when it has both reference and response channels; `extract_sine` when the project holds a sine sweep specification; `integrate` and `differentiate` when the quantity allows; `transform` through a shape set whose DOFs it is measured on, and `expand` back when it holds that set's modal responses |
-| a geometry | `generate_rigid_body_modes`; `set_view`; `add_plane`, a meshed rectangle of plates joined to what is there; `add_block`, a meshed box of solid bricks, likewise; `add_solid_block`, `add_solid_cylinder`, `add_solid_section` and `add_solid_hole`, then `combine_solids`, `pattern_solids` and `mesh_solids`; `tie_elements`, a patch of elements tied rigidly to an element group or a second patch; `merge_coincident_nodes` and `align_meshes` once it has elements, for the whole geometry or the element groups named by `groups=`; `merge_groups`, element groups of one element type and the same properties made one; `solve_modes` once its element groups carry their properties (a material and a thickness or a section per group in the Element Groups table, a material alone for a group of solids), which builds the finite element model and solves it |
+| a geometry | `generate_rigid_body_modes`; `set_view`; `add_solid_block`, `add_solid_cylinder`, `add_solid_cone`, `add_solid_sphere`, `add_solid_section`, `add_solid_hole`, `add_solid_plate` and `add_solid_disk`, then `combine_solids`, `pattern_solids` and `mesh_solids`; `tie_elements`, a patch of elements tied rigidly to an element group or a second patch; `merge_coincident_nodes` and `align_meshes` once it has elements, for the whole geometry or the element groups named by `groups=`; `merge_groups`, element groups of one element type and the same properties made one; `solve_modes` once its element groups carry their properties (a material and a thickness or a section per group in the Element Groups table, a material alone for a group of solids), which builds the finite element model and solves it |
 | the project itself | `new_geometry`, an empty geometry to build in; `new_channel_table`, an empty channel table to fill in; `generate_report` |
 | a channel table | `add_channels`, blank channels numbered on from its highest |
 | a PSD, CPSD or specification | `compute_octave`, with a specification's warning and abort limits banded along with it; `read_as_specification` for a PSD that is a requirement, and `read_as_psd` for a specification without limits |

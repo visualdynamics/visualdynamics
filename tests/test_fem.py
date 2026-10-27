@@ -804,6 +804,42 @@ def square_plate(mesh, side=1.0, thickness=0.01, material=ALUMINUM):
     return model
 
 
+
+@pytest.mark.parametrize('to_ground', ['grounded', 'loose node'])
+@pytest.mark.parametrize('side, thickness, bounce', [
+    (1.0, 0.01, 0.019368),
+    # a circuit board's size: its rockings turn far more radians than
+    # they move meters, so an element is judged by the mode's largest
+    # translation and largest rotation apart, or the rockings read rigid
+    (0.025, 0.0015, 0.5),
+])
+def test_a_soft_suspension_bounces_rather_than_reading_rigid(
+        to_ground, side, thickness, bounce):
+    """A free plate on four soft vertical springs, a test article on its
+    suspension: the bounce strains only the springs, a part in 1e12 of
+    the plate's sum, and was called rigid and read as 0 Hz (a student's
+    board deck, 2026-10-26). Only the three motions the springs do not
+    resist are rigid, and the bounce and the two rockings are where a
+    rigid plate on springs puts them."""
+    mesh = 24
+    model = square_plate(mesh, side=side, thickness=thickness)
+    stiffness = model.total_mass * (2 * np.pi * bounce) ** 2 / 4
+    corners = (1, mesh + 1, mesh * (mesh + 1) + 1, (mesh + 1) ** 2)
+    for n, corner in enumerate(corners):
+        if to_ground == 'grounded':
+            model.add_spring(f'{corner}Z+', None, stiffness)
+        else:
+            far = 10_000 + n
+            model.add_node(far, *model.position(corner))
+            model.add_spring(f'{corner}Z+', f'{far}Z+', stiffness)
+    shapes = model.eigensolution(num_modes=6)
+    assert int(np.sum(shapes.frequency == 0.0)) == 3
+    assert shapes.frequency[3] == pytest.approx(bounce, rel=1e-3)
+    # a rigid plate rocking on its corners, its own thickness adding to
+    # the inertia: I = m (side^2 + thickness^2) / 12
+    rocking = np.sqrt(3) * bounce * side / np.hypot(side, thickness)
+    assert shapes.frequency[4:6] == pytest.approx([rocking] * 2, rel=1e-4)
+
 def plate_lambdas(shapes, side, thickness, material, count):
     """The classical nondimensional frequencies, lambda^2 = w a^2
     sqrt(rho h / D), for the first `count` elastic modes."""
@@ -943,14 +979,19 @@ def test_plate_frequencies_do_not_depend_on_orientation():
                        flat.frequency, rtol=1e-8, atol=1e-6)
 
 
-def test_a_skewed_quad_is_refused():
+def test_a_skewed_quad_is_taken_and_a_folded_one_refused():
+    """Any convex quad is an element since the covariant MITC4
+    (2026-10-26); a corner folded inward is not, nor one listed out of
+    order around the quad."""
     model = fem.Model('skewed')
-    model.add_node(1, 0.0, 0.0, 0.0)
-    model.add_node(2, 1.0, 0.0, 0.0)
-    model.add_node(3, 1.3, 1.0, 0.0)
-    model.add_node(4, 0.0, 1.0, 0.0)
-    with pytest.raises(ValueError, match='rectangle'):
-        model.add_plate((1, 2, 3, 4), ALUMINUM, 0.01)
+    for node, (x, y) in enumerate([(0, 0), (1, 0), (1.3, 1), (0, 1),
+                                   (0.4, 0.3)], start=1):
+        model.add_node(node, float(x), float(y), 0.0)
+    model.add_plate((1, 2, 3, 4), ALUMINUM, 0.01)
+    with pytest.raises(ValueError, match='not convex'):
+        model.add_plate((1, 2, 5, 4), ALUMINUM, 0.01)
+    with pytest.raises(ValueError, match='out of order around it'):
+        model.add_plate((1, 3, 2, 4), ALUMINUM, 0.01)
 
 
 def test_a_warped_quad_is_refused():
@@ -959,9 +1000,29 @@ def test_a_warped_quad_is_refused():
     model.add_node(2, 1.0, 0.0, 0.0)
     model.add_node(3, 1.0, 1.0, 0.2)
     model.add_node(4, 0.0, 1.0, 0.0)
-    with pytest.raises(ValueError, match='rectangle'):
+    with pytest.raises(ValueError, match='a plate is warped: its corners '
+                                         'sit 3.5% of its shorter diagonal'):
         model.add_plate((1, 2, 3, 4), ALUMINUM, 0.01)
 
+
+
+@pytest.mark.parametrize('corner, refusal', [
+    ((1.0, 1.0, 0.2), 'a plate is warped: its corners sit 3.5%'),
+    ((0.3, 0.3, 0.0), 'not convex'),
+    ((0.0, 0.0, 0.0), 'a plate has no area'),
+])
+def test_a_plate_bent_by_a_moved_node_is_refused_at_assembly(corner,
+                                                            refusal):
+    """`move_node` (a tie putting a node on a surface) can warp or fold
+    a plate after `add_plate` checked it, so assembling checks again."""
+    model = fem.Model('moved')
+    for node, (x, y) in enumerate([(0, 0), (1, 0), (1, 1), (0, 1)],
+                                  start=1):
+        model.add_node(node, float(x), float(y), 0.0)
+    model.add_plate((1, 2, 3, 4), ALUMINUM, 0.01)
+    model.move_node(3, *corner)
+    with pytest.raises(ValueError, match=refusal):
+        model.eigensolution(num_modes=2)
 
 def test_plate_structural_mass_is_density_times_volume():
     model = square_plate(4, side=2.0, thickness=0.05)
@@ -1159,8 +1220,8 @@ def _element_by_element(model):
         _beam_stiffness,
         _block_diagonal,
         _element_axes,
-        _plate_frame,
-        _plate_matrices,
+        _quad_frame,
+        _quad_matrices,
         _solid_matrices,
         _triangle_frame,
         _triangle_matrices,
@@ -1181,8 +1242,8 @@ def _element_by_element(model):
         put(rows, T.T @ _beam_stiffness(beam.material, beam.section, L) @ T,
             T.T @ _beam_mass(beam.material, beam.section, L) @ T)
     for plate in model.plates:
-        R, a, b = _plate_frame(*[model._nodes[q] for q in plate.nodes])
-        T = _block_diagonal(R, 8); k, m = _plate_matrices(plate.material, plate.thickness, a, b)
+        R, xy = _quad_frame(*[model._nodes[q] for q in plate.nodes])
+        T = _block_diagonal(R, 8); k, m = _quad_matrices(plate.material, plate.thickness, xy)
         put(np.concatenate([np.arange(index[q], index[q] + 6) for q in plate.nodes]), T.T @ k @ T, T.T @ m @ T)
     for tri in model.triangles:
         R, xy = _triangle_frame(*[model._nodes[q] for q in tri.nodes])
@@ -1276,8 +1337,8 @@ def test_a_meshed_plate_computes_its_element_matrices_once(monkeypatch):
     from visualdynamics.core import fem
 
     calls = []
-    real = fem._plate_matrices
-    monkeypatch.setattr(fem, '_plate_matrices',
+    real = fem._quad_matrices
+    monkeypatch.setattr(fem, '_quad_matrices',
                         lambda *a: calls.append(a) or real(*a))
     model = square_plate(8)
     model.sparse_matrices()

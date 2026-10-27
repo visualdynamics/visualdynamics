@@ -276,7 +276,7 @@ def test_the_page_is_the_demos_steps():
     assert len(shapes) == len(expected) == 12
     for (shape, add, center, size, name), (_m, verb, args, kw) in zip(shapes, expected):
         block = verb == 'add_solid_block'
-        assert (add == 'Solid Block') == block, shape
+        assert (add == 'Block') == block, shape
         assert np.allclose(_numbers(center), args[1]), shape
         numbers = _numbers(size)
         if block:

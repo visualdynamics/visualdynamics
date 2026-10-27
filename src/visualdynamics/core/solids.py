@@ -22,7 +22,7 @@ what meshing asks, is worked out from the recipes without the kernel
 
 Lengths are held as the geometry holds its coordinates (meters once its
 units are defined), and angles in degrees about the geometry's fixed X,
-then Y, then Z axes, the rule Add Block's pane turns a block by
+then Y, then Z axes, the rule the add pane turns a solid by
 (`rotate.frame_from_angles`).
 """
 
@@ -66,7 +66,14 @@ BASIC = ('block', 'cylinder', 'cone', 'sphere')
 #: the basic solids no sweep makes: a cone's radius changes along it and
 #: a sphere has no axis, so bricks are fitted to them (2026-10-20)
 UNSWEPT = ('cone', 'sphere')
-PRIMITIVES = (*BASIC, *SHAPED)
+#: the flat solids: a face with no thickness, meshed into plates on its
+#: own plane (`core.shells`) and never into bricks. Its thickness is its
+#: element group's, typed in the Element Groups table once it is meshed.
+# Brandon (2026-10-26): every meshable thing made from the Solids row,
+# a plate and a disk among them; Add Plane and Add Block, which typed
+# meshed planes and blocks straight into a geometry, retired
+FLAT = ('plate', 'disk')
+PRIMITIVES = (*BASIC, *SHAPED, *FLAT)
 OPERATIONS = ('union', 'subtract', 'intersect')
 PATTERN = 'pattern'
 
@@ -104,11 +111,13 @@ class Solid:
     angles : tuple of float
         Degrees about the fixed X, then Y, then Z axes.
     widths : tuple of float
-        A block's three widths along its own axes; a pattern's spacing
-        along its own.
+        A block's three widths along its own axes, a plate's two along
+        its own X and Y (and zero along Z); a pattern's spacing along its
+        own.
     radius, length : float
         A cylinder's; a cone's radius at its base (its own -Z end) and
-        its height; a sphere's radius.
+        its height; a sphere's radius; a disk's radius, in its own XY
+        plane.
     operands : tuple of int
         A boolean's solids, by id.
     corner : float
@@ -344,6 +353,119 @@ def _sphere(solid_id: int, name: str, center, radius) -> Solid:
                  radius=float(radius))
 
 
+def add_plate(geometry: Any, center, widths, angles=(0.0, 0.0, 0.0),
+              name: str = '') -> int:
+    """Add a plate to `geometry`'s solids: a flat rectangle `widths`
+    across along its own X and Y, in its own XY plane, with its middle at
+    `center` and turned by `angles`. With no angles it lies in the
+    geometry's XY plane.
+
+    A plate has no thickness of its own. It is meshed into plates
+    (Mesh Solids, Shells), and the thickness is set on their element
+    group. Solids subtracted from it cut it where they cross its plane.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    center : array_like
+        Three numbers, as the geometry holds its coordinates.
+    widths : array_like
+        Two numbers, both positive: along its own X, then Y.
+    angles : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes.
+    name : str, optional
+        What to call it.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    solid = _plate(_next_id(geometry), name, center, widths, angles)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def _plate(solid_id: int, name: str, center, widths, angles) -> Solid:
+    """A plate's row, its numbers checked."""
+    widths = [float(w) for w in np.ravel(widths)]
+    if len(widths) == 3 and widths[2] == 0.0:
+        widths = widths[:2]                    # as the row holds it
+    across = _numbers(widths, 2, 'a plate\'s widths')
+    if min(across) <= 0.0:
+        raise ValueError('a plate needs a width along its X and its Y')
+    return Solid(solid_id, name, 'plate', _numbers(center, 3, 'a center'),
+                 _numbers(angles, 3, 'angles'), (*across, 0.0))
+
+
+def add_disk(geometry: Any, center, radius: float, angles=(0.0, 0.0, 0.0),
+             name: str = '') -> int:
+    """Add a disk to `geometry`'s solids: a flat circle of `radius` in
+    its own XY plane, centered at `center` and turned by `angles`. With
+    no angles it lies in the geometry's XY plane.
+
+    A disk has no thickness of its own; as a plate's, it is set on the
+    element group it is meshed into (Mesh Solids, Shells).
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    center : array_like
+        Three numbers, as the geometry holds its coordinates.
+    radius : float
+        Positive.
+    angles : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes.
+    name : str, optional
+        What to call it.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    solid = _disk(_next_id(geometry), name, center, radius, angles)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def _disk(solid_id: int, name: str, center, radius, angles) -> Solid:
+    """A disk's row, its numbers checked."""
+    if not float(radius) > 0.0:
+        raise ValueError('a disk needs a radius')
+    return Solid(solid_id, name, 'disk', _numbers(center, 3, 'a center'),
+                 _numbers(angles, 3, 'angles'), radius=float(radius))
+
+
+def is_flat(geometry: Any, solid_id: int) -> bool:
+    """Whether a solid is flat: a plate or a disk, or a boolean or a
+    pattern whose material is one, such as a plate with holes subtracted
+    from it. A flat solid is meshed into plates on its plane, and a
+    union of flat and solid ones is refused when it is made.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solid.
+    solid_id : int
+        Which.
+
+    Returns
+    -------
+    bool
+    """
+    item = solid(geometry, solid_id)
+    if item.kind in FLAT:
+        return True
+    if item.kind in ('subtract', 'intersect'):
+        return is_flat(geometry, item.operands[0])
+    if item.kind in ('union', PATTERN):
+        return all(is_flat(geometry, o) for o in item.operands)
+    return False
+
+
 def _top(item: Solid) -> float:
     """A cone's radius at its top."""
     return float(item.dimensions[0]) if item.dimensions else 0.0
@@ -488,6 +610,8 @@ EDITABLE = {'block': ('center', 'angles', 'widths', 'corner'),
             'cylinder': ('center', 'angles', 'radius', 'length'),
             'cone': ('center', 'angles', 'radius', 'top_radius', 'length'),
             'sphere': ('center', 'radius'),
+            'plate': ('center', 'angles', 'widths'),
+            'disk': ('center', 'angles', 'radius'),
             **{shape: ('center', 'angles', 'dimensions', 'length')
                for shape in SECTIONS},
             HOLE: ('center', 'angles', 'dimensions'),
@@ -500,7 +624,8 @@ def edit(geometry: Any, solid_id: int, **changes) -> None:
     What can be changed is a block's center, angles, widths and corner; a
     cylinder's center, angles, radius and length; a cone's center,
     angles, radius (at its base), top radius and length (its height); a
-    sphere's center and radius; a section's center,
+    sphere's center and radius; a plate's center, angles and widths; a
+    disk's center, angles and radius; a section's center,
     angles, dimensions and length; a hole's center, angles and
     dimensions; a pattern's counts, spacing and angles; and any solid's
     name. The rest are kept. The solid keeps its id, so a boolean it is
@@ -556,6 +681,12 @@ def edit(geometry: Any, solid_id: int, **changes) -> None:
                         now['top_radius'], now['length'], now['angles'])
     elif item.kind == 'sphere':
         changed = _sphere(item.id, now['name'], now['center'], now['radius'])
+    elif item.kind == 'plate':
+        changed = _plate(item.id, now['name'], now['center'], now['widths'],
+                         now['angles'])
+    elif item.kind == 'disk':
+        changed = _disk(item.id, now['name'], now['center'], now['radius'],
+                        now['angles'])
     elif item.kind in SHAPED:
         changed = _shaped(item.id, now['name'], item.kind, now['center'],
                           now['dimensions'], now['length'], now['angles'])
@@ -679,10 +810,65 @@ def combine(geometry: Any, operation: str, ids, name: str = '') -> int:
     if taken:
         raise ValueError(f'solid {taken[0]} is already part of solid '
                          f'{used[taken[0]]}')
+    flat = [is_flat(geometry, i) for i in ids]
+    if operation == 'union' and any(flat) and not all(flat):
+        raise ValueError('a union is of plates and disks, or of solids with a '
+                         'volume, not of both: they mesh into different elements')
+    if operation != 'union' and any(flat[1:]):
+        raise ValueError(f'solid {ids[flat[1:].index(True) + 1]} is flat and has no '
+                         f'volume to {"take away" if operation == "subtract" else "share"}')
     name = name or solid(geometry, ids[0]).name
     made = Solid(_next_id(geometry), name, operation, operands=ids)
     geometry.solids.append(made)
     return made.id
+
+
+def reorder(geometry: Any, ids, within: int | None = None) -> None:
+    """Put solids in a new order: the parts, or one solid's own.
+
+    The order is what a boolean made from a pick reads first to last, and
+    a subtraction takes every solid after the first from the first, so
+    which solid comes first decides what is cut. With `within`, the ids
+    are that boolean's (or pattern's) solids in their new order, and an
+    existing subtraction then cuts the new first solid. Without it, they
+    are the parts (`top_level`) in their new order; the solids a boolean
+    uses stay where they are.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids; changed in place.
+    ids : sequence of int
+        Every one of the solids being ordered, each once, in the order
+        wanted.
+    within : int, optional
+        The boolean or pattern whose solids these are.
+
+    Raises
+    ------
+    ValueError
+        When `ids` is not exactly those solids, or `within` has none.
+    """
+    ids = [int(i) for i in ids]
+    if within is None:
+        parts = [item.id for item in top_level(geometry)]
+        if sorted(ids) != sorted(parts) or len(set(ids)) != len(ids):
+            raise ValueError(f'the parts are {parts}; give each of them '
+                             'once, in the order wanted')
+        order = iter(solid(geometry, i) for i in ids)
+        used = used_by(geometry)
+        geometry.solids = [item if item.id in used else next(order)
+                           for item in geometry.solids]
+        return
+    holder = solid(geometry, within)
+    if not holder.operands:
+        raise ValueError(f'solid {within} is not made of other solids')
+    if sorted(ids) != sorted(holder.operands) or len(set(ids)) != len(ids):
+        raise ValueError(f'solid {within} is made of {list(holder.operands)}; '
+                         'give each of them once, in the order wanted')
+    geometry.solids = [replace(item, operands=tuple(ids))
+                       if item.id == holder.id else item
+                       for item in geometry.solids]
 
 
 def _checked(geometry: Any, ids) -> set[int]:
@@ -976,6 +1162,8 @@ def shape(geometry: Any, solid_id: int):
     item = solid(geometry, solid_id)
     if item.kind in BASIC:
         return _basic_shape(item)
+    if item.kind in FLAT:
+        return _flat_shape(item)
     if item.kind in SHAPED:
         # the uncut pieces made one, then the cut taken from them
         pieces = _pieces(geometry, item)
@@ -1014,6 +1202,25 @@ def shape(geometry: Any, solid_id: int):
                              'the kernel')
         result = step.Shape()
     return result
+
+
+def _flat_shape(item: Solid):
+    """A plate or a disk as OpenCASCADE's face, placed."""
+    from OCP.BRepBuilderAPI import (
+        BRepBuilderAPI_MakeEdge,
+        BRepBuilderAPI_MakeFace,
+        BRepBuilderAPI_MakeWire,
+    )
+    from OCP.gp import gp_Ax2, gp_Circ, gp_Dir, gp_Pln, gp_Pnt
+
+    if item.kind == 'plate':
+        wx, wy = item.widths[:2]
+        built = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0)),
+                                        -wx / 2, wx / 2, -wy / 2, wy / 2).Face()
+        return _placed(built, item)
+    circle = gp_Circ(gp_Ax2(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0)), item.radius)
+    wire = BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(circle).Edge()).Wire()
+    return _placed(BRepBuilderAPI_MakeFace(wire).Face(), item)
 
 
 def _basic_shape(item: Solid):
@@ -1134,6 +1341,31 @@ def volume(geometry: Any, solid_id: int) -> float:
     return float(props.Mass())
 
 
+def area(geometry: Any, solid_id: int) -> float:
+    """A flat solid's area, in the square of the geometry's length
+    unit (m² once units are defined): what a plate or a disk reads as,
+    having no volume.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry whose solids table holds it.
+    solid_id : int
+        The solid, by id.
+
+    Returns
+    -------
+    float
+    """
+    require_kernel()
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    props = GProp_GProps()
+    BRepGProp.SurfaceProperties_s(shape(geometry, solid_id), props)
+    return float(props.Mass())
+
+
 def shape_triangles(item, deflection: float = DEFLECTION) -> np.ndarray:
     """The corners of the triangles OpenCASCADE tessellates a shape's
     faces into, with `deflection` a fraction of the shape's size. This is
@@ -1202,7 +1434,7 @@ def shape_triangles(item, deflection: float = DEFLECTION) -> np.ndarray:
 # Mesh Solids turns parts into bricks. Automatic hex meshing of any solid
 # is an unsolved problem; every part built so far is an extrusion — an
 # outline pushed through a thickness — and that is meshed reliably the
-# way Add Block cuts its holes, generalized: a grid laid over the parts,
+# way `mesh.block` cuts its holes, generalized: a grid laid over the parts,
 # cut at every flat face of every block so those fall on grid lines, a
 # brick kept where its center is inside a part, and the nodes between a
 # cylinder's inside and a part's material pulled onto its circle. Whether
@@ -1223,9 +1455,11 @@ GRID_LIMIT = 10_000_000
 #: the samples along each axis `brick_count` reads the solid's share of
 #: its box at, at most
 _SAMPLES = 48
-#: the element types Mesh Solids makes: the brick, and the four- and
-#: ten-node tetrahedra (`tetmesh`)
-MESHED_TYPES = (115, 111, 118)
+#: the element types Mesh Solids makes: the brick, the four- and
+#: ten-node tetrahedra (`tetmesh`), and the plate and the triangle
+#: shells are (`shells`), so meshing a part again into another kind
+#: replaces its earlier mesh whichever it was
+MESHED_TYPES = (115, 111, 118, 44, 41)
 
 
 def _frame(item: Solid) -> np.ndarray:
@@ -1323,6 +1557,11 @@ def _leaves(geometry: Any, solid_id: int) -> list[Solid]:
     item = solid(geometry, solid_id)
     if item.kind in BASIC:
         return [item]
+    if item.kind in FLAT:
+        # a block or a cylinder of no thickness: where it is, its box,
+        # and nothing inside it
+        return [replace(item, kind='block') if item.kind == 'plate'
+                else replace(item, kind='cylinder', length=0.0)]
     if item.kind in SHAPED:
         return [piece for _cut, piece in _pieces(geometry, item)]
     leaves = [leaf for o in item.operands for leaf in _leaves(geometry, o)]
@@ -2695,8 +2934,8 @@ def _drop_inside(geometry: Any, part: Any, others) -> int:
 
 
 def meshed_elements(geometry: Any, names) -> np.ndarray:
-    """The ids of the solid elements Mesh Solids makes, bricks and
-    tetrahedra, in the element groups named `names`: what meshing
+    """The ids of the elements Mesh Solids makes, bricks, tetrahedra
+    and shells, in the element groups named `names`: what meshing
     those parts again replaces (`Project.mesh_solids`, and the pane's
     reading before Mesh is pressed).
 
@@ -2722,7 +2961,7 @@ def meshed_elements(geometry: Any, names) -> np.ndarray:
 def _mesh_grid(lines, order, size, held, circles, ticker=None,
                held_plane=None, cross=None):
     """Bricks on a grid swept along w, rings laid about the circles:
-    the one mesher behind Mesh Solids and Add Block's holes. `ticker`,
+    the one mesher behind Mesh Solids and `mesh.block`'s holes. `ticker`,
     when given, is ticked four times: ownership, the plane, the
     rounding, the bricks.
 
@@ -3682,7 +3921,7 @@ def _round_onto_circles(circles, xyz, corners, groups, centers, order,
     is not on a boundary the circle draws, and one a hole shares with
     an edge's empty space keeps its place. A node on the grid's outer
     face, where a hole breaks out through it, slides along that face to
-    where the circle crosses it rather than leaving it (Add Block's
+    where the circle crosses it rather than leaving it (`mesh.block`'s
     rule, 2026-09-30). A node two circles claim goes to the nearer.
 
     The pulls are made one at a time, the node nearest its circle first,

@@ -267,7 +267,7 @@ def test_the_project_meshes_tets_on_request_and_journals_it():
     assert set(geometry.elem_type) == {115}
     # the old words are taken to mean the same
     assert project.mesh_solids(name, [block], 0.5, unit='in', elements='tets')['tets'] > 0
-    with pytest.raises(ValueError, match="'hexes' or 'tetras'"):
+    with pytest.raises(ValueError, match="'hexes', 'tetras', 'quads' or 'triangles'"):
         project.mesh_solids(name, [block], 0.5, unit='in', elements='wedges')
 
 

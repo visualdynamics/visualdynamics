@@ -1553,12 +1553,14 @@ def _does_not_apply(families_of, holder, field):
     return why_not
 
 
-def _property_columns(unit_system=None, families_of=None):
+def _property_columns(unit_system=None, families_of=None, deck=False):
     """The property columns, in the display system (Brandon,
     2026-09-26: the table should show and expect the current display
     units). Held in SI on the geometry, as the model is inside, and
     journaled in SI, as every table edit is; the header names the unit.
-    Without a system, SI. With `families_of` (a `_GroupFamilies`), a
+    Without a system, SI. With `deck`, a finite element deck whose units
+    are not declared yet: its own numbers, shown and taken as they are,
+    the headers saying so rather than naming SI. With `families_of` (a `_GroupFamilies`), a
     property is blank and takes no value for a group whose elements do
     not use it: a thickness for plates, a section and an orientation for
     beams, a mass and ground for points, a stiffness for points and
@@ -1581,12 +1583,14 @@ def _property_columns(unit_system=None, families_of=None):
             kwargs.update(choices=[*MATERIALS, GROUND], choices_editable=True)
         if field == 'shape':
             kwargs.update(choices=[*SHAPES, CUSTOM])
-        if dimension is not None:
+        if deck and (dimension is not None or field == 'stiffness'):
+            title = f'{title} [deck units]'
+        elif dimension is not None:
             unit = (unit_system.label_text(dimension)
                     if unit_system is not None
                     else _SI_LABELS[dimension])
             title = f'{title} [{unit}]'
-        if field == 'stiffness':
+        elif field == 'stiffness':
             # two units in one cell: along an axis, and about it
             along, about = (
                 (unit_system.label_text('force/length'),
@@ -1745,7 +1749,13 @@ def element_group_table_model(geometry: Geometry,
         # A property that the group's elements do not use is blank and
         # takes no value there (principle 3), while the same row stays
         # live for the groups it applies to.
-        *_property_columns(unit_system, families_of),
+        # a deck whose units are not declared holds its own numbers, not
+        # SI (2026-10-26: converted as SI, a board read E = 463 psi and
+        # 2.4 in thick), so they are shown as they are until its units are
+        *(_property_columns(None, families_of, deck=True)
+          if getattr(geometry, 'from_deck', False)
+          and geometry.length_unit is None
+          else _property_columns(unit_system, families_of)),
     ]
     # the other way up (Brandon, 2026-10-20): a group's properties read
     # as a column of entries, and several groups side by side are

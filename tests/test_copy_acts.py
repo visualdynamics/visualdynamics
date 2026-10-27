@@ -69,8 +69,7 @@ def test_the_3d_bar_copies_the_scene(window, pump):
     window.render_current()
     pump()
     QApplication.clipboard().clear()
-    # last, after the geometry's own act (Add Plane and Add Block moved
-    # to the Quads and Hexes rows, 2026-10-10)
+    # last, after the geometry's own act
     assert _bar(window.scene) == ['Set Default View', 'Copy'], \
         'the 3-D bar offers it'
     assert window.scene.copy_view()

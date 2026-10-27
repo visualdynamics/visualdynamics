@@ -111,7 +111,7 @@ def tet_count(geometry: Any, ids, size: float) -> int:
 
 
 def tet_mesh(geometry: Any, ids, size: float, quadratic: bool = True,
-             progress: Any = None) -> tuple[Any, dict]:
+             progress: Any = None, keep_slivers: bool = False) -> tuple[Any, dict]:
     """The parts as tetrahedra, ready to join to a geometry
     (`mesh.join`).
 
@@ -138,6 +138,12 @@ def tet_mesh(geometry: Any, ids, size: float, quadratic: bool = True,
     progress : callable, optional
         Told ``(done, total)`` as the mesh goes: the edges, the points,
         each step of the relaxation, the elements.
+    keep_slivers : bool, default False
+        Keep the slivers that lie in the surface rather than remove
+        them. Removed, each leaves a shallow dimple, and the surface
+        pinches along an edge there; kept, the mesh's outer faces are
+        the surface whole, which is what a shell mesh of it wants
+        (`shells.shell_mesh`).
 
     Returns
     -------
@@ -176,7 +182,8 @@ def tet_mesh(geometry: Any, ids, size: float, quadratic: bool = True,
     points, nfixed = _seed(fd, fixed, low, high, size)
     ticker.tick()
     points, steps = _relax(fd, points, nfixed, size, extent, ticker)
-    points, corners, quality, slivers = _tetrahedra(fd, points, nfixed, size, extent)
+    points, corners, quality, slivers = _tetrahedra(fd, points, nfixed, size, extent,
+                                                    keep_slivers)
     if not len(corners):
         raise ValueError('the parts hold nothing to mesh')
     centroids = points[corners].mean(axis=1)
@@ -658,7 +665,7 @@ def _quality(points, tets):
     return np.where(size > 0.0, 3.0 * inner / np.maximum(outer, 1e-300), 0.0), volume
 
 
-def _tetrahedra(fd, points, nfixed, size, extent):
+def _tetrahedra(fd, points, nfixed, size, extent, keep_slivers=False):
     """The final tetrahedra, numbered the right way out, the slivers
     dealt with: (points, corners, quality, slivers removed).
 
@@ -725,6 +732,10 @@ def _tetrahedra(fd, points, nfixed, size, extent):
     # it, and the public runner's triangulation left one inside a bar
     # that this machine's did not (2026-10-19)
     sliver |= np.abs(volume) <= 1e-9 * size ** 3
+    if keep_slivers:
+        # for the surface alone (2026-10-26): a sliver's outer faces are
+        # the surface, and dropping it pinched the surface along an edge
+        return p, tets, quality, 0
     return p, tets[~sliver], quality[~sliver], int(sliver.sum())
 
 

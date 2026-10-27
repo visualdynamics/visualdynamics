@@ -1742,48 +1742,6 @@ def _draw_align_meshes(painter, color):
     painter.drawPolygon([QPointF(19, 33), QPointF(24, 43), QPointF(31, 36)])
 
 
-def _draw_plane(painter, color):
-    """A rectangle seen at an angle, divided into a grid: a plane meshed
-    into plates (Add Plane). Slanted so it reads as a surface laid in
-    space rather than the square of one plate element."""
-    corners = [QPointF(6, 46), QPointF(38, 56), QPointF(58, 18),
-               QPointF(26, 8)]
-
-    def along(a, b, t):
-        return QPointF(a.x() + t * (b.x() - a.x()), a.y() + t * (b.y() - a.y()))
-
-    painter.setPen(_pen(color, 5))
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawPolygon(corners)
-    painter.setPen(_pen(color, 3))
-    for t in (1 / 3, 2 / 3):
-        painter.drawLine(along(corners[0], corners[1], t),
-                         along(corners[3], corners[2], t))
-        painter.drawLine(along(corners[0], corners[3], t),
-                         along(corners[1], corners[2], t))
-
-
-def _draw_block(painter, color):
-    """A box seen at an angle, its visible faces divided into a grid: a
-    block meshed into bricks (Add Block) — the plane's icon given a
-    depth."""
-    front = [QPointF(8, 24), QPointF(40, 24), QPointF(40, 56), QPointF(8, 56)]
-    top = [QPointF(8, 24), QPointF(24, 10), QPointF(56, 10), QPointF(40, 24)]
-    side = [QPointF(40, 24), QPointF(56, 10), QPointF(56, 42), QPointF(40, 56)]
-
-    def along(a, b, t):
-        return QPointF(a.x() + t * (b.x() - a.x()), a.y() + t * (b.y() - a.y()))
-
-    painter.setPen(_pen(color, 5))
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    for face in (front, top, side):
-        painter.drawPolygon(face)
-    painter.setPen(_pen(color, 3))
-    for face in (front, top, side):
-        painter.drawLine(along(face[0], face[1], 0.5), along(face[3], face[2], 0.5))
-        painter.drawLine(along(face[0], face[3], 0.5), along(face[1], face[2], 0.5))
-
-
 def _faded(color, alpha):
     shade = QColor(color)
     shade.setAlpha(alpha)
@@ -1792,8 +1750,8 @@ def _faded(color, alpha):
 
 def _draw_solid_block(painter, color):
     """A box seen at an angle, its faces shaded and undivided: a block
-    as a solid shape, not yet meshed (Add Solid Block, 2026-10-11) —
-    Add Block's box without its grid."""
+    as a solid shape, not yet meshed (Add Block, 2026-10-11; Add Solid
+    Block until 2026-10-26)."""
     front = [QPointF(8, 24), QPointF(40, 24), QPointF(40, 56), QPointF(8, 56)]
     top = [QPointF(8, 24), QPointF(24, 10), QPointF(56, 10), QPointF(40, 24)]
     side = [QPointF(40, 24), QPointF(56, 10), QPointF(56, 42), QPointF(40, 56)]
@@ -1844,6 +1802,22 @@ def _draw_solid_cylinder(painter, color):
     painter.drawArc(QRectF(14, 42, 36, 16), 180 * 16, 180 * 16)
     painter.setBrush(_faded(color, 40))
     painter.drawEllipse(QRectF(14, 6, 36, 16))
+
+
+def _draw_solid_plate(painter, color):
+    """A flat sheet seen at a slant, shaded, its near edge stronger: a
+    plate with no thickness, meshed into shells (Add Plate, 2026-10-26)."""
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(_faded(color, 90))
+    painter.drawPolygon([QPointF(6, 46), QPointF(22, 18), QPointF(58, 18), QPointF(42, 46)])
+
+
+def _draw_solid_disk(painter, color):
+    """A flat round sheet seen at a slant, shaded: a disk with no
+    thickness, meshed into shells (Add Disk, 2026-10-26)."""
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(_faded(color, 90))
+    painter.drawEllipse(QRectF(6, 18, 52, 28))
 
 
 def _draw_solid_cone(painter, color):
@@ -2552,13 +2526,14 @@ def control_icon(name: str) -> QIcon:
      'plan_instrumentation': _draw_plan_instrumentation,
      'solid_block': _draw_solid_block, 'solid_cylinder': _draw_solid_cylinder,
      'solid_cone': _draw_solid_cone, 'solid_sphere': _draw_solid_sphere,
+     'solid_plate': _draw_solid_plate, 'solid_disk': _draw_solid_disk,
      'solid_section': _draw_solid_section, 'solid_hole': _draw_solid_hole,
      'solid_union': _draw_solid_union, 'solid_subtract': _draw_solid_subtract,
      'solid_intersect': _draw_solid_intersect,
      'solid_separate': _draw_solid_separate,
      'solid_mesh': _draw_solid_mesh,
      'solid_pattern': _draw_solid_pattern,
-     'plane': _draw_plane, 'block': _draw_block, 'tie': _draw_tie,
+     'tie': _draw_tie,
      'merge_groups': _draw_merge_groups, 'solve_modes': _draw_solve_modes,
      'set_view': _draw_set_view, 'reset_view': _draw_reset_view,
      'sine': _draw_sine,

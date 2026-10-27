@@ -165,12 +165,30 @@ def ground_axes(directions: Any) -> tuple[str, ...]:
 #: adds up. Six orders of margin either side, and no knowledge of how stiff
 #: the structure is.
 #:
+#: Over the whole structure that holds only when every element takes part.
+#: A board on four soft springs bounces at 1.66 Hz straining nothing but
+#: the springs, and their energy was 5e-13 of the board's sum: called
+#: rigid, read as 0 Hz (2026-10-26, a student's deck). So the same ratio
+#: is asked of each element too (`Model._strains_no_element`,
+#: `ZERO_ELEMENT_ENERGY`).
+#:
 #: Projecting onto the analytically known rigid-body vectors was tried
 #: first and is wrong: a cantilever's first bending mode is 99.04% rigid
 #: translation in the mass metric, because that is what a cantilever mode
 #: looks like. Being *shaped* like a rigid motion and *being* one are
 #: different questions, and only the energy asks the second.
 ZERO_ENERGY = 1e-12
+
+#: How much of a mode's size an element may strain and the mode still be
+#: rigid: each element's energy against what it would hold moved by the
+#: mode's largest translation and rotation (`Model._strains_no_element`).
+#: Measured 2026-10-26: rigid modes 1e-17 in every element of plates
+#: regular and distorted, bricks, beams and the student's board without
+#: its springs, and up to 3e-6 where a suspension mode close to zero
+#: leaves its trace in them; the board's bounce on its springs 0.2. Not
+#: the element's own motion as the measure: a spring grounded at one end
+#: cancels nothing, so that trace read as 1.0, a full stretch.
+ZERO_ELEMENT_ENERGY = 1e-3
 
 #: past this many degrees of freedom `Model.eigensolution` solves sparse
 #: rather than dense: the dense solve of a 662-node plate model (3972
@@ -759,27 +777,27 @@ class Beam:
 
 @dataclass
 class Plate:
-    """One four-node rectangular plate-bending element.
+    """One four-node plate-bending element.
 
     A flat shell: plane-stress membrane action in its own plane and
     Mindlin bending out of it, with the transverse shear tied at the edge
-    midpoints (MITC4). The tying is necessary. A plain bilinear Mindlin
-    element locks in shear as the plate gets thin, and a 12x12 mesh of the
-    locking element puts the first elastic mode of a thin free plate
-    several times too high.
+    midpoints (MITC4, in its covariant form). The tying is necessary. A
+    plain bilinear Mindlin element locks in shear as the plate gets thin,
+    and a 12x12 mesh of the locking element puts the first elastic mode
+    of a thin free plate several times too high.
 
-    Only rectangles are accepted, and any other quad is refused, because
-    the tying directions assume the natural axes run along the sides,
-    which is exactly true for a rectangle and only approximately true for
-    anything else. A general quad would need the covariant
-    transforms and the checks that come with them, and the models this
-    module builds mesh rectangular panels.
+    Any convex quad is accepted. A quad that is not convex, has no area,
+    or is warped beyond `QUAD_WARP` of its shorter diagonal is refused:
+    the element is flat, and its corners are projected onto their mean
+    plane.
 
     Nodes run around the perimeter: 1-2 is the first edge, 1-4 the second,
     and corner 3 is opposite corner 1. The thickness is in meters.
     """
-    # A skewed general quad can be added when something needs it, with the
-    # covariant transforms and the validation that come with it.
+    # Rectangles only until 2026-10-26, when a student's free-meshed
+    # circuit board (1,111 of its 11,489 quads off square, the worst by
+    # 49 degrees) needed the covariant form (Brandon: the proper
+    # solution, not quads split into triangles).
 
     nodes: tuple[int, int, int, int]
     material: Material
@@ -1401,9 +1419,9 @@ class Model:
     def add_plate(self, nodes: Sequence[int], material: Material,
                   thickness: float, color: int = 1,
                   group: str = '') -> Plate:
-        """One rectangular plate element over four existing nodes, `thickness`
-        in meters. Corners that do not form a flat rectangle are refused
-        (`Plate`).
+        """One four-node plate element over existing nodes, `thickness` in
+        meters. A quad that is not convex, has no area or is warped is
+        refused (`Plate`).
         """
         nodes = tuple(int(n) for n in nodes)
         if len(nodes) != 4 or len(set(nodes)) != 4:
@@ -1414,9 +1432,9 @@ class Model:
                     f'plate names node {node}, which is not in the model')
         if float(thickness) <= 0.0:
             raise ValueError('a plate needs a positive thickness')
-        # validate the rectangle at build time, not at solve time: the
+        # validate the shape at build time, not at solve time: the
         # person holding the bad corner coordinate is the one adding it
-        _plate_frame(*[self._nodes[n] for n in nodes])
+        _quad_frame(*[self._nodes[n] for n in nodes])
         plate = Plate(nodes, material, float(thickness), color, group)
         self.plates.append(plate)
         return plate
@@ -2117,8 +2135,8 @@ class Model:
                           * self._length(beam) for beam in self.beams))
         plates = 0.0
         for plate in self.plates:
-            _, a, b = _plate_frame(*[self._nodes[n] for n in plate.nodes])
-            plates += plate.material.density * plate.thickness * a * b
+            _, xy = _quad_frame(*[self._nodes[n] for n in plate.nodes])
+            plates += plate.material.density * plate.thickness * _quad_area(xy)
         for triangle in self.triangles:
             _, xy = _triangle_frame(*[self._nodes[n] for n in triangle.nodes])
             plates += (triangle.material.density * triangle.thickness
@@ -2224,10 +2242,12 @@ class Model:
             plates = self.plates[lo:lo + chunk]
             corners = np.array([[self._nodes[n] for n in plate.nodes]
                                 for plate in plates], dtype=np.float64)
-            rotations, a, b = _plate_frames(corners)
+            rotations, xy = _quad_frames(corners)
             which, k, m = cached(
-                lambda key: _plate_matrices(*key),
-                [(plate.material, plate.thickness, float(a[e]), float(b[e]))
+                lambda key: _quad_matrices(key[0], key[1],
+                                           np.array(key[2]).reshape(4, 2)),
+                [(plate.material, plate.thickness,
+                  tuple(float(v) for v in xy[e].ravel()))
                  for e, plate in enumerate(plates)])
             rows = dof_rows([plate.nodes for plate in plates], 6)
             yield rows, rotated(rotations, k[which]), rotated(rotations, m[which])
@@ -2462,7 +2482,7 @@ class Model:
         links are eliminated exactly (`constraint_transform`). Ground points
         (`add_ground`), nodes nothing touches (`loose_nodes`) and rotations
         nothing acts on (`dangling_rotations`, `idle_lead_rotations`) are held
-        as well. A mode that strains nothing (`ZERO_ENERGY`) is given a
+        as well. A mode that strains no element (`ZERO_ENERGY`) is given a
         frequency of exactly 0 Hz.
 
         There are two solvers, giving one answer. The dense solver, for a model
@@ -2538,7 +2558,13 @@ class Model:
         # a rigid-body eigenvalue is zero plus round-off, and comes out
         # either side of it; the negative ones are not oscillations
         frequency = np.sqrt(np.clip(eigenvalues, 0.0, None)) / (2.0 * np.pi)
-        frequency[_strains_nothing(full, stiffness)] = 0.0
+        # the whole structure's sum picks the modes that may be rigid, and
+        # each element then has its say: a soft suspension's bounce strains
+        # only its springs, a part in 1e13 of a stiff board's sum (2026-10-26)
+        zero = _strains_nothing(full, stiffness)
+        if zero.any():
+            zero[zero] = self._strains_no_element(full[:, zero])
+        frequency[zero] = 0.0
 
         order = np.argsort(frequency, kind='stable')
         # in each node's displacement frame before the sign is chosen, so
@@ -2558,6 +2584,38 @@ class Model:
                         shape_matrix=full[:, keep].T,
                         mass_unit='kg',
                         comment=self.name or '')
+
+    def _strains_no_element(self, shapes: np.ndarray) -> np.ndarray:
+        """Which of these modes (one per column, at every degree of
+        freedom) strain no element: in each element, the energy is under
+        `ZERO_ELEMENT_ENERGY` of what that element would hold moved by
+        the mode's largest translation and rotation.
+
+        The whole structure's sum (`_strains_nothing`) cannot tell a
+        rigid motion from one that strains a few soft elements in a stiff
+        structure, since the soft elements' share is smaller than the
+        stiff ones' round-off; an element's own share can. Measured
+        against the mode's size rather than the element's own motion,
+        because a spring with one end grounded cancels nothing, and the
+        trace of a nearby soft mode that the solver leaves in a rigid one
+        would read as a full stretch.
+        """
+        rotation = (np.arange(shapes.shape[0]) % 6) >= 3
+        largest = np.abs(shapes)
+        scale = np.where(rotation[:, None], largest[rotation].max(axis=0),
+                         largest[~rotation].max(axis=0))
+        worst = np.zeros(shapes.shape[1])
+        for rows, k, _m in self._batches():
+            if k is None:
+                continue
+            phi = shapes[rows]
+            energy = np.einsum('erc,ers,esc->ec', phi, k, phi, optimize=True)
+            size = np.einsum('erc,ers,esc->ec', scale[rows], np.abs(k),
+                             scale[rows], optimize=True)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                ratio = np.nan_to_num(np.abs(energy) / size, nan=0.0)
+            worst = np.maximum(worst, ratio.max(axis=0))
+        return worst < ZERO_ELEMENT_ENERGY
 
     def _in_displacement_frames(self, full):
         """`full` (six rows per node in `dof_strings` order, a column per
@@ -3715,56 +3773,106 @@ def _block_diagonal(rotation: np.ndarray, times: int) -> np.ndarray:
     return out
 
 
-def _plate_frame(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray,
-                 p4: np.ndarray) -> tuple[np.ndarray, float, float]:
-    """The element's own axes and side lengths, refusing non-rectangles.
+#: how far a quad's corners may sit off its mean plane, as a fraction of
+#: its shorter diagonal. The element is a flat shell: its corners are
+#: projected onto the mean plane, which is harmless for the small warp of
+#: a mesh on a gently curved surface and wrong for a twisted one.
+QUAD_WARP = 0.01
 
-    Local x runs along edge 1-2, local y along edge 1-4, local z is
-    their normal. The checks are one relative tolerance: the corner
-    angle must be right and corner 3 must sit where the other three
-    say it does — which also catches a warped (non-planar) quad,
-    because a flat rectangle is the only shape that passes both.
+
+def _quad_frame(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray,
+                p4: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The element's own axes and its corners in its own plane.
+
+    Local z is the normal of the two diagonals' cross product, local x
+    runs along edge 1-2 projected into the plane, and local y completes
+    the frame; for a rectangle these are its sides, so the rectangle's
+    numbers are unchanged. Returns the rotation (rows are the axes) and
+    the 4x2 corners in it, node 1 at the origin. A quad with no area, a
+    quad that is not convex (a corner folded inward, where the
+    isoparametric map turns inside out) and one warped beyond
+    `QUAD_WARP` are refused.
     """
-    edge_x = np.asarray(p2, dtype=np.float64) - p1
-    edge_y = np.asarray(p4, dtype=np.float64) - p1
-    a, b = float(np.linalg.norm(edge_x)), float(np.linalg.norm(edge_y))
-    if a == 0.0 or b == 0.0:
+    corners = np.array([p1, p2, p3, p4], dtype=np.float64)
+    diagonal_1 = corners[2] - corners[0]
+    diagonal_2 = corners[3] - corners[1]
+    normal = np.cross(diagonal_1, diagonal_2)
+    shorter = min(float(np.linalg.norm(diagonal_1)),
+                  float(np.linalg.norm(diagonal_2)))
+    twice_area = float(np.linalg.norm(normal))
+    if shorter == 0.0 or twice_area <= 1e-12 * shorter ** 2:
+        # parallel diagonals: collinear corners, or a bowtie whose
+        # corners are listed out of order around it
+        raise ValueError('a plate has no area, or its corners are out of '
+                         'order around it')
+    e3 = normal / twice_area
+    edge = corners[1] - corners[0]
+    edge = edge - (edge @ e3) * e3
+    if float(np.linalg.norm(edge)) == 0.0:
         raise ValueError('a plate edge has zero length')
-    e1, e2 = edge_x / a, edge_y / b
-    tolerance = 1e-6 * max(a, b)
-    if abs(float(np.dot(edge_x, edge_y))) > tolerance * max(a, b):
+    e1 = edge / float(np.linalg.norm(edge))
+    e2 = np.cross(e3, e1)
+    rotation = np.array([e1, e2, e3])
+    local = (corners - corners[0]) @ rotation.T
+    warp = float(np.max(np.abs(local[:, 2] - local[:, 2].mean())))
+    if warp > QUAD_WARP * shorter:
         raise ValueError(
-            'plate corners do not form a rectangle: the corner angle at '
-            'node 1 is not square. Rectangular elements only — see Plate')
-    if float(np.linalg.norm(p3 - (p1 + edge_x + edge_y))) > tolerance:
-        raise ValueError(
-            'plate corners do not form a rectangle: corner 3 is not '
-            'where corners 1, 2 and 4 put it. Rectangular elements '
-            'only — see Plate')
-    return np.array([e1, e2, np.cross(e1, e2)]), a, b
+            f'a plate is warped: its corners sit {warp / shorter:.1%} of '
+            'its shorter diagonal off its plane, where a flat shell takes '
+            f'{QUAD_WARP:.0%}; split it into triangles')
+    xy = local[:, :2]
+    # convex, corners in order around the normal: each corner turns
+    # the same way
+    for k in range(4):
+        before, after = xy[k] - xy[k - 1], xy[(k + 1) % 4] - xy[k]
+        if before[0] * after[1] - before[1] * after[0] <= 0.0:
+            raise ValueError(
+                'a plate is not convex: a corner folds inward or the '
+                'corners are out of order around it')
+    return rotation, xy
 
 
-def _plate_frames(corners: np.ndarray
-                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """`_plate_frame` for many plates at once: corners (E, 4, 3) in,
-    rotations (E, 3, 3) and side lengths a and b (E,) out. A plate that
-    fails a check is handed to `_plate_frame`, so the refusal is the
-    one-plate refusal, word for word."""
-    edge_x = corners[:, 1] - corners[:, 0]
-    edge_y = corners[:, 3] - corners[:, 0]
-    a = np.linalg.norm(edge_x, axis=1)
-    b = np.linalg.norm(edge_y, axis=1)
-    tolerance = 1e-6 * np.maximum(a, b)
-    bad = ((a == 0.0) | (b == 0.0)
-           | (np.abs(np.einsum('ei,ei->e', edge_x, edge_y))
-              > tolerance * np.maximum(a, b))
-           | (np.linalg.norm(corners[:, 2] - (corners[:, 0] + edge_x + edge_y),
-                             axis=1) > tolerance))
+def _quad_frames(corners: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """`_quad_frame` for many plates at once: corners (E, 4, 3) in,
+    rotations (E, 3, 3) and corners in their planes (E, 4, 2) out. A
+    plate that fails a check is handed to `_quad_frame`, so the refusal
+    is the one-plate refusal, word for word."""
+    diagonal_1 = corners[:, 2] - corners[:, 0]
+    diagonal_2 = corners[:, 3] - corners[:, 1]
+    normal = np.cross(diagonal_1, diagonal_2)
+    shorter = np.minimum(np.linalg.norm(diagonal_1, axis=1),
+                         np.linalg.norm(diagonal_2, axis=1))
+    twice_area = np.linalg.norm(normal, axis=1)
+    bad = (shorter == 0.0) | (twice_area <= 1e-12 * shorter ** 2)
     if bad.any():
-        _plate_frame(*corners[int(np.flatnonzero(bad)[0])])
-    e1 = edge_x / a[:, None]
-    e2 = edge_y / b[:, None]
-    return np.stack([e1, e2, np.cross(e1, e2)], axis=1), a, b
+        _quad_frame(*corners[int(np.flatnonzero(bad)[0])])
+    e3 = normal / twice_area[:, None]
+    edge = corners[:, 1] - corners[:, 0]
+    edge = edge - np.einsum('ei,ei->e', edge, e3)[:, None] * e3
+    length = np.linalg.norm(edge, axis=1)
+    if (length == 0.0).any():
+        _quad_frame(*corners[int(np.flatnonzero(length == 0.0)[0])])
+    e1 = edge / length[:, None]
+    e2 = np.cross(e3, e1)
+    rotations = np.stack([e1, e2, e3], axis=1)
+    local = np.einsum('eci,eji->ecj', corners - corners[:, :1], rotations)
+    warp = np.max(np.abs(local[:, :, 2] - local[:, :, 2].mean(axis=1,
+                                                               keepdims=True)),
+                  axis=1)
+    xy = local[:, :, :2]
+    before = xy - np.roll(xy, 1, axis=1)
+    after = np.roll(xy, -1, axis=1) - xy
+    turns = before[:, :, 0] * after[:, :, 1] - before[:, :, 1] * after[:, :, 0]
+    bad = (warp > QUAD_WARP * shorter) | (turns <= 0.0).any(axis=1)
+    if bad.any():
+        _quad_frame(*corners[int(np.flatnonzero(bad)[0])])
+    return rotations, xy
+
+
+def _quad_area(xy: np.ndarray) -> float:
+    """A plate's area from its corners in its own plane (the shoelace)."""
+    x, y = xy[:, 0], xy[:, 1]
+    return 0.5 * abs(float(x @ np.roll(y, -1) - y @ np.roll(x, -1)))
 
 
 #: transverse shear correction for a homogeneous section: the parabolic
@@ -3785,17 +3893,27 @@ SHEAR_CORRECTION = 5.0 / 6.0
 DRILLING_FRACTION = 1e-3
 
 
-def _plate_matrices(material: Material, thickness: float, a: float,
-                    b: float) -> tuple[np.ndarray, np.ndarray]:
-    """Local stiffness and consistent mass for the rectangular shell.
+def _quad_matrices(material: Material, thickness: float,
+                   xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Local stiffness and consistent mass for the four-node shell.
 
-    24x24, six DOFs per node in DIRECTIONS order, nodes at
-    (0,0) (a,0) (a,b) (0,b) in the element's own plane. Membrane and
-    bending integrate 2x2 Gauss (exact for the rectangle); the
-    transverse shear is the MITC4 assumed field — gamma_xz tied at the
-    midpoints of the two eta edges and interpolated linearly in eta,
-    gamma_yz the mirror of that — which is what keeps the thin limit
-    honest instead of shear-locked.
+    24x24, six DOFs per node in DIRECTIONS order, corners at `xy` in the
+    element's own plane, in order around its normal. Bilinear
+    isoparametric throughout: the membrane, the curvatures, the drilling
+    tie and the mass integrate 2x2 Gauss with the Jacobian at each point.
+    The transverse shear is MITC4 (Bathe and Dvorkin), in its covariant
+    form so that any convex quad is valid:
+
+        e_xi  = x,xi  gamma_xz + y,xi  gamma_yz,  tied at (0, -1), (0, 1),
+        e_eta = x,eta gamma_xz + y,eta gamma_yz,  tied at (-1, 0), (1, 0),
+
+    each interpolated linearly across the element (e_xi in eta, e_eta in
+    xi) and turned back into (gamma_xz, gamma_yz) with the inverse
+    Jacobian where it is evaluated. The tying is what keeps a thin plate
+    from locking in shear; tying the Cartesian shears instead, as a
+    rectangle allows, is exact only when the natural axes run along the
+    sides. On a rectangle the Jacobian is constant and diagonal and this
+    is that element exactly.
 
     Sign conventions, written down because they were derived once and
     should not be re-derived: the tilt of the normal toward +x is
@@ -3812,36 +3930,48 @@ def _plate_matrices(material: Material, thickness: float, a: float,
     d_membrane = t * plane
     d_bending = t ** 3 / 12.0 * plane
     d_shear = SHEAR_CORRECTION * G * t * np.eye(2)
+    signs = np.array([(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)])
 
     def basis(xi: float, eta: float):
-        signs = ((-1, -1), (1, -1), (1, 1), (-1, 1))
-        n = np.array([(1 + xi * sx) * (1 + eta * sy) / 4.0
-                      for sx, sy in signs])
-        dx = np.array([sx * (1 + eta * sy) / 4.0 * 2.0 / a
-                       for sx, sy in signs])
-        dy = np.array([sy * (1 + xi * sx) / 4.0 * 2.0 / b
-                       for sx, sy in signs])
-        return n, dx, dy
+        """The shape functions, their x and y derivatives, the Jacobian
+        (rows: d/dxi, d/deta of x and y) and its determinant."""
+        n = (1 + xi * signs[:, 0]) * (1 + eta * signs[:, 1]) / 4.0
+        natural = np.array([signs[:, 0] * (1 + eta * signs[:, 1]) / 4.0,
+                            signs[:, 1] * (1 + xi * signs[:, 0]) / 4.0])
+        jacobian = natural @ xy
+        determinant = float(np.linalg.det(jacobian))
+        if determinant <= 0.0:
+            raise ValueError('a plate is not convex: a corner folds inward '
+                             'or the corners are out of order around it')
+        dx, dy = np.linalg.solve(jacobian, natural)
+        return n, dx, dy, jacobian, determinant
 
-    def shear_rows(xi: float, eta: float) -> np.ndarray:
-        n, dx, dy = basis(xi, eta)
+    def raw_shear(xi: float, eta: float) -> np.ndarray:
+        """gamma_xz = w,x + theta_y and gamma_yz = w,y - theta_x at a
+        point, as rows over the 24 DOFs, with that point's Jacobian."""
+        n, dx, dy, jacobian, _det = basis(xi, eta)
         rows = np.zeros((2, 24))
         for i in range(4):
-            rows[0, 6 * i + 2] = dx[i]          # gamma_xz = w,x + theta_y
+            rows[0, 6 * i + 2] = dx[i]
             rows[0, 6 * i + 4] = n[i]
-            rows[1, 6 * i + 2] = dy[i]          # gamma_yz = w,y - theta_x
+            rows[1, 6 * i + 2] = dy[i]
             rows[1, 6 * i + 3] = -n[i]
-        return rows
+        return jacobian @ rows            # (e_xi, e_eta), covariant
+
+    tie_xi = {eta: raw_shear(0.0, eta)[0] for eta in (-1.0, 1.0)}
+    tie_eta = {xi: raw_shear(xi, 0.0)[1] for xi in (-1.0, 1.0)}
 
     stiffness = np.zeros((24, 24))
     consistent = np.zeros((24, 24))
     gauss = 1.0 / math.sqrt(3.0)
-    area_weight = a * b / 4.0                    # dA per unit natural area
+    spin = rho * t ** 3 / 12.0
+    weights = np.diag([rho * t] * 3 + [spin, spin, spin * 1e-3])
     for xi in (-gauss, gauss):
         for eta in (-gauss, gauss):
-            n, dx, dy = basis(xi, eta)
+            n, dx, dy, jacobian, det = basis(xi, eta)
             b_membrane = np.zeros((3, 24))
             b_bending = np.zeros((3, 24))
+            b_drilling = np.zeros((1, 24))
             fields = np.zeros((6, 24))
             for i in range(4):
                 col = 6 * i
@@ -3853,47 +3983,33 @@ def _plate_matrices(material: Material, thickness: float, a: float,
                 b_bending[1, col + 3] = -dy[i]
                 b_bending[2, col + 3] = -dx[i]
                 b_bending[2, col + 4] = dy[i]
-                for field in range(6):
-                    fields[field, col + field] = n[i]
-            # the assumed shear: the raw rows evaluated at the tying
-            # points, blended linearly across the element
-            b_shear = np.zeros((2, 24))
-            b_shear[0] = ((1 - eta) * shear_rows(0.0, -1.0)[0]
-                          + (1 + eta) * shear_rows(0.0, 1.0)[0]) / 2.0
-            b_shear[1] = ((1 - xi) * shear_rows(-1.0, 0.0)[1]
-                          + (1 + xi) * shear_rows(1.0, 0.0)[1]) / 2.0
-
-            # the drilling tie: theta_z minus the rotation the membrane
-            # field describes, penalized softly (see DRILLING_FRACTION)
-            b_drilling = np.zeros((1, 24))
-            for i in range(4):
-                col = 6 * i
+                # the drilling tie: theta_z minus the rotation the
+                # membrane field describes, penalized softly (see
+                # DRILLING_FRACTION)
                 b_drilling[0, col] = dy[i] / 2.0
                 b_drilling[0, col + 1] = -dx[i] / 2.0
                 b_drilling[0, col + 5] = n[i]
-
-            stiffness += area_weight * (
+                for field in range(6):
+                    fields[field, col + field] = n[i]
+            covariant = np.vstack([
+                ((1 - eta) * tie_xi[-1.0] + (1 + eta) * tie_xi[1.0]) / 2.0,
+                ((1 - xi) * tie_eta[-1.0] + (1 + xi) * tie_eta[1.0]) / 2.0])
+            b_shear = np.linalg.solve(jacobian, covariant)
+            stiffness += det * (
                 b_membrane.T @ d_membrane @ b_membrane
                 + b_bending.T @ d_bending @ b_bending
                 + b_shear.T @ d_shear @ b_shear
-                + DRILLING_FRACTION * G * t
-                * (b_drilling.T @ b_drilling))
+                + DRILLING_FRACTION * G * t * (b_drilling.T @ b_drilling))
             # translations carry rho t, the bending rotations the
-            # section's rotary inertia rho t^3/12. The drilling
-            # rotation carries a thousandth of that — not zero, because
-            # a massless DOF breaks the Cholesky factorization the
+            # section's rotary inertia rho t^3/12, and the drilling
+            # rotation a thousandth of that — not zero, because a
+            # massless DOF breaks the Cholesky factorization the
             # eigensolution stands on, and not the full value, because
             # inertia against penalty stiffness sets where the drilling
-            # *artifact* modes land: at the full inertia a half-inch
-            # plate grew a wall of a hundred and sixty fake modes at
-            # 4.2 kHz, mid-band; at a thousandth they sit near 130 kHz,
-            # far above anything the element is valid for. Rigid
-            # rotation about the normal loses nothing measurable — its
-            # inertia is the translations' r^2 terms, not this.
-            spin = rho * t ** 3 / 12.0
-            weights = np.diag([rho * t] * 3 + [spin, spin, spin * 1e-3])
-            consistent += area_weight * (fields.T @ weights @ fields)
-
+            # artifact modes land: at the full inertia a half-inch plate
+            # grew a wall of a hundred and sixty fake modes at 4.2 kHz,
+            # mid-band; at a thousandth they sit near 130 kHz
+            consistent += det * (fields.T @ weights @ fields)
     return stiffness, consistent
 
 

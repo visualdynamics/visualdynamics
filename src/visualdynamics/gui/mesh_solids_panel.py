@@ -4,7 +4,7 @@ It follows select, see, set, apply (principle 13). The parts are picked
 in the tree, the bricks they would be meshed into are drawn in the view
 as the element size is typed, the pane says what that size makes, and
 Mesh runs the project's `mesh_solids`. Keep apart joins the bricks only
-to nodes of their own element groups, as Add Block's option does, so a
+to nodes of their own element groups (`mesh.join`), so a
 part meshed beside another keeps its own nodes where they touch, to be
 merged later at the places picked. With two or more parts, Keep the
 parts apart from each other meshes them on one grid with each part
@@ -12,6 +12,11 @@ keeping its own nodes where the parts touch. A union that is no
 extrusion is meshed in pieces, and then the size is one per piece, in
 a table in place of the box: each piece's row takes its own, and
 Detect Element Size fills every row.
+
+The elements are Hexes, Tetras, or shells: Shells (quads) and Shells
+(triangles), meshed on a plate's or a disk's plane and on the outer
+surface of a solid with a volume. A plate or a disk among the parts
+takes shells only, so only they are offered then.
 
 The pane holds no rules of its own: the window asks `core.solids` what
 the size makes, draws it, and shows the result here.
@@ -36,6 +41,14 @@ from .editors import LENGTH_DECIMALS, DoubleSpinBox, commit_on_enter
 from .settings_panel import panel_grid
 
 # The pane: Brandon, 2026-10-11.
+
+
+#: the element kinds offered, as the tree names the families, and what
+#: the box calls them; a flat part takes shells only (principle 3)
+ELEMENT_LABELS = {'hexes': 'Hexes', 'tetras': 'Tetras', 'quads': 'Shells (quads)',
+                  'triangles': 'Shells (triangles)'}
+ELEMENT_KINDS = ('hexes', 'tetras', 'quads', 'triangles')
+SHELL_KINDS = ('quads', 'triangles')
 
 
 class MeshSolidsPanel(QWidget):
@@ -91,14 +104,17 @@ class MeshSolidsPanel(QWidget):
         # shape; a shape bricks cannot mesh says why in the reading
         self.elements_label: QLabel = QLabel('Elements')
         self.elements: QComboBox = QComboBox()
-        # named as the tree names the families (Brandon, 2026-10-19)
-        self.elements.addItem('Hexes', 'hexes')
-        self.elements.addItem('Tetras', 'tetras')
+        # named as the tree names the families (Brandon, 2026-10-19);
+        # shells, quads and triangles both (Brandon, 2026-10-26)
+        self._kinds_shown: tuple[str, ...] = ()
+        self._show_kinds(ELEMENT_KINDS)
         self.elements.setToolTip(
             'Hexes: eight-node bricks on a grid, for parts that are an '
             'extrusion along X, Y or Z, holes rounded, and fitted to any '
             'other shape. Tetras: ten-node tetrahedra for any shape, from '
-            'the recipe alone')
+            'the recipe alone. Shells: four-node plates or three-node '
+            'triangles, on a plate\'s or a disk\'s plane and on the outer '
+            'surface of a solid, their thickness set on the element group')
         grid.addWidget(self.elements_label, 3, 0)
         grid.addWidget(self.elements, 3, 1)
         self.parts_label: QLabel = QLabel()
@@ -143,12 +159,14 @@ class MeshSolidsPanel(QWidget):
         self.detect_button.clicked.connect(self.detect_asked.emit)
         self.close_button.clicked.connect(self.close_asked.emit)
 
-    def open_for(self, unit: str, size: float, parts: str, count: int = 1) -> None:
+    def open_for(self, unit: str, size: float, parts: str, count: int = 1,
+                 flat: bool = False) -> None:
         """Set the pane up: the size in the display unit `unit`, `parts`
         naming the parts it meshes, and `count`, how many there are.
         Both Keep apart boxes are cleared, and the second is shown only
         for two or more parts meshed into bricks; the elements are
-        bricks again."""
+        bricks again. With `flat`, a plate or a disk among the parts,
+        only shells are offered, quads first."""
         self.size_label.setText(f'Element size [{unit}]')
         self.size.blockSignals(True)
         self.size.setSingleStep(max(size / 4.0, 1e-6))
@@ -159,15 +177,25 @@ class MeshSolidsPanel(QWidget):
             box.setChecked(False)
             box.blockSignals(False)
         self.elements.blockSignals(True)
+        self._show_kinds(SHELL_KINDS if flat else ELEMENT_KINDS)
         self.elements.setCurrentIndex(0)
         self.elements.blockSignals(False)
         self._count = count
-        self.parts_apart.setVisible(count > 1)
+        self.parts_apart.setVisible(count > 1 and not flat)
         self.parts_label.setText(f'Solids: {parts}')
+
+    def _show_kinds(self, kinds) -> None:
+        """Offer these element kinds, in this order."""
+        if tuple(kinds) == self._kinds_shown:
+            return
+        self.elements.clear()
+        for kind in kinds:
+            self.elements.addItem(ELEMENT_LABELS[kind], kind)
+        self._kinds_shown = tuple(kinds)
 
     @property
     def element_kind(self) -> str:
-        """'hexes' or 'tetras', as picked."""
+        """'hexes', 'tetras', 'quads' or 'triangles', as picked."""
         return str(self.elements.currentData())
 
     def set_pieces(self, unit: str, rows) -> None:

@@ -1,8 +1,8 @@
 # The finite element workflow: the BARC
 
 This page builds a finite element model of plates in the app: the
-planes a structure is made of, tied together where it is bolted, then
-solved. Further down, the same structure is [built again from solid
+plates a structure is made of, meshed into shells, tied together where
+it is bolted, then solved. Further down, the same structure is [built again from solid
 bricks](#the-barc-from-bricks-bolted-with-mate-surfaces), with its parts
 meshed apart and each joint made with Mate Surfaces over the nodes its
 bolts clamp.
@@ -32,95 +32,107 @@ barc.project().save('barc.vdyn')    # the model this page builds, already built
 | Step | Where | How |
 |---|---|---|
 | Start a geometry | the project row's bar | **+** *New Geometry* |
-| Build it from planes | the geometry's **Quads** row | *Add Plane*, once per plane |
+| Build it from plates | the geometry's **Solids** row | *Add Plate*, once per plate |
+| Mesh the plates | the plates picked in the tree | *Mesh Solids*, *Shells (quads)* |
 | Tie the bolted parts | the geometry's Quads | pick the elements under each washer, *Tie* to the part below |
 | Give each part its material and thickness | the pencil on each element group's row | pick a material, type a thickness |
 | Solve | the 3-D view's bar | *Modes*, then *Solve Modes* in the pane |
 
-## 1. The geometry, from planes
+## 1. The geometry, from plates
 
-The simplest description of a plate model is its planes. Each plane is
-a rectangle at the plate's mid-thickness, given as a corner, two edges
-and an element size. Each edge is divided evenly into the whole number
-of elements nearest that size, so the elements come out close to
-square. Where a new plane's nodes fall on nodes already in the geometry,
-they become those nodes, so planes that meet along a line (the box's
-corners, a channel's web and flanges) are joined there. Planes given the
-same element group name are one element group: the box's five walls are
-the group *box*.
+The simplest description of a plate model is its plates. Each plate is
+a rectangle at the part's mid-thickness, given as a center, two widths
+and a rotation. When the plates are meshed, each edge is divided evenly
+into the whole number of elements nearest the element size, so the
+elements come out close to square, and plates that meet along a line
+(the box's corners, a channel's web and flanges) share their nodes
+there. Each plate becomes an element group named for it, and plates
+given the same name are one element group: the box's five walls are the
+group *box*.
 
 Choose the inch system in the unit menu, select the project's row and
 press **+** (*New Geometry*). This makes an empty geometry in inches,
-named *Geometry*. Expand it, select its **Quads** row and press *Add
-Plane*. A pane opens beside the 3-D view. Type each row of the table
-below (element group, center, widths) with an element size of 0.125 in,
-and press **Add**. A plate leaves one width at zero, the axis it faces:
-the bottom's zero width along Y puts it in the X-Z plane. The pane stays
-open for the next row and draws the plate in the 3-D view as you type.
-Before each Add it says how many of the plate's nodes land on nodes
-already there (for example, the right wall's 25 on the bottom's edge).
-You can also turn the preview about its center with the rings around it
-and slide the center along its axes with the arrows, which land on a
-tenth of an inch; the rows in the table do not need either.
+named *Geometry*. Expand it, select its **Solids** row and press *Add
+Plate*. A pane opens beside the 3-D view. Type each row of the table
+below (name, center, widths, rotation) and press **Add**. A plate lies
+in its own X-Y plane, so a rotation of 90° about X stands it in the X-Z
+plane and 90° about Y in the Y-Z plane. The pane stays open for the
+next row and draws the plate in the 3-D view as you type. You can also
+turn the preview about its center with the rings around it and slide
+the center along its axes with the arrows, which land on a tenth of an
+inch; the rows in the table do not need either.
 
 ![Where to click: select the project's row (1) and press New Geometry
 on the bar (2)](../images/fem-new-geometry-click.png)
 
-![Where to click: select the geometry's Quads row (1), choose Add Plane
+![Where to click: select the geometry's Solids row (1), choose Add Plate
 on the bar (2), type a row of the table below and press Add
-(3)](../images/fem-add-plane-click.png)
+(3)](../images/fem-add-plate-click.png)
 
-| Plane | Element group | Center | Widths |
-|---|---|---|---|
-| box, bottom | box | (0, −2.875, 1.5) | (5.75, 0, 3) |
-| box, right side | box | (2.875, 0, 1.5) | (0, 5.75, 3) |
-| box, left side | box | (−2.875, 0, 1.5) | (0, 5.75, 3) |
-| box, top left of the slot | box | (−1.5625, 2.875, 1.5) | (2.625, 0, 3) |
-| box, top right of it | box | (1.5625, 2.875, 1.5) | (2.625, 0, 3) |
-| right channel, foot | right channel | (1.96875, 3.0625, 1.5) | (0.9375, 0, 1) |
-| right channel, top | right channel | (1.96875, 4.9375, 1.5) | (0.9375, 0, 1) |
-| right channel, web | right channel | (2.4375, 4, 1.5) | (0, 1.875, 1) |
-| left channel, foot | left channel | (−2, 3.0625, 1.53125) | (1, 0, 0.9375) |
-| left channel, top | left channel | (−2, 4.9375, 1.53125) | (1, 0, 0.9375) |
-| left channel, web | left channel | (−2, 4, 1.0625) | (1, 1.875, 0) |
-| beam | beam | (0, 5.0625, 1.5) | (5, 0, 1) |
+| Plate | Name | Center | Widths | Rotation |
+|---|---|---|---|---|
+| box, bottom | box | (0, −2.875, 1.5) | (5.75, 3) | (90, 0, 0) |
+| box, right side | box | (2.875, 0, 1.5) | (3, 5.75) | (0, 90, 0) |
+| box, left side | box | (−2.875, 0, 1.5) | (3, 5.75) | (0, 90, 0) |
+| box, top left of the slot | box | (−1.5625, 2.875, 1.5) | (2.625, 3) | (90, 0, 0) |
+| box, top right of it | box | (1.5625, 2.875, 1.5) | (2.625, 3) | (90, 0, 0) |
+| right channel, foot | right channel | (1.96875, 3.0625, 1.5) | (0.9375, 1) | (90, 0, 0) |
+| right channel, top | right channel | (1.96875, 4.9375, 1.5) | (0.9375, 1) | (90, 0, 0) |
+| right channel, web | right channel | (2.4375, 4, 1.5) | (1, 1.875) | (0, 90, 0) |
+| left channel, foot | left channel | (−2, 3.0625, 1.53125) | (1, 0.9375) | (90, 0, 0) |
+| left channel, top | left channel | (−2, 4.9375, 1.53125) | (1, 0.9375) | (90, 0, 0) |
+| left channel, web | left channel | (−2, 4, 1.0625) | (1, 1.875) | (0, 0, 0) |
+| beam | beam | (0, 5.0625, 1.5) | (5, 1) | (90, 0, 0) |
 
 The two channels are turned a quarter turn from each other, as they are
 on the hardware. The lengths are the solid model's, in inches (the
 geometry stores them in SI). Up is +y, as in the solid model.
 
-![The twelve planes added: the box, the two channels and the beam,
+Then pick the twelve plates under **Solids** (click the first,
+Shift-click the last) and press *Mesh Solids*. With plates picked, the
+pane offers only shells. Leave *Shells (quads)*, type 0.125 for the
+element size and press **Mesh**. The plates become four element groups
+under **Quads**: *box*, *right channel*, *left channel* and *beam*.
+
+![Where to click: pick the first plate (1) and the last (2), press Mesh
+Solids (3), type the element size and press Mesh
+(4)](../images/fem-plates-mesh-click.png)
+
+![The twelve plates meshed: the box, the two channels and the beam,
 5,470 nodes](../images/fem-planes.png)
 
-From a script, the same planes are `mesh.plane` and `mesh.assemble`, or
-`project.add_plane`, which is what each Add records:
+From a script, the same plates are `project.add_solid_plate` and
+`project.mesh_solids`, which is what each Add and the Mesh record:
 
 ```python
-import numpy as np
-from visualdynamics import mesh
+import visualdynamics
 
-x, y, z = np.eye(3)
-size = 0.125                                 # inches
+project = visualdynamics.Project('BARC')
+name = project.new_geometry(unit='in')
+across, up = (90, 0, 0), (0, 90, 0)          # into X-Z, into Y-Z
 
-def plate(corner, a, b, name):
-    return mesh.plane(corner, a, b, size, name, unit='in')
-
-t = 2.875                                    # the box wall's mid-surface
-barc = mesh.assemble(
-    plate((-t, -t, 0), 2 * t * x, 3 * z, 'box'),            # bottom
-    plate((t, -t, 0), 2 * t * y, 3 * z, 'box'),             # right side
-    plate((-t, -t, 0), 2 * t * y, 3 * z, 'box'),            # left side
-    plate((-t, t, 0), (t - 0.25) * x, 3 * z, 'box'),        # top, left of the slot
-    plate((0.25, t, 0), (t - 0.25) * x, 3 * z, 'box'),      # top, right of it
-    plate((1.5, 3.0625, 1), 0.9375 * x, z, 'right channel'),       # its foot
-    plate((1.5, 4.9375, 1), 0.9375 * x, z, 'right channel'),       # its top
-    plate((2.4375, 3.0625, 1), 1.875 * y, z, 'right channel'),     # its web
-    plate((-2.5, 3.0625, 1.0625), x, 0.9375 * z, 'left channel'),
-    plate((-2.5, 4.9375, 1.0625), x, 0.9375 * z, 'left channel'),
-    plate((-2.5, 3.0625, 1.0625), x, 1.875 * y, 'left channel'),
-    plate((-2.5, 5.0625, 1), 5 * x, z, 'beam'),
-)
+plates = [
+    ('box', (0, -2.875, 1.5), (5.75, 3), across),              # bottom
+    ('box', (2.875, 0, 1.5), (3, 5.75), up),                   # right side
+    ('box', (-2.875, 0, 1.5), (3, 5.75), up),                  # left side
+    ('box', (-1.5625, 2.875, 1.5), (2.625, 3), across),        # top, left of the slot
+    ('box', (1.5625, 2.875, 1.5), (2.625, 3), across),         # top, right of it
+    ('right channel', (1.96875, 3.0625, 1.5), (0.9375, 1), across),     # its foot
+    ('right channel', (1.96875, 4.9375, 1.5), (0.9375, 1), across),     # its top
+    ('right channel', (2.4375, 4, 1.5), (1, 1.875), up),                # its web
+    ('left channel', (-2, 3.0625, 1.53125), (1, 0.9375), across),
+    ('left channel', (-2, 4.9375, 1.53125), (1, 0.9375), across),
+    ('left channel', (-2, 4, 1.0625), (1, 1.875), (0, 0, 0)),
+    ('beam', (0, 5.0625, 1.5), (5, 1), across),
+]
+ids = [project.add_solid_plate(name, center, widths, turn, plate, unit='in')
+       for plate, center, widths, turn in plates]
+project.mesh_solids(name, ids, 0.125, unit='in', elements='quads')
 ```
+
+The demonstration module builds the same mesh directly from
+`mesh.plane`, each plate a corner, two edges and the element size, and
+`mesh.assemble`.
 
 ## 2. The bolted joints
 
@@ -219,10 +231,10 @@ critical) set already; press *Solve Modes*. The model has 5,470 nodes, 5,136 pla
 and 160 rigid links, and a mass of 0.820 kg; the solid model's volumes
 give 0.816 kg, the difference being that the plates have no bolt holes.
 It solves in a few seconds, and its modes go into the geometry's group:
-six rigid-body modes at 0 Hz, then the elastic modes. Planes typed from
-the table above give the demo's mesh node for node, and the patches
-above are the demo's element for element, so a geometry built by hand
-solves to the same modes.
+six rigid-body modes at 0 Hz, then the elastic modes. Plates typed from
+the table above and meshed at 0.125 in give the demo's nodes and
+elements, and the patches above are the demo's element for element, so
+a geometry built by hand solves to the same modes.
 
 ![Where to click: select the geometry (1), turn on Modes (2) and press
 Solve Modes in the pane (3)](../images/fem-solve-click.png)
@@ -300,7 +312,7 @@ y = 3, and the beam's underside is the channels' top faces at y = 5.
 | its inside | (−2, 4, 1.6875) | 1.5 × 1.75 × 1.125 | |
 | beam | (0, 5.0625, 1.5) | 5 × 0.125 × 1 | beam |
 
-![Where to click: select the Solids row (1), choose Add Solid Block on
+![Where to click: select the Solids row (1), choose Add Block on
 the bar (2), type a block and press Add
 (3)](../images/fem-bricks-block-click.png)
 

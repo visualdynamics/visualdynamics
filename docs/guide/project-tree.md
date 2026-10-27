@@ -81,11 +81,10 @@ Clicking the project row clears the panes on the right, and the
 bar holds the project's three acts: *Generate Report*; **+** *New
 Geometry*, which adds an empty geometry in the display length unit to
 build a model in; and *New Channel Table*, which adds an empty channel
-table to type channels into ([the channel table](channel-table.md)). In a geometry, the **Quads** row offers *Add Plane*
-and the **Hexes** row *Add Block*, since each adds elements of that
-family ([the finite element workflow](workflows/fem-workflow.md)). The
-**Solids** row offers *Add Solid Block*, *Add Cylinder*, *Add Cone*,
-*Add Sphere* and *Add Section*: shapes to combine, pattern and then mesh
+table to type channels into ([the channel table](channel-table.md)). In a geometry, the
+**Solids** row offers *Add Block*, *Add Cylinder*, *Add Cone*,
+*Add Sphere*, *Add Section*, *Add Plate* and *Add Disk*: shapes to
+combine, pattern and then mesh
 ([the solid workflow](workflows/fem-solids.md)).
 
 ![The project row selected: the panes clear, and Generate Report, New Geometry and New Channel Table are on the bar](images/tree-project.png)

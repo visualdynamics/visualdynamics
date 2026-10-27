@@ -1,10 +1,13 @@
-"""New Geometry and Add Plane: a plate model built in the app.
+"""New Geometry, the join that adds a part to it, and the add pane's
+gizmo: a model built in the app.
 
 Until 2026-09-26 the planes a plate model is made of could be meshed only
 from a script (`mesh.plane`, `mesh.assemble`), and a geometry could only
 be imported; the BARC's workflow page had to start in Python. The
-project's **+** makes an empty geometry, and Add Plane types planes into
-it, each tied to what is there where they meet (`mesh.join`).
+project's **+** makes an empty geometry. Add Plane typed meshed planes
+into it until 2026-10-26; a plate is now a solid on the Solids row,
+meshed by Mesh Solids, and each part is tied to what is there where they
+meet (`mesh.join`).
 """
 
 from __future__ import annotations
@@ -110,30 +113,30 @@ def test_assembling_numbers_the_nodes_without_gaps():
 
 
 def test_the_project_builds_a_model_from_nothing():
-    """The verbs the two acts call, journaled as a script would write
-    them; lengths in the unit named, held in SI."""
+    """Plates added as solids and meshed, journaled as a script would
+    write them; lengths in the unit named, held in SI. Two plates of one
+    name are one element group, tied where they meet."""
     project = visualdynamics.Project('p')
     name = project.new_geometry('Box', unit='in')
     assert project[name].num_nodes == 0 and project[name].length_unit == 'in'
     assert [verb for verb, _ in project.verbs(name)] == [
-        'generate_rigid_body_modes', 'add_plane', 'add_block',
+        'generate_rigid_body_modes',
         'add_solid_block', 'add_solid_cylinder', 'add_solid_cone', 'add_solid_sphere',
-        'add_solid_section', 'set_view'], \
+        'add_solid_section', 'add_solid_plate', 'add_solid_disk', 'set_view'], \
         'an empty geometry has no elements to merge or element groups to solve'
-    first = project.add_plane(name, (0, 0, 0), (4, 0, 0), (0, 2, 0), 1,
-                              'box', unit='in')
-    second = project.add_plane(name, (0, 0, 0), (4, 0, 0), (0, 0, 2), 1,
-                               'box', unit='in')
-    assert (first['added'], second['added'], second['shared']) == (15, 10, 5)
+    floor = project.add_solid_plate(name, (2, 1, 0), (4, 2), name='box', unit='in')
+    wall = project.add_solid_plate(name, (2, 0, 1), (4, 2), (90, 0, 0), 'box', unit='in')
+    found = project.mesh_solids(name, [floor, wall], 1, unit='in', elements='quads')
     box = project[name]
+    assert (found['added'], box.num_nodes, len(box.elem_conn)) == (25, 25, 16), \
+        'fifteen and fifteen, five of them shared along the edge'
     assert np.allclose(box.node_xyz.max(axis=0), [4 * INCH, 2 * INCH,
                                                   2 * INCH])
     assert list(box.group_name) == ['box']
-    assert project.journal[-2:] == [
-        ("project.add_plane('Box', (0, 0, 0), (4, 0, 0), (0, 2, 0), 1, "
-         "'box', unit='in')"),
-        ("project.add_plane('Box', (0, 0, 0), (4, 0, 0), (0, 0, 2), 1, "
-         "'box', unit='in')")]
+    assert project.journal[-3:] == [
+        "project.add_solid_plate('Box', (2, 1, 0), (4, 2), name='box', unit='in')",
+        "project.add_solid_plate('Box', (2, 0, 1), (4, 2), (90, 0, 0), 'box', unit='in')",
+        "project.mesh_solids('Box', [1, 2], 1, unit='in', elements='quads')"]
 
 
 def test_a_geometry_without_units_takes_the_numbers_as_given():
@@ -141,18 +144,21 @@ def test_a_geometry_without_units_takes_the_numbers_as_given():
     raw = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.5, 'floor',
                      unit=None)
     project.add('Raw', raw)
-    project.add_plane('Raw', (0, 0, 0), (1, 0, 0), (0, 0, 1), 0.5, 'wall',
-                      unit='in')
+    wall = project.add_solid_plate('Raw', (0.5, 0, 0.5), (1, 1), (90, 0, 0), 'wall',
+                                   unit='in')
+    project.mesh_solids('Raw', [wall], 0.5, unit='in', elements='quads')
     assert not raw.units_defined
     assert np.isclose(raw.node_xyz[:, 2].max(), 1.0)
+    assert raw.num_nodes == 15, 'tied to the floor along their edge'
 
 
 def test_the_project_offers_a_new_geometry(window, pump):
     """The **+** on the project's bar: an empty geometry in the display
-    length unit, shown and selected; its Quads row offers Add Plane and
-    its Hexes row Add Block — what they add is quads and hexes, into an
-    element group of them, so they live on those rows and not on the
-    geometry's (Brandon, 2026-10-10)."""
+    length unit, shown and selected. Its Solids row offers the shapes a
+    part is built from, a plate among them, and its family rows offer
+    nothing to add: Add Plane and Add Block, which typed meshed planes
+    and blocks onto the Quads and Hexes rows, retired for the plate and
+    the block meshed by Mesh Solids (Brandon, 2026-10-26)."""
     window.unit_combo.setCurrentText('in-slinch-lbf-s')
     window.tree.clearSelection()
     window.test_item.setSelected(True)
@@ -177,132 +183,40 @@ def test_the_project_offers_a_new_geometry(window, pump):
         pump()
         return row
 
-    pick('Quads')
-    assert [act[0] for act in window.acts_for()] == ['add_plane']
-    assert bar_acts(window.scene)[:1] == ['Add Plane'], 'on the 3-D bar'
-    pick('Hexes')
-    assert [act[0] for act in window.acts_for()] == ['add_block']
-    pick('Beams')
-    assert window.acts_for() == []
-    # opened from the Quads row, the pane stays open through an Add,
+    pick('Solids')
+    assert [act[0] for act in window.acts_for()] == list(window.SOLID_ACTS)
+    assert 'Add Plate' in bar_acts(window.scene), 'on the 3-D bar'
+    for family in ('Quads', 'Hexes', 'Beams'):
+        pick(family)
+        assert window.acts_for() == [], family
+    # opened from the Solids row, the pane stays open through an Add,
     # which rebuilds the geometry's rows under it
-    pick('Quads')
-    window.add_plane_act()
+    pick('Solids')
+    window.add_solid_plate_act()
     pump()
     panel = window.scene.mesh_panel
-    panel.set_values(group='floor', center=(2, 1, 0), widths=(4, 2, 0), size=1)
+    panel.set_values(group='floor', center=(2, 1, 0), widths=(4, 2, 0))
     pump()
     panel.add_button.click()
     pump()
-    assert window.objects['Geometry'].num_nodes == 15
-    assert panel.isVisibleTo(window), 'still open for the next plane'
-
-
-def test_add_plane_types_planes_in_display_units(window, pump):
-    """The pane beside the view (no window, 2026-10-02) reads a center
-    and widths in the display unit, the zero width naming the plane;
-    previews the plate, says what it shares before it is added, refuses
-    widths that make no plate, and each Add is the project's verb."""
-    window.unit_combo.setCurrentText('in-slinch-lbf-s')
-    window.project.new_geometry('Box', unit='in')
-    window.show_object('Box')
-    select_objects(window, pump, 'Box')
-    window.add_plane_act()
-    pump()
-    panel = window.scene.mesh_panel
-    assert panel.isVisibleTo(window) and panel.title.text() == 'Add Plane'
-    from PySide6.QtWidgets import QDialog, QLabel
-
-    assert not [w for w in window.findChildren(QDialog) if w.isVisible()], \
-        'no window of its own'
-    labels = [label.text() for label in panel.findChildren(QLabel)]
-    assert {'Center [in]', 'Width [in]', 'Element size [in]'} <= set(labels)
-    panel.set_values(group='floor', center=(2, 1, 0), widths=(4, 2, 0), size=1)
-    pump()
-    assert panel.reading_label.text() == (
-        "8 plates of 1 by 1 in, into a new element group 'floor': 15 nodes to add, "
-        '0 on nodes already there.')
-    assert 'plane-preview' in window.scene.plotter.actors
-    assert any('rotate-arrow' in name for name in window.scene.plotter.actors), \
-        'the gizmo is around the plate'
-    panel.add_button.click()
-    pump()
-    box = window.objects['Box']
-    assert np.allclose(box.node_xyz.max(axis=0), [4 * INCH, 2 * INCH, 0])
-    assert window.project.journal[-1].startswith("project.add_plane('Box', "
-                                                 '(0.0, 0.0, 0.0), (4.0, ')
-    # a wall: the zero width now along Y, the plate in X-Z
-    panel.set_values(group='wall', center=(2, 0, 1), widths=(4, 0, 2))
-    pump()
-    assert panel.reading_label.text().endswith(
-        '10 nodes to add, 5 on nodes already there.')
-    panel.add_button.click()
-    pump()
-    assert box.num_nodes == 25 and list(box.group_name) == ['floor', 'wall']
-    assert 'added 8 plates — 10 nodes, 5 shared' in \
-        window.statusBar().currentMessage()
-    panel.set_values(widths=(4, 2, 1))
-    pump()
-    assert 'exactly one width at zero' in panel.reading_label.text()
-    assert not panel.add_button.isEnabled()
-    assert 'plane-preview' not in window.scene.plotter.actors, \
-        'a refused plate is not drawn'
-    panel.close_button.click()
-    pump()
-    assert not panel.isVisibleTo(window)
-    assert 'plane-preview' not in window.scene.plotter.actors, \
-        'closing takes the preview away'
-    assert not any('rotate-' in name for name in window.scene.plotter.actors)
-
-
-def test_keep_apart_is_offered_once_there_is_something_to_keep_apart_from(
-        window, pump):
-    """The pane's Keep apart (2026-10-11) is shown once the geometry
-    holds nodes, says in the reading that nothing lands, and is
-    recorded as the verb's keyword — left out of the journal line
-    when unused, which then reads as before."""
-    window.project.new_geometry('Box', unit='in')
-    window.show_object('Box')
-    select_objects(window, pump, 'Box')
-    window.add_plane_act()
-    pump()
-    panel = window.scene.mesh_panel
-    assert panel.apart.isHidden(), 'nothing yet to keep it apart from'
-    panel.set_values(group='floor', center=(2, 1, 0), widths=(4, 2, 0), size=1)
-    panel.add_button.click()
-    pump()
-    assert 'apart' not in window.project.journal[-1]
-    assert not panel.apart.isHidden()
-    panel.set_values(group='foot', center=(2, 1, 0), widths=(2, 2, 0))
-    pump()
-    assert panel.reading_label.text().endswith(
-        '0 nodes to add, 9 on nodes already there.')
-    panel.set_values(apart=True)
-    pump()
-    assert panel.reading_label.text().endswith(
-        '9 nodes to add, 0 on nodes already there.')
-    panel.add_button.click()
-    pump()
-    assert window.project.journal[-1].endswith(", 'foot', unit='in', apart=True)")
-    box = window.objects['Box']
-    assert box.num_nodes == 24
-    assert len(box.coincident_spots(0.1 * INCH)) == 9
+    assert len(window.objects['Geometry'].solids) == 1
+    assert panel.isVisibleTo(window), 'still open for the next plate'
 
 
 def test_the_gizmo_turns_the_box_about_its_center_and_slides_it_onto_the_grid(
         window, pump):
-    """The coordinate system's rings and arrows, on the box: a quarter
-    turn about Z swaps the plate's edges and keeps its center; a slide
-    along X lands the center on a tenth of an inch and the field shows
-    it (2026-10-02)."""
+    """The coordinate system's rings and arrows, on the solid: a quarter
+    turn about Z turns the plate and keeps its center; a slide along X
+    lands the center on a tenth of an inch and the field shows it
+    (2026-10-02)."""
     window.unit_combo.setCurrentText('in-slinch-lbf-s')
     window.project.new_geometry('Box', unit='in')
     window.show_object('Box')
     select_objects(window, pump, 'Box')
-    window.add_plane_act()
+    window.add_solid_plate_act()
     pump()
     panel = window.scene.mesh_panel
-    panel.set_values(center=(0, 0, 0), widths=(4, 2, 0), size=1)
+    panel.set_values(center=(0, 0, 0), widths=(4, 2, 0))
     pump()
     window._rotating = {'row': 'mesh', 'axis': 2,
                         'start': np.array(window._mesh['frame']), 'from': 0.0}
@@ -310,8 +224,8 @@ def test_the_gizmo_turns_the_box_about_its_center_and_slides_it_onto_the_grid(
     window._commit_rotation()
     pump()
     _verb, call = window._mesh_call()
-    assert np.allclose(call['edges'][0], (0, 4, 0)) and \
-        np.allclose(call['edges'][1], (-2, 0, 0)), 'the plate turned'
+    assert call['angles'] == pytest.approx((0, 0, 90)), 'the plate turned'
+    assert np.allclose(window._mesh['frame'][0], (0, 1, 0))
     assert np.allclose(window._mesh['frame'][3], (0, 0, 0)), 'about its center'
     window._sliding = {'row': 'mesh', 'axis': 1,
                        'start': np.array(window._mesh['frame']), 'from': 0.0}
@@ -334,7 +248,7 @@ def test_selecting_another_object_puts_the_pane_away(window, pump):
     window.show_object('Box')
     window.show_object('Other')
     select_objects(window, pump, 'Box')
-    window.add_block_act()
+    window.add_solid_block_act()
     pump()
     assert window.scene.mesh_panel.isVisibleTo(window)
     select_objects(window, pump, 'Other')
@@ -345,24 +259,25 @@ def test_selecting_another_object_puts_the_pane_away(window, pump):
 
 def test_dragging_the_box_draws_its_outline_snaps_the_angle_and_says_it(
         window, pump, monkeypatch):
-    """While the box is dragged only its outline is drawn — the bricks
-    are not meshed on every move — the turn snaps to whole degrees and
-    the angle is written over the view; release brings the full preview
-    and its reading back, and takes the number away (2026-10-02)."""
-    from visualdynamics.core import mesh
+    """While the box is dragged only its outline is drawn — the solid is
+    not built on every move — the turn snaps to whole degrees and the
+    angle is written over the view; release brings the full preview and
+    its reading back, and takes the number away (2026-10-02)."""
+    from visualdynamics.core import solids
 
     window.unit_combo.setCurrentText('in-slinch-lbf-s')
     window.project.new_geometry('Box', unit='in')
     window.show_object('Box')
     select_objects(window, pump, 'Box')
-    window.add_block_act()
+    window.add_solid_block_act()
     pump()
     panel = window.scene.mesh_panel
-    panel.set_values(center=(0, 0, 0), widths=(4, 2, 1), size=0.5)
+    panel.set_values(center=(0, 0, 0), widths=(4, 2, 1))
     pump()
     built = []
-    real = mesh.block
-    monkeypatch.setattr(mesh, 'block', lambda *a, **k: built.append(1) or real(*a, **k))
+    real = solids.shape_triangles
+    monkeypatch.setattr(solids, 'shape_triangles',
+                        lambda *a, **k: built.append(1) or real(*a, **k))
     start = np.array(window._mesh['frame'])
     window._rotating = {'row': 'mesh', 'axis': 2, 'start': start, 'from': 0.0}
     applied = window._apply_rotation(np.radians(37.4), snap=True)
@@ -372,13 +287,13 @@ def test_dragging_the_box_draws_its_outline_snaps_the_angle_and_says_it(
     actors = window.scene.plotter.actors
     assert 'mesh-outline' in actors and 'plane-preview' not in actors
     assert 'gizmo-reading' in actors and window._gizmo_reading == 'Turn about Z: +37°'
-    assert built == [], 'nothing meshed while dragging'
+    assert built == [], 'nothing built while dragging'
     window._commit_rotation()
     pump()
     actors = window.scene.plotter.actors
     assert 'plane-preview' in actors and 'mesh-outline' not in actors
     assert 'gizmo-reading' not in actors and window._gizmo_reading is None
-    assert built == [1], 'meshed once, on release'
+    assert built == [1], 'built once, on release'
     turned = np.array(window._mesh['frame'])
     window._sliding = {'row': 'mesh', 'axis': 0, 'start': turned, 'from': 0.0}
     window._apply_slide(1.234)
@@ -402,17 +317,16 @@ def test_the_pane_turns_the_box_by_typed_angles_and_the_rings_write_them_back(
     window.project.new_geometry('Box', unit='in')
     window.show_object('Box')
     select_objects(window, pump, 'Box')
-    window.add_plane_act()
+    window.add_solid_plate_act()
     pump()
     panel = window.scene.mesh_panel
     from PySide6.QtWidgets import QLabel
 
     assert 'Rotation [°]' in [label.text() for label in panel.findChildren(QLabel)]
-    panel.set_values(center=(0, 0, 0), widths=(4, 2, 0), size=1, angles=(0, 0, 37.5))
+    panel.set_values(center=(0, 0, 0), widths=(4, 2, 0), angles=(0, 0, 37.5))
     pump()
-    _verb, call = window._mesh_call()
     c, s = np.cos(np.radians(37.5)), np.sin(np.radians(37.5))
-    assert np.allclose(call['edges'][0], (4 * c, 4 * s, 0))
+    assert np.allclose(window._mesh['frame'][0], (c, s, 0))
     window._rotating = {'row': 'mesh', 'axis': 2,
                         'start': np.array(window._mesh['frame']), 'from': 0.0}
     window._apply_rotation(np.radians(10.0), snap=True)

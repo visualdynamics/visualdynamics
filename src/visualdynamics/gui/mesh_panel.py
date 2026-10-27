@@ -1,39 +1,23 @@
-"""The pane beside the 3-D view where Add Block, Add Plane and the
-solids are typed.
+"""The pane beside the 3-D view where the solids are typed.
 
-A box is described by its center and its width along each axis, and its
-preview in the view is turned and slid by the same gizmo that turns a
-coordinate system. So the pane holds a center, three widths and an
-element size in the display unit, and the window holds the frame the box
-is drawn in: the rings turn it about its center, and the arrows slide
-the center along the frame's own axes onto the grid. The rotation is
-also three fields, degrees about the geometry's X, Y and Z applied in
-that order, for an angle the rings' whole degrees do not reach. The
-rings write the angles back, so the fields and the view always agree.
-Square Up turns the box back to the geometry's axes and keeps its
-center.
-
-A block takes three widths. A plate lies in a plane, and the plane is
-named by the one width left at zero (a width of zero along Z is a plate
-in the frame's X-Y plane), so a plate and a block are typed the same
-way.
+A solid is described by its center and its size, and its preview in the
+view is turned and slid by the same gizmo that turns a coordinate
+system. So the pane holds a center and the solid's dimensions in the
+display unit, and the window holds the frame the solid is drawn in: the
+rings turn it about its center, and the arrows slide the center along
+the frame's own axes onto the grid. The rotation is also three fields,
+degrees about the geometry's X, Y and Z applied in that order, for an
+angle the rings' whole degrees do not reach. The rings write the angles
+back, so the fields and the view always agree. Square Up turns the
+solid back to the geometry's axes and keeps its center.
 
 The pane holds no rule of its own. The window turns the fields and its
-frame into the corner and edges the project's `add_block` and
-`add_plane` take, asks the core what they would make, and draws it. Add
-runs the project verb, so the journal line is the call a script makes.
+frame into the numbers the project's `add_solid_*` verbs take, asks the
+core what they would make, and draws it. Add runs the project verb, so
+the journal line is the call a script makes. A solid is a shape that is
+meshed later (`core.solids`), so it has a name and no element size.
 
-Keep apart from other groups joins the box only to its own element
-group's nodes. A part meshed against another (a channel's foot on the
-box it is bolted to) then keeps nodes of its own where the two touch,
-for Merge Coincident Nodes to join at the bolts. It is shown once the
-geometry has nodes.
-
-Solids are typed in the same pane and turned and slid by the same
-gizmo. A solid has a name in place of the element group and no element
-size, because it is a shape that is meshed later (`core.solids`).
-
-- A solid block is a center, three widths, three angles and a corner
+- A block is a center, three widths, three angles and a corner
   radius, which rounds its four edges along its own Z.
 - A cylinder is a center, a radius, a length along the frame's Z, and
   three angles.
@@ -43,6 +27,9 @@ size, because it is a shape that is meshed later (`core.solids`).
 - A hole is a diameter, a depth or Through, and a counterbore's diameter
   and depth when one is asked for. Its center is where it enters, and it
   runs down the frame's Z.
+- A plate is a center, two widths in the frame's X-Y plane and three
+  angles, and a disk a center, a radius and three angles. Neither has a
+  thickness: they are meshed into shells, whose element group takes it.
 
 A solid already made can be opened in the pane to change it, with Apply
 in place of Add. A boolean has no size of its own, so its pane (Move
@@ -50,8 +37,6 @@ Part) only moves and turns it.
 """
 
 from __future__ import annotations
-
-from collections.abc import Sequence
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -71,17 +56,16 @@ from .settings_panel import panel_grid
 # 2026-09-30) took a corner and two or three edges. Brandon wanted no
 # window at all, the box described by its center and widths, and the
 # preview turned and slid by the coordinate-system gizmo, with the
-# rotation as fields too (Brandon, 2026-10-02). Keep apart: Brandon,
-# 2026-10-11. Solids: 2026-10-11. Sections and holes: 2026-10-12.
+# rotation as fields too (Brandon, 2026-10-02). Solids: 2026-10-11.
+# Sections and holes: 2026-10-12. The pane added meshed blocks and planes
+# too (Add Block, Add Plane), with an element size, an element group and
+# Keep apart, until a plate and a disk joined the solids (Brandon,
+# 2026-10-26): every part is now a solid, meshed by Mesh Solids.
 
-#: what the fields open on, in the display unit: a box one unit on a side
-#: in X and Y and a tenth deep, sitting on the origin's corner, a tenth
-#: per element — the old dialog's defaults, said as a center. A solid
-#: opens centered on the origin (Brandon, 2026-10-12): it is a shape to
-#: be placed, and its own middle is the point it is placed by
+#: what the fields open on, in the display unit. A solid opens centered
+#: on the origin (Brandon, 2026-10-12): it is a shape to be placed, and
+#: its own middle is the point it is placed by
 DEFAULTS = {
-    'block': {'center': (0.5, 0.5, 0.05), 'widths': (1.0, 1.0, 0.1)},
-    'plane': {'center': (0.5, 0.5, 0.0), 'widths': (1.0, 1.0, 0.0)},
     'solid_block': {'center': (0.0, 0.0, 0.0), 'widths': (1.0, 1.0, 1.0)},
     'solid_cylinder': {'center': (0.0, 0.0, 0.0), 'widths': (0.5, 0.5, 1.0)},
     'solid_part': {'center': (0.0, 0.0, 0.0), 'widths': (1.0, 1.0, 1.0)},
@@ -89,6 +73,8 @@ DEFAULTS = {
     'solid_hole': {'center': (0.0, 0.0, 0.0), 'widths': (0.25, 0.25, 0.5)},
     'solid_cone': {'center': (0.0, 0.0, 0.0), 'widths': (1.0, 1.0, 1.0)},
     'solid_sphere': {'center': (0.0, 0.0, 0.0), 'widths': (1.0, 1.0, 1.0)},
+    'solid_plate': {'center': (0.0, 0.0, 0.0), 'widths': (1.0, 1.0, 0.0)},
+    'solid_disk': {'center': (0.0, 0.0, 0.0), 'widths': (1.0, 1.0, 0.0)},
 }
 #: a section's dimensions as it opens, in the display unit, in the order
 #: `SECTIONS` names them: a foot deep in inches, a beam's proportions
@@ -100,23 +86,24 @@ SECTION_LENGTH = 4.0
 #: eighth deep when one is asked for
 HOLE_DEFAULTS = (0.25, 0.5, 0.5, 0.125)
 #: each kind's title
-TITLES = {'block': 'Add Block', 'plane': 'Add Plane',
-          'solid_block': 'Add Solid Block', 'solid_cylinder': 'Add Cylinder',
+TITLES = {'solid_block': 'Add Block', 'solid_cylinder': 'Add Cylinder',
           'solid_section': 'Add Section', 'solid_hole': 'Add Hole',
-          'solid_cone': 'Add Cone', 'solid_sphere': 'Add Sphere'}
+          'solid_cone': 'Add Cone', 'solid_sphere': 'Add Sphere',
+          'solid_plate': 'Add Plate', 'solid_disk': 'Add Disk'}
 #: and the title when a solid already made is opened to change it (its
 #: row's pencil, 2026-10-11): a boolean has no size of its own, so its
 #: pane moves and turns it whole
-EDIT_TITLES = {'solid_block': 'Edit Solid Block', 'solid_cylinder': 'Edit Cylinder',
+EDIT_TITLES = {'solid_block': 'Edit Block', 'solid_cylinder': 'Edit Cylinder',
                'solid_part': 'Move Part', 'solid_section': 'Edit Section',
                'solid_hole': 'Edit Hole', 'solid_cone': 'Edit Cone',
-               'solid_sphere': 'Edit Sphere'}
-#: the kinds that are solids, typed without a mesh
+               'solid_sphere': 'Edit Sphere', 'solid_plate': 'Edit Plate',
+               'solid_disk': 'Edit Disk'}
+#: the kinds the pane is opened for
 SOLID_KINDS = ('solid_block', 'solid_cylinder', 'solid_part', 'solid_section',
-               'solid_hole', 'solid_cone', 'solid_sphere')
+               'solid_hole', 'solid_cone', 'solid_sphere', 'solid_plate',
+               'solid_disk')
 #: a cone as it opens: a radius of half at its base, a quarter at its top
 CONE_TOP = 0.25
-DEFAULT_SIZE = 0.1
 
 
 def _box(value: float, minimum: float = -1e9) -> DoubleSpinBox:
@@ -128,8 +115,7 @@ def _box(value: float, minimum: float = -1e9) -> DoubleSpinBox:
 
 
 class MeshPanel(QWidget):
-    """The fields for one block, plate or solid, and its Add (or Apply)
-    button.
+    """The fields for one solid, and its Add (or Apply) button.
 
     `changed` is emitted when a field is edited; the window then reads
     `values` and redraws the preview. `add_asked`, `close_asked` and
@@ -145,16 +131,18 @@ class MeshPanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.kind: str = 'block'
+        self.kind: str = 'solid_block'
         self.editing: bool = False
         self.unit: str = ''
-        self.title: QLabel = QLabel('Add Block')
+        self.title: QLabel = QLabel(TITLES['solid_block'])
         grid = panel_grid(self, self.title)
+        # the solid's name: an editable box once offered the geometry's
+        # element groups, while the pane also added meshed blocks
         self.group: QComboBox = QComboBox()
         self.group.setEditable(True)
-        self.group.setToolTip('The element group the elements go in: one '
-                              "of the geometry's, or a new name")
-        self.group_label: QLabel = QLabel('Element group')
+        self.group.setToolTip('What to call it; a part meshed from it '
+                              'becomes an element group of this name')
+        self.group_label: QLabel = QLabel('Name')
         grid.addWidget(self.group_label, 1, 0)
         grid.addWidget(self.group, 1, 1)
         self.center_label: QLabel = QLabel('Center')
@@ -175,8 +163,7 @@ class MeshPanel(QWidget):
         self.width_axes: list[QLabel] = []
         for row, axis in enumerate('XYZ', start=7):
             box = _box(0.0, minimum=0.0)
-            box.setToolTip(f'The width along the frame\'s {axis}; a plate '
-                           'leaves one width at zero, which names its plane')
+            box.setToolTip(f'The width along the frame\'s {axis}')
             label = QLabel(axis)
             grid.addWidget(label, row, 0)
             grid.addWidget(box, row, 1)
@@ -261,14 +248,7 @@ class MeshPanel(QWidget):
             grid.addWidget(axis_label, row, 0)
             grid.addWidget(box, row, 1)
             self.angles.append(box)
-        self.size_label: QLabel = QLabel('Element size')
-        self.size: DoubleSpinBox = _box(DEFAULT_SIZE, minimum=0.0)
-        self.size.setToolTip('Each edge is divided into the whole number of '
-                             'elements nearest this size')
-        grid.addWidget(self.size_label, 17, 0)
-        grid.addWidget(self.size, 17, 1)
-        # a solid block's corner radius, in the size's row: a solid has
-        # no element size, and only a block has corners
+        # a block's corner radius, the one kind with corners to round
         self.corner_label: QLabel = QLabel('Corner radius')
         self.corner: DoubleSpinBox = _box(0.0, minimum=0.0)
         self.corner.setToolTip("Round the block's four edges along its own "
@@ -277,14 +257,8 @@ class MeshPanel(QWidget):
         grid.addWidget(self.corner, 17, 1)
         self.square_button: QPushButton = QPushButton('Square Up')
         self.square_button.setToolTip(
-            "Turn the box back to the geometry's axes, keeping its center")
+            "Turn the solid back to the geometry's axes, keeping its center")
         grid.addWidget(self.square_button, 18, 0, 1, 2)
-        self.apart: QCheckBox = QCheckBox('Keep apart from other groups')
-        self.apart.setToolTip(
-            'Join only nodes of its own element group: where it touches '
-            'another part it keeps nodes of its own, to be merged at the '
-            'places picked with Merge Coincident Nodes')
-        grid.addWidget(self.apart, 19, 0, 1, 2)
         self.reading_label: QLabel = QLabel()
         self.reading_label.setWordWrap(True)
         grid.addWidget(self.reading_label, 20, 0, 1, 2)
@@ -299,10 +273,10 @@ class MeshPanel(QWidget):
         buttons.addWidget(self.close_button)
         grid.addLayout(buttons, 21, 0, 1, 2)
         grid.setRowStretch(22, 1)
-        commit_on_enter(*self.center, *self.widths, *self.angles, self.size,
+        commit_on_enter(*self.center, *self.widths, *self.angles,
                         self.radius, self.length, self.corner, self.top, *self.section,
                         *self.hole)
-        for box in (*self.center, *self.widths, *self.angles, self.size,
+        for box in (*self.center, *self.widths, *self.angles,
                     self.radius, self.length, self.corner, self.top, *self.section,
                     *self.hole):
             box.valueChanged.connect(lambda _value: self.changed.emit())
@@ -310,35 +284,30 @@ class MeshPanel(QWidget):
         self.through.toggled.connect(self._hole_toggled)
         self.counterbore.toggled.connect(self._hole_toggled)
         self.group.currentTextChanged.connect(lambda _text: self.changed.emit())
-        self.apart.toggled.connect(lambda _on: self.changed.emit())
         self.add_button.clicked.connect(self.add_asked.emit)
         self.close_button.clicked.connect(self.close_asked.emit)
         self.square_button.clicked.connect(self.square_asked.emit)
 
-    def open_for(self, kind: str, unit: str, groups: Sequence[str],
-                 default: str | None = None, editing: bool = False) -> None:
+    def open_for(self, kind: str, unit: str, editing: bool = False) -> None:
         """Set the pane up for `kind`, with every field on its default.
 
-        `kind` is 'block' or 'plane' for elements, or a solid:
-        'solid_block', 'solid_cylinder', 'solid_cone', 'solid_sphere',
-        'solid_section' or 'solid_hole',
-        or 'solid_part' for a boolean, which is only edited. `unit` is the
-        display unit the fields are in. `groups` are the geometry's
-        element groups to choose from, and the field opens on `default`,
-        or on 'block' or 'plate' when it is None; a solid has a name field
-        instead, which opens empty. Only the fields the kind takes are
-        shown. `editing` opens the pane on a solid already made, to change
-        it, with Apply in place of Add; a section's shape cannot be
-        changed then.
+        `kind` is 'solid_block', 'solid_cylinder', 'solid_cone',
+        'solid_sphere', 'solid_section', 'solid_hole', 'solid_plate' or
+        'solid_disk', or 'solid_part' for a boolean, which is only
+        edited. `unit` is the display unit the fields are in. The name
+        field opens empty, and only the fields the kind takes are shown.
+        `editing` opens the pane on a solid already made, to change it,
+        with Apply in place of Add; a section's shape cannot be changed
+        then.
         """
         self.kind = kind
         self.editing = editing
         self.unit = unit
-        solid = kind in SOLID_KINDS
         cylinder = kind == 'solid_cylinder'
         part = kind == 'solid_part'
         section, hole = kind == 'solid_section', kind == 'solid_hole'
         cone, sphere = kind == 'solid_cone', kind == 'solid_sphere'
+        plate, disk = kind == 'solid_plate', kind == 'solid_disk'
         self.title.setText((EDIT_TITLES if editing else TITLES)[kind])
         self.add_button.setText('Apply' if editing else 'Add')
         self.center_label.setText(f'Center [{unit}]')
@@ -346,12 +315,15 @@ class MeshPanel(QWidget):
         self.radius_label.setText(f'{"Base radius" if cone else "Radius"} [{unit}]')
         self.length_label.setText(f'{"Height" if cone else "Length"} [{unit}]')
         self.top_label.setText(f'Top radius [{unit}]')
-        self.size_label.setText(f'Element size [{unit}]')
-        self.group_label.setText('Name' if solid else 'Element group')
         for widget in (self.width_label, *self.widths, *self.width_axes):
-            widget.setVisible(not (cylinder or part or section or hole or cone or sphere))
+            widget.setVisible(not (cylinder or part or section or hole or cone or sphere
+                                   or disk))
+        # a plate is flat in the frame's X-Y plane: no width along Z
+        for widget in (self.widths[2], self.width_axes[2]):
+            widget.setVisible(not (cylinder or part or section or hole or cone or sphere
+                                   or disk or plate))
         for widget in (self.radius_label, self.radius):
-            widget.setVisible(cylinder or cone or sphere)
+            widget.setVisible(cylinder or cone or sphere or disk)
         for widget in (self.length_label, self.length):
             widget.setVisible(cylinder or section or cone)
         for widget in (self.top_label, self.top):
@@ -367,27 +339,18 @@ class MeshPanel(QWidget):
         for widget in (*self.hole_labels, *self.hole, self.through,
                        self.counterbore):
             widget.setVisible(False)
-        for widget in (self.size_label, self.size):
-            widget.setVisible(not solid)
         for widget in (self.corner_label, self.corner):
             widget.setVisible(kind == 'solid_block')
         self.corner_label.setText(f'Corner radius [{unit}]')
-        if solid:
-            self.apart.setVisible(False)
-        names = [] if solid else [name for name in groups if name]
         self.group.blockSignals(True)
-        self.group.clear()
-        self.group.addItems(names)
-        self.group.setCurrentText('' if solid else
-                                  default or ('block' if kind == 'block'
-                                              else 'plate'))
+        self.group.setCurrentText('')
         self.group.blockSignals(False)
         defaults = DEFAULTS[kind]
         self.set_values(center=defaults['center'], widths=defaults['widths'],
-                        angles=(0.0, 0.0, 0.0), size=DEFAULT_SIZE,
-                        radius=0.5 if (cone or sphere) else 0.25,
+                        angles=(0.0, 0.0, 0.0),
+                        radius=0.5 if (cone or sphere or disk) else 0.25,
                         length=SECTION_LENGTH if section else 1.0,
-                        corner=0.0, top=CONE_TOP, apart=False, quiet=True)
+                        corner=0.0, top=CONE_TOP, quiet=True)
         if section:
             self.set_values(shape='I-beam', quiet=True)
         if hole:
@@ -441,7 +404,7 @@ class MeshPanel(QWidget):
     def values(self) -> dict:
         """The fields as typed, in the display unit, as a dict: 'center',
         'widths', 'shape', 'dimensions', 'radius', 'length', 'corner',
-        'top', 'angles' in degrees, 'size', 'group' and 'apart'.
+        'top', 'angles' in degrees and 'group', the solid's name.
 
         A cone's 'radius' is at its base, 'top' at its top and 'length'
         its height. A section's 'dimensions' are its shape's, in the order
@@ -467,6 +430,10 @@ class MeshPanel(QWidget):
             widths = (wide, wide, self.length.value())
         elif self.kind == 'solid_sphere':
             widths = (2 * self.radius.value(),) * 3
+        elif self.kind == 'solid_disk':
+            widths = (2 * self.radius.value(), 2 * self.radius.value(), 0.0)
+        elif self.kind == 'solid_plate':
+            widths = (self.widths[0].value(), self.widths[1].value(), 0.0)
         elif self.kind == 'solid_section':
             across = {'round tube': (section[0], section[0]),
                       'angle': section[:2], 'rectangular tube': section[:2]}.get(
@@ -483,14 +450,12 @@ class MeshPanel(QWidget):
                 'radius': self.radius.value(), 'length': self.length.value(),
                 'corner': self.corner.value(), 'top': self.top.value(),
                 'angles': tuple(box.value() for box in self.angles),
-                'size': self.size.value(),
-                'group': self.group.currentText().strip(),
-                'apart': self.apart.isChecked()}
+                'group': self.group.currentText().strip()}
 
     def set_values(self, quiet: bool = False, **values) -> None:
         """Fill fields by name, in the display unit: center=(x, y, z),
-        widths=(x, y, z), angles=(x, y, z) in degrees, size, radius,
-        length, corner, shape, dimensions, group and apart. A hole's
+        widths=(x, y, z), angles=(x, y, z) in degrees, radius, length,
+        corner, top, shape, dimensions and group. A hole's
         dimensions are given as `values` gives them. Picking a shape
         opens its dimensions on that shape's defaults, except when
         editing.
@@ -499,13 +464,12 @@ class MeshPanel(QWidget):
         angles back with it. With `quiet` the fields are filled without
         emitting `changed`.
         """
-        boxes = [*self.center, *self.widths, *self.angles, self.size,
+        boxes = [*self.center, *self.widths, *self.angles,
                  self.radius, self.length, self.corner, self.top, *self.section, *self.hole]
         if quiet:
             for box in boxes:
                 box.blockSignals(True)
             self.group.blockSignals(True)
-            self.apart.blockSignals(True)
         try:
             for key, value in values.items():
                 if key == 'shape':
@@ -535,9 +499,7 @@ class MeshPanel(QWidget):
                         box.setValue(number)
                 elif key == 'group':
                     self.group.setCurrentText(value)
-                elif key == 'apart':
-                    self.apart.setChecked(bool(value))
-                elif key in ('size', 'radius', 'length', 'corner', 'top'):
+                elif key in ('radius', 'length', 'corner', 'top'):
                     getattr(self, key).setValue(value)
                 else:
                     for box, number in zip(getattr(self, key), value):
@@ -547,7 +509,6 @@ class MeshPanel(QWidget):
                 for box in boxes:
                     box.blockSignals(False)
                 self.group.blockSignals(False)
-                self.apart.blockSignals(False)
         if not quiet:
             self.changed.emit()
 

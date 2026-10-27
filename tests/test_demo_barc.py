@@ -12,13 +12,16 @@ project — Brandon).
 
 from __future__ import annotations
 
+from collections import Counter
+
 import numpy as np
 import pytest
 
 from visualdynamics.core.fem import RIGID
 from visualdynamics.demo import barc
 
-INCH3 = 0.0254 ** 3
+INCH = 0.0254
+INCH3 = INCH ** 3
 
 
 @pytest.fixture(scope='module')
@@ -113,20 +116,23 @@ def test_the_project_is_the_app_workflow(tmp_path):
 
 
 def test_the_docs_page_builds_the_demos_mesh():
-    """The workflow page writes the planes out for a reader; run its
-    code, and it must build the demo's mesh node for node — a page that
-    drifted from the model would teach a different one."""
+    """The workflow page writes the plates out for a reader; run its
+    code, and it must build the demo's mesh, node for node and plate for
+    plate — a page that drifted from the model would teach a different
+    one."""
     import pathlib
     import re
 
+    from visualdynamics import mesh
+
     page = (pathlib.Path(__file__).resolve().parents[1] / 'docs' / 'guide'
             / 'workflows' / 'fem-workflow.md').read_text(encoding='utf-8')
-    planes = next(block for block in
+    plates = next(block for block in
                   re.findall(r'```python\n(.*?)```', page, re.DOTALL)
-                  if 'mesh.assemble' in block)
+                  if 'add_solid_plate' in block)
     room: dict = {}
-    exec(planes, room)  # noqa: S102 — the page's own example
-    built = room['barc']
+    exec(plates, room)  # noqa: S102 — the page's own example
+    built = room['project'][room['name']]
     demo = barc.geometry()
     planes_only = demo.num_nodes                  # the links add no node
     assert built.num_nodes == planes_only
@@ -134,18 +140,26 @@ def test_the_docs_page_builds_the_demos_mesh():
                        np.sort(demo.node_xyz, axis=0))
     assert list(built.group_name) == ['box', 'right channel', 'left channel',
                                       'beam']
+    assert _quads(built) == _quads(mesh.assemble(*barc._planes(barc.SIZE)))
 
 
-def test_the_docs_table_typed_into_add_plane_is_the_demos_mesh():
-    """The page's app steps: a new geometry in inches and the planes table
-    typed row by row into Add Plane (the project verb each Add records)
-    must give the demo's planes node for node — same ids, same places,
-    same plates — which is what lets the page say a model built by hand
-    solves to the same modes. The table is centers and widths since the
-    pane replaced the dialog (2026-10-02), turned into the corner and
-    edges the verb takes the way the pane turns them: each nonzero width
-    along its axis, in X, Y, Z order, the corner half their sum below
-    the center."""
+def _quads(geometry):
+    """Each element as its group's name and its corners' places, on a
+    64th of an inch, so two meshes numbered differently compare."""
+    corners = np.round(geometry.node_xyz / INCH * 64).astype(int)
+    names = dict(zip(geometry.group_id.tolist(), geometry.group_name))
+    return Counter((names[int(group)], frozenset(map(tuple, corners[geometry.node_index(conn)])))
+                   for conn, group in zip(geometry.elem_conn, geometry.elem_group))
+
+
+def test_the_docs_table_typed_into_add_plate_is_the_demos_mesh():
+    """The page's app steps: a new geometry in inches, the plates table
+    typed row by row into Add Plate (the project verb each Add records)
+    and the twelve meshed into quads at the demo's size, must give the
+    demo's planes — the same nodes in the same places, the same plates
+    in the same element groups — which is what lets the page say a model
+    built by hand solves to the same modes. Add Plane typed planes as a
+    center and three widths, one of them zero, until 2026-10-26."""
     import pathlib
 
     import visualdynamics
@@ -153,7 +167,7 @@ def test_the_docs_table_typed_into_add_plane_is_the_demos_mesh():
 
     page = (pathlib.Path(__file__).resolve().parents[1] / 'docs' / 'guide'
             / 'workflows' / 'fem-workflow.md').read_text(encoding='utf-8')
-    table = page.split('| Plane | Element group | Center | Widths |')[1]
+    table = page.split('| Plate | Name | Center | Widths | Rotation |')[1]
     rows = [[cell.strip() for cell in line.strip('|').split('|')]
             for line in table.split('\n\n')[0].splitlines()[2:]]
 
@@ -163,21 +177,16 @@ def test_the_docs_table_typed_into_add_plane_is_the_demos_mesh():
 
     project = visualdynamics.Project('p')
     name = project.new_geometry(unit='in')
-    for _plane, block, center, widths in rows:
-        widths = np.array(vector(widths))
-        assert int(np.sum(widths == 0.0)) == 1, 'a plate names its plane'
-        edges = [tuple(widths[i] * np.eye(3)[i]) for i in range(3)
-                 if widths[i] > 0.0]
-        corner = tuple(np.array(vector(center)) - 0.5 * np.sum(edges, axis=0))
-        project.add_plane(name, corner, *edges, barc.SIZE, block, unit='in')
+    ids = [project.add_solid_plate(name, vector(center), vector(widths), vector(turn),
+                                   plate, unit='in')
+           for _plate, plate, center, widths, turn in rows]
+    project.mesh_solids(name, ids, barc.SIZE, unit='in', elements='quads')
     typed = project[name]
     demo = mesh.assemble(*barc._planes(barc.SIZE))
     assert len(rows) == 12
-    assert np.array_equal(typed.node_id, demo.node_id)
-    assert np.allclose(typed.node_xyz, demo.node_xyz)
-    assert all(np.array_equal(a, b) for a, b in zip(typed.elem_conn,
-                                                    demo.elem_conn,
-                                                    strict=True))
+    assert typed.num_nodes == demo.num_nodes == 5470
+    assert np.allclose(np.sort(typed.node_xyz, axis=0), np.sort(demo.node_xyz, axis=0))
+    assert _quads(typed) == _quads(demo)
     assert list(typed.group_name) == list(demo.group_name)
 
 
@@ -330,7 +339,7 @@ def test_each_joint_ties_the_places_its_bolts_clamp_and_no_other():
 
 def test_the_docs_solids_meshed_apart_and_mated_are_the_demos_bricks():
     """The page's bricks steps, as the project verbs the app records:
-    the blocks table typed into Add Solid Block, each part's blocks
+    the blocks table typed into Add Block, each part's blocks
     subtracted from its first, the four parts meshed with Keep the parts
     apart, then the four joints the page makes in Mate Surfaces — at each
     foot the patch with its outer ring of 32 clicked out, at each end of

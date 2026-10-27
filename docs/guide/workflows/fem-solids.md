@@ -37,7 +37,7 @@ per click.
 | Step | Where | How |
 |---|---|---|
 | Start a geometry | the project row's bar | **+** *New Geometry* |
-| Add the shapes | the geometry's **Solids** row | *Add Solid Block*, *Add Cylinder*, *Add Cone*, *Add Sphere*, *Add Section* |
+| Add the shapes | the geometry's **Solids** row | *Add Block*, *Add Cylinder*, *Add Cone*, *Add Sphere*, *Add Section*, *Add Plate*, *Add Disk* |
 | Pattern them in rows | solids picked in the tree | *Pattern* |
 | Cut and join them | solids picked in the tree | *Subtract*, *Union* |
 | Mesh | parts picked in the tree | *Mesh Solids* |
@@ -57,8 +57,8 @@ type, and **Add** puts it in the tree.
 
 | Shape | Add | Center | Size | Name |
 |---|---|---|---|---|
-| plate | Solid Block | (0, 0, −0.25) | 16 × 6 × 0.5 | frame |
-| window | Solid Block | (−5.8125, 0, −0.25) | 3.375 × 5 × 1, corner 0.138 | |
+| plate | Block | (0, 0, −0.25) | 16 × 6 × 0.5 | frame |
+| window | Block | (−5.8125, 0, −0.25) | 3.375 × 5 × 1, corner 0.138 | |
 | rail hole | Cylinder | (−7.75, −2.75, −0.25) | radius 0.1451, length 1 | |
 | upright hole | Cylinder | (−7.75, −1.375, −0.25) | radius 0.1451, length 1 | |
 
@@ -68,7 +68,7 @@ the plate it leaves the 0.138 in fillets the frame has in each window's
 corners. Without the fillets, the frame's in-plane modes come out 8 %
 low.
 
-![Where to click: select the Solids row (1), choose Add Solid Block on
+![Where to click: select the Solids row (1), choose Add Block on
 the bar (2), type the window's row of the table and press Add
 (3)](../images/fem-solids-block-click.png)
 
@@ -180,7 +180,7 @@ one is the same with 0.1243 for the thickness and 0.08975 for every Z):
 
 | Shape | Add | Center | Size | Name |
 |---|---|---|---|---|
-| wing | Solid Block | (1.9375, 0, 0.15575) | 4.385 × 22 × 0.2563 | thick wing |
+| wing | Block | (1.9375, 0, 0.15575) | 4.385 × 22 × 0.2563 | thick wing |
 | screw hole | Cylinder | (0, −2.75, 0.15575) | radius 0.1043, length 1 | |
 | rail hole | Cylinder | (1.2917, −2.75, 0.15575) | radius 0.1043, length 1 | |
 | end hole | Cylinder | (0.5626, −7.75, 0.15575) | radius 0.1043, length 1 | |

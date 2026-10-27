@@ -310,6 +310,10 @@ PHASE_STEPS = 120            # frames in one mode-shape cycle
 # having: an eighth crawls a mode through its cycle, eight times runs a
 # long record past in seconds.
 SPEEDS = (0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
+
+#: the sizes the sensors are drawn at, as multiples of their true size
+SENSOR_SIZES = (('True size', 1.0), ('×2', 2.0), ('×5', 5.0), ('×10', 10.0),
+                ('×20', 20.0), ('×50', 50.0), ('×100', 100.0))
 NORMAL_SPEED = SPEEDS.index(1.0)
 
 MAX_LISTED_ENTITIES = 2000  # a big FE model must not build 100k tree items
@@ -2282,6 +2286,34 @@ class MainWindow(QMainWindow):
             lambda _index: self.render_current())
         self.dofs_combo_action: QAction = toolbar.addWidget(self.dofs_combo)
         self.dofs_combo_action.setVisible(False)
+        # the bodies of the sensors a channel table names, at their nodes
+        # (Brandon, 2026-10-26 and 2026-10-27): on by default, since a
+        # table that lists its models is asking to be seen, and offered
+        # only when the drawn geometry has a table that places one
+        self.sensors_action: QAction = QAction(control_icon('sensors'),
+                                               'Sensors', self)
+        self.sensors_action.setCheckable(True)
+        self.sensors_action.setChecked(True)
+        self.sensors_action.setToolTip(
+            'Draw the accelerometers and force transducers the channel '
+            'table names, centered on their nodes')
+        self.sensors_action.toggled.connect(self._sensors_toggled)
+        toolbar.addAction(self.sensors_action)
+        self.sensors_action.setVisible(False)
+        self.sensor_size_combo: QComboBox = QComboBox()
+        for label, factor in SENSOR_SIZES:
+            self.sensor_size_combo.addItem(label, factor)
+        self.sensor_size_combo.setToolTip(
+            'How large the sensors are drawn: a multiple of their true size, '
+            'since a 6 mm sensor on a 2 m structure is a speck')
+        self.sensor_size_combo.currentIndexChanged.connect(
+            lambda _index: self.render_current())
+        self.sensor_size_action: QAction = toolbar.addWidget(
+            self.sensor_size_combo)
+        self.sensor_size_action.setVisible(False)
+        #: (geometry, channel table) for each geometry drawn with sensors
+        self._sensor_pairs = []
+        self._sensor_geometries = []
         # a channel table selected with a geometry: its DOFs are what the
         # arrows mark, and the box picks them by role (Brandon,
         # 2026-10-22). The arrows go on for the pair and back to as they
@@ -2553,6 +2585,7 @@ class MainWindow(QMainWindow):
                 unit_system=self.unit_system, text_color=colors['scene_text'],
                 colormap=self.colormap_action.isChecked())
         self.animator.set_scale(self.scale_box.value())
+        self._add_sensors([geometry], follow=self.animator)
         self.scene.axis_unit = self.animator.axis_unit
         annotate_scene(self.scene.plotter, self.scene.axis_unit, colors,
                        self.scene.bounds_visible, self.scene.orientation_visible)
@@ -4570,6 +4603,11 @@ class MainWindow(QMainWindow):
         if model.obj is self._dof_table and self._dof_geometries:
             # the arrows follow the cell typed, as the grid does
             note = self._add_channel_arrows()
+            if any(table is model.obj for _geometry, table
+                   in self._sensor_pairs):
+                # and so do the sensors: a model or a sign typed shows
+                note = '  |  '.join(said for said in (
+                    note, self._add_sensors(self._sensor_geometries)) if said)
             self.scene.plotter.render()
             if note:
                 self._show_status(note)
@@ -10058,6 +10096,7 @@ class MainWindow(QMainWindow):
                     picture_sets.append((name, obj, None))
 
         self._update_dof_controls(geometries, series, channels)
+        self._update_sensor_controls(geometries, series, channels, shapes)
         self._update_link_actions()
         shape_table = bool(shapes) and not geometries and not series
         shape_sets = list(dict.fromkeys(
@@ -10798,6 +10837,7 @@ class MainWindow(QMainWindow):
             alphas=alphas, unit_system=self.unit_system,
             text_color=theme['scene_text'])
         self.animator.set_scale(self.scale_box.value())
+        self._add_sensors([first_pair[0]], follow=self.animator)
         self.scene.axis_unit = self.animator.axis_unit
         annotate_scene(self.scene.plotter, self.scene.axis_unit, theme,
                        self.scene.bounds_visible, self.scene.orientation_visible)
@@ -12333,6 +12373,95 @@ class MainWindow(QMainWindow):
         return (f'{name} — {flavor}; drag the cursor to pick the '
                 f'frequency, Play sweeps the phase{fit}{notes}')
 
+    def _sensors_toggled(self, checked):
+        self.sensor_size_action.setVisible(
+            bool(checked) and self.sensors_action.isVisible())
+        self.render_current()
+
+    def _update_sensor_controls(self, geometries, series, channels, shapes):
+        """Sensors is an option when a geometry is drawn and a channel
+        table places a sensor on it. Each table is drawn on one geometry,
+        its own: two geometries selected together each get the table
+        linked with them, and a table selected with geometries goes on
+        the one linked with it. A table's nodes are often in more than one
+        geometry (an instrumentation plan keeps the model's node numbers,
+        each measured in a turned frame of its own), and drawn on each
+        they were the same sensors twice, turned two ways (Brandon,
+        2026-10-27). With data or a shape set, it is the table linked
+        with that, on the geometry it moves."""
+        from ..core.sensors import place
+
+        def linked(name):
+            try:
+                found = self.project.channel_table_for(name)
+            except (KeyError, ValueError):
+                found = None
+            return found[1] if found is not None else None
+
+        def home(name):
+            try:
+                found = self.project.geometry_for(name)
+            except (KeyError, ValueError):
+                found = None
+            return found[0] if found is not None else None
+
+        pairs = []
+        if geometries and channels:
+            name, table = channels[0][0], channels[0][1]
+            own = home(name)
+            order = ([own] if own in geometries else []) + [
+                other for other in geometries if other != own]
+            for other in order:
+                if place(table, geometries[other]['object'])[0]:
+                    pairs.append((geometries[other]['object'], table))
+                    break
+        elif geometries and (series or shapes):
+            source = series[0][0] if series else shapes[0][0]
+            table = linked(source)
+            if table is not None:
+                pairs = [(entry['object'], table)
+                         for entry in list(geometries.values())[:1]]
+        else:
+            pairs = [(entry['object'], linked(name))
+                     for name, entry in geometries.items()]
+        self._sensor_pairs = [(geometry, table) for geometry, table in pairs
+                              if table is not None
+                              and place(table, geometry)[0]]
+        offered = bool(self._sensor_pairs)
+        self.sensors_action.setVisible(offered)
+        self.sensor_size_action.setVisible(
+            offered and self.sensors_action.isChecked())
+
+    def _add_sensors(self, geometries, follow=None):
+        """The sensors on each geometry drawn that has a table to draw
+        (`_update_sensor_controls`), replacing any drawn before, and
+        carried by `follow`, an animator, when one is moving the nodes.
+        Returns what the status bar should add, or ''."""
+        from ..viz.sensors import add_sensors
+
+        plotter = self.scene.plotter
+        for name in list(plotter.actors):
+            if str(name).startswith('sensors-'):
+                plotter.remove_actor(name, render=False)
+        self._sensor_geometries = list(geometries)
+        if not self.sensors_action.isChecked():
+            return ''
+        size = float(self.sensor_size_combo.currentData() or 1.0)
+        notes = []
+        for i, geometry in enumerate(self._sensor_geometries):
+            table = next((table for drawn_on, table in self._sensor_pairs
+                          if drawn_on is geometry), None)
+            if table is None:
+                continue
+            drawn, said = add_sensors(plotter, geometry, table,
+                                      unit_system=self.unit_system,
+                                      size=size, name=f'sensors-{i}')
+            if drawn is not None:
+                notes += said
+                if follow is not None:
+                    follow.follow(drawn)
+        return '; '.join(dict.fromkeys(notes))
+
     def _add_dof_arrows(self, geometries):
         """The DOF arrows, on whichever scene is being built.
 
@@ -12465,6 +12594,10 @@ class MainWindow(QMainWindow):
                              if entry.get('mates')]
         arrows_note = self._add_dof_arrows(
             entry['object'] for _name, entry in geometries)
+        sensors_note = self._add_sensors(
+            [entry['object'] for _name, entry in geometries])
+        arrows_note = '  |  '.join(note for note in (arrows_note, sensors_note)
+                                   if note)
         self.scene.axis_unit = axis_unit
         annotate_scene(self.scene.plotter, axis_unit, colors, self.scene.bounds_visible,
                        self.scene.orientation_visible)

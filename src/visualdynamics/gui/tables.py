@@ -92,6 +92,9 @@ class Column:
     #: a different value.
     date: bool = False
     affects_row: bool = False          # setting it can restate its neighbors
+    #: setting it can restate other rows too: a triax's model fills its
+    #: other legs
+    affects_table: bool = False
     #: titles of columns that must fill along when this one is filled
     #: down — a unit dragged over rows carries its Type, because a unit
     #: without its quantity is half a statement (Brandon, 2026-08-30:
@@ -295,7 +298,11 @@ class TableModel(QAbstractTableModel):
             # the cell reverts; say why, or the refusal looks like a bug
             self.edit_rejected.emit(str(e))
             return False
-        if column.affects_row:
+        if column.affects_table and self.rowCount():
+            # without a reset, which would drop the selection
+            self.dataChanged.emit(self.index(0, 0), self.index(
+                self.rowCount() - 1, self.columnCount() - 1))
+        elif column.affects_row:
             # changing a channel's quantity can clear the unit beside it
             self.dataChanged.emit(*self.item_range(item))
         else:

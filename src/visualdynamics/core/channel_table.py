@@ -484,7 +484,13 @@ class ChannelTable:
 
         A unit that is not of the channel's declared type is refused;
         change the type first. Changing the type clears a unit of another
-        kind.
+        kind. A model in the sensor catalog (`core.sensor_catalog`) fills
+        a blank Make with its maker; a make already written is kept. A
+        triaxial accelerometer's model or serial number is written once:
+        the other acceleration rows at its node, its other legs, get its
+        Make, Model and Serial Number where theirs are blank (and their
+        model is blank or the same). A row of another type at that node,
+        a force gauge, is never filled.
 
         Parameters
         ----------
@@ -537,6 +543,43 @@ class ChannelTable:
                 from ..units import dimension_of
                 if dimension_of(unit) != coerced:
                     self.frame.loc[row, 'unit'] = ''
+        if name == 'model' and coerced:
+            # picking a model names its maker too (Brandon, 2026-10-26)
+            from .sensor_catalog import lookup
+
+            entry = lookup(str(coerced))
+            if entry is not None and not str(self.frame.loc[row, 'make']).strip():
+                self.frame.loc[row, 'make'] = entry.make
+        if name in ('model', 'serial_number') and coerced:
+            self._fill_triax(row)
+
+    def _fill_triax(self, row: int) -> None:
+        """Copy a triax row's Make, Model and Serial Number into the blank
+        cells of its other legs: the other acceleration rows at its node
+        whose model is blank or the same. Only a model the catalog knows
+        is a triax is spread, and only into acceleration rows."""
+        # Brandon, 2026-10-27: a triax's identity typed three times was
+        # one too many; legs wired one or two at a time are why the cells
+        # are filled rather than merged, and a force gauge at the node is
+        # why the type has to match.
+        from .sensor_catalog import lookup
+
+        frame = self.frame
+        entry = lookup(str(frame.loc[row, 'model']))
+        node = str(frame.loc[row, 'node']).strip()
+        if (entry is None or entry.kind != 'triax' or not node
+                or str(frame.loc[row, 'channel_type']) != 'acceleration'):
+            return
+        for other in range(self.num_channels):
+            if (other == row or str(frame.loc[other, 'node']).strip() != node
+                    or str(frame.loc[other, 'channel_type']) != 'acceleration'):
+                continue
+            model = str(frame.loc[other, 'model']).strip()
+            if model and lookup(model) is not entry:
+                continue
+            for column in ('make', 'model', 'serial_number'):
+                if not str(frame.loc[other, column]).strip():
+                    frame.loc[other, column] = frame.loc[row, column]
 
     def _agrees_with_type(self, row: int, unit: str) -> None:
         """A declared type and a unit have to describe one channel."""

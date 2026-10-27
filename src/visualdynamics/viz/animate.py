@@ -136,6 +136,11 @@ class PairedAnimator:
         self.first.set_parameter(parameter)
         self.second.set_parameter(parameter)
 
+    def follow(self, drawn: Any) -> None:
+        """Move a mesh drawn at nodes with the first copy: the +
+        deflection of an envelope, the first set of a comparison."""
+        self.first.follow(drawn)
+
     def render(self) -> None:
         """Render the scene the copies share."""
         self.first.render()
@@ -203,8 +208,29 @@ class GeometryAnimator:
         self._rows = deflection.rows
         self._base_rows = self.base[self._rows] if len(self._rows) else None
         self._norms = np.empty(len(self._rows))
+        #: meshes drawn at nodes that move with them (`follow`)
+        self._followers: list[tuple[Any, np.ndarray, np.ndarray, Any]] = []
         self.parameter: float = 0.0
         self.set_parameter(0.0)
+
+    def follow(self, drawn: Any) -> None:
+        """Move a mesh drawn at nodes with those nodes from now on: a
+        `viz.sensors.SensorMesh`, or anything with its `node_rows`,
+        `base`, `points` and `view`. Each point keeps its offset from its
+        node, so a body translates with its node and keeps its
+        orientation."""
+        rows = np.asarray(drawn.node_rows, dtype=np.intp)
+        relative = np.ascontiguousarray(drawn.base - self.base[rows])
+        self._followers.append((drawn.points, drawn.view, rows, relative))
+        self._place_followers()
+
+    def _place_followers(self) -> None:
+        # a gather into VTK's own memory and an add in place: nothing is
+        # allocated per frame, as for the nodes themselves
+        for points, view, rows, relative in self._followers:
+            np.take(self.view, rows, axis=0, out=view)
+            view += relative
+            points.Modified()
 
     @property
     def scale(self) -> float:
@@ -227,6 +253,7 @@ class GeometryAnimator:
         # one write into VTK's own memory, seen by every mesh at once
         self.view[self._rows] = self._base_rows + offsets * self.scale
         self.points_source.Modified()
+        self._place_followers()
         if self.magnitude is not None:
             # |offset| per node, without allocating: einsum for the sum of
             # squares, sqrt in place
@@ -244,6 +271,7 @@ class GeometryAnimator:
         zero."""
         self.view[:] = self.base
         self.points_source.Modified()
+        self._place_followers()
         if self.magnitude is not None:
             self.magnitude[:] = 0.0
             self.scalars_source.Modified()
@@ -435,6 +463,25 @@ def _single(geometry: Geometry, deflection: Any, *,
     return build
 
 
+def _sensing(build: Any, sensors: Any, size: float) -> Any:
+    """`build` with the sensors a channel table places drawn at their
+    nodes and moving with them; `build` itself when there is no table."""
+    if sensors is None:
+        return build
+
+    def built(plotter: Any) -> Any:
+        from .sensors import add_sensors
+
+        animator = build(plotter)
+        lead = getattr(animator, 'first', animator)
+        drawn, _notes = add_sensors(plotter, lead.geometry, sensors,
+                                    lead.unit_system, size)
+        if drawn is not None:
+            animator.follow(drawn)
+        return animator
+    return built
+
+
 def _cycled(geometry: Geometry, build: Any, *, colors: Any,
             cycle_seconds: float, title: str, show: bool,
             screenshot: str | None, movie: str | None,
@@ -545,7 +592,8 @@ def animate_shape(geometry: Geometry, shapes: ShapeSet, mode: int = 0, *,
                   theme: Any = None,
                   screenshot: str | None = None,
                   movie: str | None = None,
-                  show: bool = True) -> Any:
+                  show: bool = True, sensors: Any = None,
+                  sensor_size: float = 1.0) -> Any:
     """One mode shape (index `mode` of `shapes`) moving on a geometry, as
     the app animates it.
 
@@ -556,15 +604,20 @@ def animate_shape(geometry: Geometry, shapes: ShapeSet, mode: int = 0, *,
     as an MP4 (H.264) of whole cycles at `cycle_seconds` a cycle, and
     the path is returned (`gui.movie.write_movie`). Otherwise a window
     plays it and is returned.
+
+    With `sensors`, a channel table, the sensors it places are drawn at
+    their nodes and move with them (`viz.sensors`), `sensor_size` times
+    true size.
     """
     from ..deform import ShapeDeflection
     from ..theme import theme as resolve_theme
 
     deflection = ShapeDeflection(geometry, shapes.coordinate,
                                  shapes.shape_matrix[mode])
-    return _cycled(geometry, _single(geometry, deflection,
-                                     unit_system=unit_system, scale=scale,
-                                     colormap=colormap),
+    return _cycled(geometry, _sensing(_single(geometry, deflection,
+                                              unit_system=unit_system,
+                                              scale=scale, colormap=colormap),
+                                      sensors, sensor_size),
                    colors=resolve_theme(theme), cycle_seconds=cycle_seconds,
                    title=shapes.mode_label(mode), show=show,
                    screenshot=screenshot, movie=movie)
@@ -580,7 +633,8 @@ def animate_envelope(geometry: Geometry, data: Any,
                      theme: Any = None,
                      screenshot: str | None = None,
                      movie: str | None = None,
-                     show: bool = True) -> Any:
+                     show: bool = True, sensors: Any = None,
+                     sensor_size: float = 1.0) -> Any:
     """A PSD's envelope on a geometry, as the app shows it: two copies
     deflected by plus and minus sqrt(PSD) at one line, colored in dB
     below the loudest node.
@@ -599,6 +653,10 @@ def animate_envelope(geometry: Geometry, data: Any,
 
     Raises ValueError when no auto record measures the quantity, or
     when none of the records is at a node of this geometry.
+
+    With `sensors`, a channel table, the sensors it places are drawn at
+    their nodes and move with them (`viz.sensors`), `sensor_size` times
+    true size.
     """
     from ..deform import (
         EnvelopeDeflection,
@@ -640,6 +698,7 @@ def animate_envelope(geometry: Geometry, data: Any,
         pair.set_parameter(line)
         return pair
 
+    build = _sensing(build, sensors, sensor_size)
     if screenshot is not None or movie is not None:
         return _render_offscreen(
             geometry, build, colors=colors, still=line,
@@ -660,7 +719,8 @@ def animate_ods(geometry: Geometry, data: Any,
                 theme: Any = None,
                 screenshot: str | None = None,
                 movie: str | None = None,
-                show: bool = True) -> Any:
+                show: bool = True, sensors: Any = None,
+                sensor_size: float = 1.0) -> Any:
     """The operating deflection shape of complex spectra at one line, as
     the app animates it when the object is selected with a geometry.
 
@@ -676,6 +736,10 @@ def animate_ods(geometry: Geometry, data: Any,
     Raises ValueError for real data, which has no phase, when no record
     measures the quantity, and when none of the records is at a node of
     this geometry.
+
+    With `sensors`, a channel table, the sensors it places are drawn at
+    their nodes and move with them (`viz.sensors`), `sensor_size` times
+    true size.
     """
     from ..deform import (
         OdsDeflection,
@@ -703,9 +767,10 @@ def animate_ods(geometry: Geometry, data: Any,
                        else int(np.clip(
                            np.searchsorted(abscissa, float(frequency)),
                            0, len(abscissa) - 1)))
-    return _cycled(geometry, _single(geometry, deflection,
-                                     unit_system=unit_system, scale=scale,
-                                     colormap=colormap),
+    return _cycled(geometry, _sensing(_single(geometry, deflection,
+                                              unit_system=unit_system,
+                                              scale=scale, colormap=colormap),
+                                      sensors, sensor_size),
                    colors=resolve_theme(theme), cycle_seconds=cycle_seconds,
                    title=f'ODS — {abscissa[deflection.line]:.5g} Hz',
                    show=show, screenshot=screenshot, movie=movie)
@@ -718,7 +783,8 @@ def animate_time(geometry: Geometry, data: Any, records: Any = None, *,
                  seconds: float = SECONDS_PER_RECORD, theme: Any = None,
                  screenshot: str | None = None,
                  movie: str | None = None,
-                 show: bool = True) -> Any:
+                 show: bool = True, sensors: Any = None,
+                 sensor_size: float = 1.0) -> Any:
     """Time records moving on a geometry, as the app plays them: the
     record once through in `seconds`, one record per DOF
     (`animation_records`) and one `quantity`, by default the most common
@@ -741,6 +807,10 @@ def animate_time(geometry: Geometry, data: Any, records: Any = None, *,
 
     Raises ValueError when no record measures the quantity, or none of
     the records is at a node of this geometry.
+
+    With `sensors`, a channel table, the sensors it places are drawn at
+    their nodes and move with them (`viz.sensors`), `sensor_size` times
+    true size.
     """
     from ..core.validate import modal_coordinate
     from ..deform import (
@@ -770,8 +840,9 @@ def animate_time(geometry: Geometry, data: Any, records: Any = None, *,
         raise ValueError('none of the records land on this geometry')
     colors = resolve_theme(theme)
     samples = deflection.num_frames
-    build = _single(geometry, deflection, unit_system=unit_system,
-                    scale=scale, colormap=colormap)
+    build = _sensing(_single(geometry, deflection, unit_system=unit_system,
+                             scale=scale, colormap=colormap),
+                     sensors, sensor_size)
     if screenshot is not None or movie is not None:
         return _render_offscreen(
             geometry, build, colors=colors,

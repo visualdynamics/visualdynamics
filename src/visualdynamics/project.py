@@ -1553,6 +1553,43 @@ class Project(dict):
             return active, self[active]
         return None
 
+    def sensors(self, name: Any) -> tuple[list, list[str]]:
+        """The sensors a channel table places on its geometry, and notes on
+        what could not be placed (`core.sensors.place`): the bodies the
+        3-D view draws when Sensors is on.
+
+        Parameters
+        ----------
+        name : str or object
+            The channel table.
+
+        Returns
+        -------
+        sensors : list of Sensor
+            One per physical sensor: its node, model, catalog entry,
+            center and frame.
+        notes : list of str
+            Rows left out and why, models drawn as generic bodies, and
+            triax legs the table gets wrong.
+
+        Raises
+        ------
+        TypeError
+            If the object is not a channel table.
+        ValueError
+            If there is no geometry to place them on.
+        """
+        from .core.sensors import place
+
+        name = self.name_of(name)
+        table = self[name]
+        if not isinstance(table, ChannelTable):
+            raise TypeError(f'{name!r} is not a channel table')
+        home = self.geometry_for(name)
+        if home is None:
+            raise ValueError(f'{name!r} has no geometry — link one')
+        return place(table, home[1])
+
     def channel_table_for(self, name: Any) -> tuple[str, ChannelTable] | None:
         """(name, table) for the channel table linked with an object:
         the one lookup the overload check and the shape values share.
@@ -5732,7 +5769,10 @@ class Project(dict):
         mode : int, default 0
             Which mode, by index. Not used for a spectrum.
         **kwargs
-            Passed through to the scene.
+            Passed through to the scene. `sensors=True` draws the sensors
+            of the channel table linked with the object
+            (`channel_table_for`) at their nodes, moving with them, and
+            `sensor_size` multiplies their true size.
 
         Returns
         -------
@@ -5742,6 +5782,12 @@ class Project(dict):
         name = self.name_of(name)
         target = self[name]
         drawn_on = name
+        if kwargs.get('sensors') is True:
+            found = self.channel_table_for(name)
+            if found is None:
+                raise ValueError(f'{name!r} has no channel table linked to '
+                                 'draw sensors from')
+            kwargs = {**kwargs, 'sensors': found[1]}
         quantity = kwargs.get('quantity')
         if (isinstance(target, TimeHistory) and 'shapes' not in kwargs
                 and (quantity is None or quantity.startswith('modal_'))):

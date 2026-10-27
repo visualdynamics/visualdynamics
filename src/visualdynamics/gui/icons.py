@@ -2138,6 +2138,21 @@ def _draw_dofs(painter, color):
                          QPointF(32, 16)])
 
 
+def _draw_sensors(painter, color):
+    """A sensor's body in three-quarter view with its connector: the
+    Sensors toggle."""
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    front = [QPointF(14, 26), QPointF(38, 26), QPointF(38, 50), QPointF(14, 50)]
+    painter.drawPolygon(front)
+    painter.drawPolyline([QPointF(14, 26), QPointF(24, 16), QPointF(48, 16),
+                          QPointF(38, 26)])
+    painter.drawPolyline([QPointF(48, 16), QPointF(48, 40), QPointF(38, 50)])
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    painter.drawRect(QRectF(48, 25, 9, 8))
+
+
 def _draw_photos(painter, color):
     """A framed photo: sun over mountains."""
     painter.setPen(_pen(color, 5))
@@ -2530,7 +2545,8 @@ def control_icon(name: str) -> QIcon:
      'sweep_rate': _draw_sweep_rate,
      'sine_profile': _draw_sine_profile,
      'replication_fit': _draw_replication_fit,
-     'dofs': _draw_dofs, 'link': _draw_link, 'unlink': _draw_unlink,
+     'dofs': _draw_dofs, 'sensors': _draw_sensors,
+     'link': _draw_link, 'unlink': _draw_unlink,
      'automatic': _draw_automatic,
      'table': _draw_channel_table, 'overlay': _draw_overlay,
      'ratio': _draw_ratio,

@@ -43,7 +43,7 @@ one per channel, picked by role from a drop-down on the 3-D view's bar
 | Sensitivity (mV/Unit) | millivolts per whatever the Unit cell holds, greater than zero. The two cells are one calibration statement, which is why the header names both |
 | DAQ Range (V) | the DAQ input's range, in volts; blank when unstated |
 | Sensor Range (V) | the sensor's own full-scale output, in volts; blank when unstated. The smaller of the two that are stated is the level the channel clips at (`ChannelTable.clip_ranges()`); over the sensitivity it is the channel's range in its unit, which the *Overload* reading of a linked time history reads every channel against ([checking each channel against its range](overload.md)) |
-| Serial Number, Make, Model | the sensor's identity, as text |
+| Serial Number, Make, Model | the sensor's identity, as text. On an acceleration or force row, Make and Model offer the sensors of that type that Visual Dynamics can draw (below), and a model picked from the list fills a blank Make. A triaxial accelerometer's identity is typed once: its model or serial number fills the blank Make, Model and Serial Number cells of the other acceleration rows at its node. A row of another type there, such as a force gauge, is left alone, and so is a cell already filled |
 | Triax DOF | `X`, `Y` or `Z`: which leg of a triaxial accelerometer this is. This is not a direction; the Direction column says where it points |
 | Expiration | when its calibration runs out, with a calendar to pick from |
 | Comment | anything else worth writing down |
@@ -93,6 +93,66 @@ them blank. They come from the geometry, so they are not editable and
 are not written to Excel. The report's instrumentation table includes
 them beside the basis geometry, and a script reads the same rows from
 `visualdynamics.core.tables.table_of(table, geometry)`.
+
+## Sensors on the geometry
+
+When a row names a model, the sensor is drawn on the geometry at its
+node: a simple body built from the datasheet's dimensions, in the 3-D
+view beside the DOF arrows. The bodies are display only. They are not
+added to the geometry, its mass or its mesh.
+
+| Model | Kind | Size (mm) |
+|---|---|---|
+| PCB 356A01, 356A03 | triaxial accelerometer | 6.35 cube |
+| PCB 356A02 | triaxial accelerometer | 20.3 × 14.0 × 14.0 |
+| PCB 356A33 | triaxial accelerometer | 19.6 × 10.2 × 10.2 |
+| PCB 356A43 | triaxial accelerometer | 19.1 × 10.2 × 10.2 |
+| PCB 352A24 | uniaxial accelerometer | 12.2 × 7.1 × 4.8 |
+| PCB 352A73 | uniaxial accelerometer | 8.6 × 4.1 × 2.8 |
+| PCB 208C01 to 208C05 | force transducer | 15.88 hex, 15.88 tall |
+
+A model that is not in this list is still drawn, as a plain cube for an
+accelerometer or a puck for a force transducer, and the status line
+names it. A row with no model gets no body; its DOF arrow still marks
+the channel. Only acceleration and force rows are drawn.
+
+Each body is centered on its node. The orientation comes from the table
+alone, never from the surface the sensor is mounted on:
+
+- A triaxial accelerometer is its rows at one node with one model. The
+  Triax DOF column says which leg each row is (blank means the row's own
+  direction letter), and the row's direction, read through the node's
+  coordinate system as in the Unit X, Y and Z columns, is that leg's
+  positive direction. The lines through the centers of the X, Y and Z
+  faces cross at the node. The cable or connector is on the −X face, and
+  X is the long side. With two legs in the table the third is worked out
+  from them; with one, the others follow the node's own axes.
+- A uniaxial accelerometer or a force transducer is one row. Its sensing
+  axis runs through the node along the row's direction, and its
+  connector faces the node's local +X (+Y when the sensing axis is
+  along X).
+
+The face on the positive side of each sensing axis is drawn in that
+axis's arrow color: red for X, green for Y, blue for Z. A sign wrong in
+the table shows as a colored face on the wrong side. Triax legs that
+are not perpendicular, or that make a left-handed set, are an error in
+the table; the sensor is drawn as a plain body on the node's own axes,
+and the status line names the node.
+
+*Sensors* on the 3-D view's bar turns the bodies on and off, and the
+list beside it draws them at true size or larger, up to 100 times, since
+a 6 mm sensor on a 2 m structure is hard to see. The button shows
+only when a table places a sensor on the geometry drawn: the table
+selected with it, or else the one linked with the geometry, the data or
+the shape set being shown. Each table is drawn on one geometry, the one
+it is linked with, so two geometries that share node numbers do not
+show the same sensors twice. The bodies move with their nodes in every
+animation, keeping their orientation.
+
+From a script, `project.sensors('Channels')` gives each sensor's node,
+model, center and frame, `geometry.plot_channels(table, sensors=True,
+sensor_size=10)` draws them with the arrows, and `project.animate(name,
+sensors=True)` plays an animation with them.
 
 ## Role and Control
 

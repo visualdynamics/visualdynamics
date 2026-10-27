@@ -238,13 +238,29 @@ def channel_table_model(table: ChannelTable, parent: QObject | None = None,
                 row_choices=lambda t, r, i=index: t.units_for(i(r)),
                 alignment=LEFT))
             continue
+        if name in ('make', 'model'):
+            # the catalog's sensors for what the row measures, offered and
+            # not imposed: any make or model can still be typed, and a
+            # model picked fills its make, and a triax's other legs
+            # (`ChannelTable.set_cell`)
+            columns.append(Column(
+                title, _column_getter(name, index),
+                set=_column_setter(name, index),
+                journal=_column_journal(name, index),
+                row_choices=lambda t, r, n=name, i=index: _catalog_choices(
+                    t, i(r), n),
+                choices_editable=True, affects_table=name == 'model',
+                alignment=LEFT))
+            continue
         columns.append(Column(
             title, _column_getter(name, index),
             set=_column_setter(name, index),
             journal=_column_journal(name, index),
             date=spec.kind == 'date',
-            # a node moves the derived columns beside it
-            affects_row=name == 'node', alignment=LEFT))
+            # a node moves the derived columns beside it, and a triax's
+            # serial number fills its other legs
+            affects_row=name == 'node',
+            affects_table=name == 'serial_number', alignment=LEFT))
     if geometry is not None:
         from ..core.channel_table import DERIVED_COLUMNS
 
@@ -256,6 +272,17 @@ def channel_table_model(table: ChannelTable, parent: QObject | None = None,
     count = ((lambda t: t.num_channels) if rows is None
              else (lambda t: len(rows)))
     return TableModel(table, columns, count, parent)
+
+
+def _catalog_choices(table: ChannelTable, row: int, name: str) -> list[str]:
+    """What a Make or Model cell offers: the catalog's sensors for the
+    row's channel type, none for a type the catalog has no sensor of."""
+    from ..core.sensor_catalog import models_for
+
+    entries = models_for(str(table.frame.loc[row, 'channel_type']))
+    if name == 'make':
+        return list(dict.fromkeys(entry.make for entry in entries))
+    return [entry.model for entry in entries]
 
 
 def _shown_getter(name, index):

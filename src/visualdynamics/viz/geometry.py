@@ -1111,19 +1111,23 @@ def plot_channels(geometry: Geometry, table: Any, role: str = 'all',
                   unit_system: UnitSystem | None = None,
                   screenshot: str | None = None, theme: Any = None,
                   show: bool = True, size_in: tuple[float, float] | None = None,
-                  dpi: float | None = None, **kwargs: Any) -> Any:
+                  dpi: float | None = None, sensors: bool = False,
+                  sensor_size: float = 1.0, **kwargs: Any) -> Any:
     """The geometry with labeled arrows at a channel table's DOFs: the
     app's view of a channel table selected with a geometry, from a
     script.
 
     `role` limits the arrows to the references, responses or monitors
-    (`channel_dofs`). Shown or rendered to `screenshot` as `plot_dofs`
-    is; other keyword arguments go to `geometry_scene`.
+    (`channel_dofs`). With `sensors`, the bodies of the sensors the
+    table places are drawn at their nodes too (`viz.sensors`),
+    `sensor_size` times true size. Shown or rendered to `screenshot` as
+    `plot_dofs` is; other keyword arguments go to `geometry_scene`.
     """
     us = unit_system or DEFAULT_SYSTEM
     dofs, incoming = channel_dofs(table, role)
     return _dof_plot(geometry, dofs, incoming, us, f'Channels — {role}',
-                     screenshot, theme, show, size_in, dpi, kwargs)
+                     screenshot, theme, show, size_in, dpi, kwargs,
+                     sensors=(table, sensor_size) if sensors else None)
 
 
 def transformation_arrows(view: Any, row: int) -> tuple[list[str], list[float]]:
@@ -1164,15 +1168,20 @@ def plot_transformation(geometry: Geometry, view: Any, row: int = 0,
 
 
 def _dof_plot(geometry, dofs, incoming, us, title, screenshot, theme, show,
-              size_in, dpi, kwargs, scales=None):
+              size_in, dpi, kwargs, scales=None, sensors=None):
     """`plot_dofs`, `plot_channels` and `plot_transformation` once the
     DOFs are chosen: the geometry and its arrows, shown or rendered to a
-    file."""
+    file, with `sensors`, a (table, size), drawn too."""
     def draw(plotter: Any, scale: float = 1.0) -> None:
         geometry_scene(geometry, unit_system=us, plotter=plotter,
                        theme=theme, scale=scale, **kwargs)
         add_dof_arrows(plotter, geometry, dofs, unit_system=us,
                        incoming=incoming, scales=scales)
+        if sensors is not None:
+            from .sensors import add_sensors
+
+            add_sensors(plotter, geometry, sensors[0], unit_system=us,
+                        size=sensors[1])
 
     if screenshot is not None:
         import pyvista as pv

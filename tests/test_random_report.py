@@ -1426,3 +1426,93 @@ def test_each_figure_carries_the_bars_own_numbers(run):
         assert len(shown[label]) == 2, 'and again on the octave bands'
     states = {r['state'] for rows in expected.values() for r in rows}
     assert 'over' in states and 'in' in states, 'the run has both kinds'
+
+
+def _without_force(project):
+    """The placed plate run with its force channels removed: a test
+    controlled on accelerometers alone."""
+    project['Time History'].delete_records(dim='force')
+    return project
+
+
+def test_a_run_with_no_force_channels_cites_no_force_figure():
+    """A random report printed '({{figure:Excitation degrees of freedom
+    (force)}})' for a run with no force channels (Brandon, 2026-10-27):
+    the paragraph was fixed text and the figure is built only for a
+    quantity the run measured. It now names the figures there are."""
+    import re
+
+    project = _without_force(visualdynamics.random_vibration_run(
+        fixture_path('plate', 'random.nc4'),
+        geometry=fixture_path('plate', 'geometry.npz'), length_unit='m'))
+    template = random_template(project, object_groups=project.object_groups)
+    captions = [b['caption'] for b in template.blocks if b['kind'] == 'scene']
+    assert captions == ['Test geometry and measurement locations',
+                        'Response degrees of freedom (acceleration)']
+    [prose] = [b['text'] for b in template.blocks if b['kind'] == 'text'
+               and b['text'].startswith('## Test Article')]
+    assert 'excitation' not in prose.lower()
+    assert ('The response degrees of freedom ({{figure:Response degrees of '
+            'freedom (acceleration)}}) mark every measured accelerometer '
+            'direction.') in prose
+    page = render_html(template, project, object_groups=project.object_groups,
+                       unit_system=visualdynamics.SI)
+    assert not re.search(r'\{\{[^}]*\}\}', page), \
+        'nothing unresolved reaches the page'
+
+
+@pytest.mark.parametrize('kind', ['modal', 'random', 'transient', 'sine',
+                                  'shock', 'sysid'])
+def test_every_template_cites_only_dof_figures_it_built(kind):
+    """Every template that refers to the DOF figures refers to the ones
+    `front_matter` built, on a run with no force channels."""
+    import re
+
+    from visualdynamics.core.report import TEMPLATE_BUILDERS
+
+    project = _without_force(visualdynamics.random_vibration_run(
+        fixture_path('plate', 'random.nc4'),
+        geometry=fixture_path('plate', 'geometry.npz'), length_unit='m'))
+    report = TEMPLATE_BUILDERS[kind](project, project.object_groups)
+    captions = [b['caption'] for b in report.blocks if b['kind'] == 'scene']
+    text = ' '.join(b['text'] for b in report.blocks if b['kind'] == 'text')
+    cited = re.findall(r'\{\{figure:([^}]*degrees of freedom[^}]*)\}\}', text)
+    assert cited, 'the template cites a DOF figure'
+    for reference in cited:
+        assert any(c.lower().startswith(reference.strip().lower())
+                   for c in captions), f'{reference!r} has no figure'
+
+
+def test_the_dof_sentence_names_what_there_is():
+    from visualdynamics.core.report import dof_sentence
+
+    both = dof_sentence('{{figure:E}}', '{{figure:R}}', 'how it was driven',
+                        'what was read')
+    assert both == (' The excitation degrees of freedom ({{figure:E}}) mark '
+                    'where and how it was driven; the response degrees of '
+                    'freedom ({{figure:R}}) mark what was read.')
+    assert dof_sentence('{{figure:E}}', '', 'a', 'b') == (
+        ' The excitation degrees of freedom ({{figure:E}}) mark where and a.')
+    assert dof_sentence('', '', 'a', 'b') == ''
+
+
+def test_the_dof_references_follow_the_figures_built():
+    from visualdynamics.core.report import dof_references
+
+    def run(geometry=True):
+        return visualdynamics.random_vibration_run(
+            fixture_path('plate', 'random.nc4'),
+            **({'geometry': fixture_path('plate', 'geometry.npz'),
+                'length_unit': 'm'} if geometry else {}))
+
+    placed = run()
+    assert dof_references(placed, placed.object_groups,
+                          '@basis:TimeHistory') == (
+        '{{figure:Excitation degrees of freedom (force)}}',
+        '{{figure:Response degrees of freedom (acceleration)}}')
+    bare = run(geometry=False)
+    assert dof_references(bare, bare.object_groups,
+                          '@basis:TimeHistory') == ('', ''), 'no figures drawn'
+    assert dof_references({}, None, '@basis:TimeHistory') == (
+        '{{figure:Excitation degrees of freedom}}',
+        '{{figure:Response degrees of freedom}}'), 'the outline'

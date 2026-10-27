@@ -71,7 +71,13 @@ dependencies = [
     "netCDF4",
     "pint",
     "pyvista",
-    "pyvistaqt",
+    # 0.13 made the 3-D view a QOpenGLWidget that Qt composes with the
+    # rest of the window, and the window is built for that: Qt Quick
+    # draws with OpenGL and every context has the views' format from
+    # the start (gui.opengl.one_graphics_system). A Mac still on 0.11.4
+    # crashed generating a report under that setup (2026-10-27); the
+    # floor has pip upgrade such an environment rather than leave it.
+    "pyvistaqt>=0.13",
     # BSD-3-Clause. pyvista brings it, but this package imports
     # `vtkmodules` directly — the stage's marks, the drag picking, the
     # scene's axes — and what is imported is declared here rather than

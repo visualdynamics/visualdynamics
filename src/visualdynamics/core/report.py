@@ -726,7 +726,8 @@ OTHER_SIDE = 'other'
 
 
 #: the instrumentation section the transient and random templates share
-#: word for word
+#: word for word, as it reads for a run with force and acceleration
+#: channels (and in a template read with no project behind it)
 _INSTRUMENTATION_TEXT = (
     '## Test Article and Instrumentation\n\nThe test geometry '
     '({{figure:Test geometry and measurement locations}}) shows '
@@ -740,26 +741,85 @@ _INSTRUMENTATION_TEXT = (
     'instrumentation at each location.')
 
 
+def dof_references(objects: Mapping[str, Any],
+                   object_groups: Sequence[Mapping[str, Any]] | None,
+                   dofs_source: str) -> tuple[str, str]:
+    """References to the excitation and the response DOF figures
+    `front_matter` builds for `dofs_source`, '' for a role with none.
+
+    A run controlled on accelerometers alone has no force channels and
+    so no excitation figure; a reference to one would print as written.
+    Two excitation figures (force and voltage) are referred to
+    together. A project with no geometry draws no DOF figures at all.
+    With no project behind the template, the references are the
+    generic ones the outline is read with.
+    """
+    # Brandon, 2026-10-27: a random report printed
+    # '({{figure:Excitation degrees of freedom (force)}})' for a run with
+    # no force channels; the prose named a figure only the scenes knew
+    # had not been built. The references now come from the same blocks.
+    if not objects:
+        return ('{{figure:Excitation degrees of freedom}}',
+                '{{figure:Response degrees of freedom}}')
+    if resolve_binding('@basis:Geometry', objects,
+                       object_groups) not in objects:
+        return '', ''
+    captions: dict[bool, list[str]] = {True: [], False: []}
+    for block in front_matter(objects, object_groups, dofs_source):
+        if block['kind'] == 'scene' and block.get('dofs'):
+            captions[block['dofs'] in EXCITATION_QUANTITIES].append(
+                '{{figure:' + block['caption'] + '}}')
+    return ' and '.join(captions[True]), ' and '.join(captions[False])
+
+
+def dof_sentence(excitation: str, response: str, driven: str,
+                 measured: str) -> str:
+    """The sentence on the DOF figures, naming only those there are:
+    where and `driven` for the excitation, `measured` for the response.
+    Starts with a space so it follows the sentence before it; '' when
+    there is neither."""
+    clauses = []
+    if excitation:
+        clauses.append(f'the excitation degrees of freedom ({excitation}) '
+                       f'mark where and {driven}')
+    if response:
+        clauses.append(f'the response degrees of freedom ({response}) '
+                       f'mark {measured}')
+    if not clauses:
+        return ''
+    text = '; '.join(clauses)
+    return ' ' + text[0].upper() + text[1:] + '.'
+
+
 def instrumentation_text(objects: Mapping[str, Any],
-                         object_groups: Sequence[Mapping[str, Any]] | None = None
-                         ) -> str:
+                         object_groups: Sequence[Mapping[str, Any]] | None = None,
+                         dofs_source: str = '@basis:TimeHistory') -> str:
     """The instrumentation section's text, naming only what the project holds.
 
-    The standard text refers to the geometry, the DOF scenes and the
-    channel table. A run imported without a geometry has no geometry or
-    DOF scenes, and a paragraph about "the test geometry" above a
-    channel table alone reads as a report with parts missing. With a
-    geometry bound the text is the standard one; without one, it is the
-    channel table's sentence, and the photographs' sentence when there
-    are photographs. An empty project keeps the standard text, since
-    there the template itself is being read.
+    The text refers to the geometry, the DOF figures and the channel
+    table. A run imported without a geometry has no geometry or DOF
+    figures, and a paragraph about "the test geometry" above a channel
+    table alone reads as a report with parts missing; the text is then
+    the channel table's sentence, and the photographs' sentence when
+    there are photographs. With a geometry, it names the DOF figures
+    built for `dofs_source` (`dof_references`). An empty project keeps
+    the standard text, since there the template itself is being read.
     """
     # Brandon, 2026-09-19: no paragraph about a geometry the run does
     # not have.
     if not objects:
         return _INSTRUMENTATION_TEXT
     if resolve_binding('@basis:Geometry', objects, object_groups) in objects:
-        return _INSTRUMENTATION_TEXT
+        excitation, response = dof_references(objects, object_groups,
+                                              dofs_source)
+        return ('## Test Article and Instrumentation\n\nThe test geometry '
+                '({{figure:Test geometry and measurement locations}}) '
+                'shows where the article was instrumented.'
+                + dof_sentence(excitation, response,
+                               'in which direction it was driven',
+                               'every measured accelerometer direction')
+                + ' The channel table ({{table:Instrumentation}}) lists '
+                'the instrumentation at each location.')
     photos = resolve_binding('@basis:Photos', objects, object_groups)
     sentences = []
     if photos in objects and getattr(objects[photos], 'names', None):
@@ -1406,12 +1466,11 @@ def modal_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[s
             '## Test Setup\n\n'
             'The test geometry ({{figure:Test geometry}}) shows every '
             'measurement location and the wireframe used to visualize '
-            'the mode shapes. The excitation degrees of freedom '
-            '({{figure:Excitation degrees of freedom}}) mark where and '
-            'in which direction the structure was driven; the response '
-            'degrees of freedom ({{figure:Response degrees of '
-            'freedom}}) mark every measured accelerometer direction. '
-            'The channel table ({{table:Instrumentation}}) lists the '
+            'the mode shapes.'
+            + dof_sentence(*dof_references(objects, object_groups, frf),
+                           'in which direction the structure was driven',
+                           'every measured accelerometer direction')
+            + ' The channel table ({{table:Instrumentation}}) lists the '
             'instrumentation at each location: sensor, sensitivity, '
             'and calibration status.'},
         *front_matter(objects, object_groups, frf),
@@ -1745,6 +1804,8 @@ def shock_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[s
          'mode': 'scalogram', 'select': 'dim:acceleration',
          'caption': 'Shock scalogram'}]
 
+    excitation, response = dof_references(objects, object_groups,
+                                          '@basis:TimeHistory')
     return Report('Shock Test Report', [
         {'kind': 'text', 'text':
             '## Test Summary\n\n'
@@ -1766,14 +1827,14 @@ def shock_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[s
         {'kind': 'text', 'text':
             '## Test Article and Instrumentation\n\n'
             'The test geometry ({{figure:Test geometry}}) shows where '
-            'the article was instrumented. The excitation degrees of '
-            'freedom ({{figure:Excitation degrees of freedom}}) mark '
-            'where and in which direction the shock was applied, and '
-            'the response degrees of freedom ({{figure:Response '
-            'degrees of freedom}}) every measured direction — a shock '
-            'is judged where it was measured, and a channel not on '
-            'these figures is a channel this report says nothing '
-            'about. The photographs record the article as it was '
+            'the article was instrumented.'
+            + dof_sentence(excitation, response,
+                           'in which direction the shock was applied',
+                           'every measured direction')
+            + (' A shock is judged where it was measured, and a channel '
+               'not on these figures is a channel this report says '
+               'nothing about.' if excitation or response else '')
+            + ' The photographs record the article as it was '
             'actually mounted, which for a shock test is the account '
             'of the fixture and the programmer that no number carries. '
             'The channel table ({{table:Instrumentation}}) lists the '
@@ -2013,11 +2074,12 @@ def sine_template(objects: Mapping[str, Any],
         {'kind': 'text', 'text':
             '## Test Article and Instrumentation\n\n'
             'The test geometry ({{figure:Test geometry}}) shows where '
-            'the article was instrumented, the excitation degrees of '
-            'freedom ({{figure:Excitation degrees of freedom}}) where '
-            'and in which direction it was driven, and the response '
-            'degrees of freedom ({{figure:Response degrees of '
-            'freedom}}) every measured direction. The photographs '
+            'the article was instrumented.'
+            + dof_sentence(*dof_references(objects, object_groups,
+                                           '@basis:TimeHistory'),
+                           'in which direction it was driven',
+                           'every measured direction')
+            + ' The photographs '
             'record the article as it was actually instrumented, and '
             'the channel table ({{table:Instrumentation}}) lists what '
             'was at each location — for a swept test the control '
@@ -2163,6 +2225,12 @@ def sysid_template(objects: Mapping[str, Any],
     def ref(name: str, field: str) -> str:
         return '{{' + f'{name}.{field}' + '}}'
 
+    dofs_source = ('@basis:TimeHistory'
+                   if any(isinstance(obj, TimeHistory)
+                          for obj in objects.values())
+                   else '@basis:Frf')
+    excitation, response = dof_references(objects, object_groups,
+                                          dofs_source)
     return Report('System ID Report', [
         {'kind': 'text', 'text':
             '## Test Summary\n\n'
@@ -2187,24 +2255,22 @@ def sysid_template(objects: Mapping[str, Any],
             '## Test Article and Instrumentation\n\n'
             'The test geometry ({{figure:Test geometry}}) shows every '
             'measurement location and the wireframe the article is '
-            'drawn on. The excitation degrees of freedom '
-            '({{figure:Excitation degrees of freedom}}) mark where '
-            'and in which direction the article was driven, and the '
-            'response degrees of freedom ({{figure:Response degrees '
-            'of freedom}}) mark every measured direction — together '
-            'they are the identification\'s reach, since a plant is '
-            'only measured where something was driven and something '
-            'was listening. The photographs record the article as it '
+            'drawn on.'
+            + dof_sentence(excitation, response,
+                           'in which direction the article was driven',
+                           'every measured direction')
+            + (' Together they are the identification\'s reach, since '
+               'a plant is only measured where something was driven '
+               'and something was listening.' if excitation and response
+               else '')
+            + ' The photographs record the article as it '
             'was actually instrumented, which is the only account of '
             'cable routing, fixture condition and sensor mounting '
             'that survives the test. The channel table '
             '({{table:Instrumentation}}) lists what was at each '
             'location: sensor, sensitivity, and calibration '
             'status.'},
-        *front_matter(objects, object_groups, '@basis:TimeHistory'
-                      if any(isinstance(obj, TimeHistory)
-                             for obj in objects.values())
-                      else '@basis:Frf'),
+        *front_matter(objects, object_groups, dofs_source),
         {'kind': 'text', 'text':
             '## The Recordings\n\n'
             'A system identification is made from two recordings, and '
@@ -2357,7 +2423,8 @@ def transient_template(objects: Mapping[str, Any],
             f'The run was recorded on {ref(time, "num_channels")} '
             f'channels at {ref(time, "sample_rate")} over '
             f'{ref(time, "duration")}.'},
-        {'kind': 'text', 'text': instrumentation_text(objects, object_groups)},
+        {'kind': 'text', 'text': instrumentation_text(objects, object_groups,
+                                                      time)},
         *front_matter(objects, object_groups, time),
         {'kind': 'text', 'text':
             '## Specification\n\nThe waveform the controller was asked '
@@ -2889,7 +2956,8 @@ def random_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[
             + (f', giving {ref(psd, "frequency_resolution")} resolution '
                f'out to {ref(psd, "max_frequency")}.' if present(psd)
                else '.')},
-        {'kind': 'text', 'text': instrumentation_text(objects, object_groups)},
+        {'kind': 'text', 'text': instrumentation_text(objects, object_groups,
+                                                      time)},
         *front_matter(objects, object_groups, time),
         {'kind': 'text', 'text':
             '## Measured Data\n\nThe measured time histories, one '

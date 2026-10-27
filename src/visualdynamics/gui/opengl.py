@@ -21,6 +21,10 @@ import ctypes
 import re
 import sys
 from ctypes import wintypes
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:                                    # pragma: no cover
+    from PySide6.QtGui import QSurfaceFormat
 
 #: the least OpenGL VTK's renderer accepts
 NEEDED = (3, 2)
@@ -180,6 +184,39 @@ def check() -> tuple[int, str]:
 QUICK_BACKEND = 'QSG_RHI_BACKEND'
 
 
+def view_format() -> QSurfaceFormat:
+    """The OpenGL format the 3-D views draw with: desktop OpenGL 3.2,
+    core profile, double buffered, eight bits a color channel and for
+    depth, no stencil and no multisampling (VTK multisamples in its own
+    buffers).
+
+    It is VTK's own default for a Qt widget, the one pyvistaqt makes the
+    process's default when it builds a 3-D view. Each 3-D view sets the
+    default again, so this must agree with it in every field, or
+    building a view would change the format under the window.
+    """
+    # Written here, not imported: pyvistaqt's is a private function
+    # (`pyvistaqt.rwi._default_format`) that 0.12 does not have, and
+    # importing it crashed the launch on a Mac with 0.12 installed
+    # (Brandon, 2026-10-27). tests/test_opengl.py checks this against
+    # pyvistaqt's whenever pyvistaqt has one.
+    from PySide6.QtGui import QSurfaceFormat
+
+    fmt = QSurfaceFormat()
+    fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
+    fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+    fmt.setVersion(3, 2)
+    fmt.setSwapBehavior(QSurfaceFormat.SwapBehavior.DoubleBuffer)
+    fmt.setRedBufferSize(8)
+    fmt.setGreenBufferSize(8)
+    fmt.setBlueBufferSize(8)
+    fmt.setDepthBufferSize(8)
+    fmt.setAlphaBufferSize(8)
+    fmt.setStencilBufferSize(0)
+    fmt.setSamples(0)
+    return fmt
+
+
 def one_graphics_system() -> None:
     """Have Qt Quick draw with OpenGL, as the 3-D views do, and every
     OpenGL context be the one format the 3-D views need.
@@ -203,14 +240,10 @@ def one_graphics_system() -> None:
     # printed QBackingStoreDefaultCompositor's '#version 120' shader
     # refused ("version '120' is not supported", the core profile takes
     # 150 and up) and the application crashed; the same import worked
-    # on the next launch. pyvistaqt's own format, not a copy of it: each
-    # 3-D view sets the default again when it is built, and a format
-    # that differed in any field would change it under the window as
-    # before.
+    # on the next launch.
     from PySide6.QtGui import QSurfaceFormat
-    from pyvistaqt.rwi import _default_format
 
-    QSurfaceFormat.setDefaultFormat(_default_format())
+    QSurfaceFormat.setDefaultFormat(view_format())
     # pyvistaqt 0.13 made the 3-D view a QOpenGLWidget composed by Qt;
     # 0.12's was a native window of its own, which never met Qt Quick.
     # Measured on screen 2026-10-21 (Brandon: no 3-D view drew in the

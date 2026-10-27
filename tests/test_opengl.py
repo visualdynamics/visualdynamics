@@ -180,7 +180,6 @@ def test_every_context_is_the_3d_views_format_from_the_start(qt_app):
     launcher and a window a script builds both set the 3-D views' own
     format first, so building a 3-D view changes nothing."""
     from PySide6.QtGui import QSurfaceFormat
-    from pyvistaqt.rwi import _default_format
 
     from visualdynamics.gui import before_application
     from visualdynamics.gui.main_window import MainWindow
@@ -190,16 +189,45 @@ def test_every_context_is_the_3d_views_format_from_the_start(qt_app):
         QSurfaceFormat.setDefaultFormat(QSurfaceFormat())
         before_application()
         made = QSurfaceFormat.defaultFormat()
-        assert made == _default_format(), 'the launcher'
+        assert made == opengl.view_format(), 'the launcher'
         assert made.profile() == QSurfaceFormat.OpenGLContextProfile.CoreProfile
         assert (made.majorVersion(), made.minorVersion()) == (3, 2)
         QSurfaceFormat.setDefaultFormat(QSurfaceFormat())
         window = MainWindow(offscreen_3d=True)
         try:
-            assert QSurfaceFormat.defaultFormat() == _default_format(), (
+            assert QSurfaceFormat.defaultFormat() == opengl.view_format(), (
                 'a window a script builds without the launcher')
         finally:
             window.close()
             window.deleteLater()
+    finally:
+        QSurfaceFormat.setDefaultFormat(before)
+
+
+def test_the_format_is_the_one_a_3d_view_sets():
+    """A 3-D view (pyvistaqt 0.13 and later) makes its own format the
+    default when it is built; the one set at launch must be the same in
+    every field, or building a view changes it under the window."""
+    import pyvistaqt.rwi
+
+    theirs = getattr(pyvistaqt.rwi, '_default_format', None)
+    if theirs is None:
+        pytest.skip('this pyvistaqt sets no default format')
+    assert opengl.view_format() == theirs()
+
+
+def test_the_launch_needs_nothing_private_from_pyvistaqt(monkeypatch, qt_app):
+    """pyvistaqt 0.12 has no `_default_format`; importing it crashed
+    the launch on a Mac with 0.12 installed (Brandon, 2026-10-27)."""
+    import pyvistaqt.rwi
+    from PySide6.QtGui import QSurfaceFormat
+
+    from visualdynamics.gui import before_application
+
+    monkeypatch.delattr(pyvistaqt.rwi, '_default_format', raising=False)
+    before = QSurfaceFormat.defaultFormat()
+    try:
+        before_application()
+        assert QSurfaceFormat.defaultFormat() == opengl.view_format()
     finally:
         QSurfaceFormat.setDefaultFormat(before)

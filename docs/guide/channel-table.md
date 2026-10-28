@@ -173,11 +173,72 @@ as a monitor.
 
 A controller run sets these for you. A channel with a feedback device
 is a drive, which is Rattlesnake's own rule, so it imports as a
-reference; every other enabled channel imports as a response. A random,
-transient or sine-sweep run also states its control channels through
-its specification, since the requirement is written per control
-channel, so a response channel whose DOF the specification names is
-imported with Control checked.
+reference; every other enabled channel imports as a response. Each
+environment in the file names its control channels, and those import
+with Control checked. A run with more than one environment is
+described in the next section.
+
+## Environments and transformations
+
+A Rattlesnake run has one channel table and one environment per
+control loop. A combined run, a sine sweep and a random test on the
+same hardware, is two environments, and they can control different
+channels. One can also control a *virtual* response: a response
+transformation matrix is applied to every frame of the control
+channels, and the controller works on the matrix's rows instead of
+the channels. A reference transformation does the same for the drive
+signals. The file records the matrices, and the rows of a transformed
+environment's specification, FRF, coherence and spectra are numbered
+1, 2, 3, because the file does not name them.
+
+The table keeps one record per environment: its control channels and
+its drives, by channel number and in the controller's order, and the
+two matrices when the environment has them. The Control column is
+the union of every environment's control channels. The instrumentation
+is written once, since both environments read the same sensors, and
+what differs between the loops is kept beside it.
+
+With more than one environment in the table, a drop-down on the
+table's bar picks the environment, and the Control column shows that
+environment's control channels. Checking or clearing a box changes
+that environment. An environment that transforms its control channels
+refuses the change, because the matrix's columns are those channels.
+With one environment, there is no drop-down and the column is that
+environment's.
+
+A second drop-down, present when the picked environment holds a
+transformation, shows the matrix in the table's place: *Response
+transformation* has a row per controlled response and a column per
+control channel, headed by the channel's DOF, and *Reference
+transformation* has a column per drive. The grid is read-only and
+copies as text like every other table. The status line names the
+environment and counts the rows and the channels.
+
+A spectrum over a transformation's rows says so on the status line
+when it is drawn: which rows, which environment, and which channel
+table holds the matrix. Deleting a channel takes it out of every
+environment, and its column out of the matrix with it. A merged table
+carries no environments, since the loops belong to one acquisition's
+channel numbers and a merge renumbers them. The environments ride the
+project file and come back with the table.
+
+```python
+table = project.channel_table
+table.environments                       # {'Sine': Environment(...), 'Random': ...}
+table.controls('Sine')                   # a boolean per channel, that loop's
+table.drives('Sine')                     # the same for its drives
+view = table.transformation('Sine')      # rows '1', '2', ...; columns the control DOFs
+view.values                              # the matrix, (rows, control channels)
+table.transformation('Sine', 'reference')
+
+project.table('Channels', environment='Sine')                    # the table, Control as the sine's
+project.table('Channels', environment='Sine', form='response')   # the matrix as text
+project.transformed_rows('Sine_frf')     # [('Channels', 'Sine', ['1', '2', '3'])]
+
+from visualdynamics.core.channel_table import Environment
+table.set_environment('Shock', Environment(controls=[1, 2], drives=[7]))
+table.set_control('Shock', 2, True)      # channel in row 2 joins the shock's controls
+```
 
 ## Two levels of strictness
 

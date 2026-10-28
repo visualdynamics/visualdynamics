@@ -22,6 +22,7 @@ from __future__ import annotations
 import datetime as _datetime
 import os
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
 import numpy as np
@@ -224,6 +225,82 @@ def _parse_date(text: str) -> str:
 CHANNEL_CHOICES = ('all', 'control', 'reference', 'response', 'monitor')
 
 
+@dataclass
+class Environment:
+    """One control loop of a run: the channels the controller read as
+    its control channels, the ones it drove, and the transformations
+    it put over them, if any.
+
+    Channels are named by number (the `channel` column, the table's
+    join key), so the record survives a row deleted elsewhere in the
+    table. The controller's order is kept, because a transformation's
+    columns are the controls, or the drives, in that order.
+
+    Attributes
+    ----------
+    controls : list of int
+        The control channels' numbers, in the controller's order.
+    drives : list of int
+        The drive channels' numbers, in the controller's order.
+    response_transformation : numpy.ndarray or None
+        `(rows, len(controls))`: what the controller applied to every
+        frame of its control channels, controlling the rows in their
+        place. None when it controlled the channels themselves.
+    reference_transformation : numpy.ndarray or None
+        `(rows, len(drives))`: what it applied to its drive signals.
+        None when it drove the channels themselves.
+    """
+    # A combined run has one channel table and a loop per environment:
+    # a sine and a random over the same hardware may control different
+    # channels through different matrices (Brandon, 2026-10-28, on a
+    # file whose sine controls went unmarked). One table carries the
+    # instrumentation once; what differs between the loops is this.
+
+    controls: list[int] = field(default_factory=list)
+    drives: list[int] = field(default_factory=list)
+    response_transformation: np.ndarray | None = None
+    reference_transformation: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        # a matrix typed as nested lists is a matrix from here on, so
+        # the shape checks and the equality have one thing to look at
+        self.controls = [int(n) for n in self.controls]
+        self.drives = [int(n) for n in self.drives]
+        for form in TRANSFORMATION_FORMS:
+            matrix = getattr(self, f'{form}_transformation')
+            if matrix is not None:
+                setattr(self, f'{form}_transformation',
+                        np.asarray(matrix, dtype=float))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Environment):
+            return NotImplemented
+        return (list(self.controls) == list(other.controls)
+                and list(self.drives) == list(other.drives)
+                and _same_matrix(self.response_transformation,
+                                 other.response_transformation)
+                and _same_matrix(self.reference_transformation,
+                                 other.reference_transformation))
+
+    def matrix(self, form: str) -> np.ndarray | None:
+        """The 'response' or the 'reference' transformation."""
+        if form not in TRANSFORMATION_FORMS:
+            raise ValueError(f'{form!r} is not a transformation; use one '
+                             f'of {TRANSFORMATION_FORMS}')
+        return getattr(self, f'{form}_transformation')
+
+
+#: the two transformations a control loop may hold, by the roles the
+#: controller gives them
+TRANSFORMATION_FORMS = ('response', 'reference')
+
+
+def _same_matrix(a: np.ndarray | None, b: np.ndarray | None) -> bool:
+    if a is None or b is None:
+        return a is b
+    return a.shape == b.shape and bool(np.array_equal(a, b))
+
+
 class ChannelTable:
     """Per-channel metadata, in one fixed set of typed columns.
 
@@ -235,6 +312,9 @@ class ChannelTable:
         dropped, missing ones take their default, and the values are
         read leniently (see the module description). A channel type left
         blank is filled in from the unit when the unit names one.
+    environments : mapping of str to Environment, optional
+        The run's control loops by name, each checked as
+        `set_environment` checks it.
 
     Raises
     ------
@@ -248,6 +328,11 @@ class ChannelTable:
         The table, one row per channel, columns in `SCHEMA` order. Every
         cell is text except `channel`, which is an integer.
         `node` is text too, blank where no node was recorded.
+    environments : dict of str to Environment
+        The control loops, in the order they were set. Empty for a
+        table that describes no controller run. While a table has
+        any, its Control column is the union of their control
+        channels and is set through them (`set_control`), not directly.
     """
     # Text and not numbers for the other columns: a serial number that
     # happens to be all digits is not a number, and a column read back
@@ -326,7 +411,9 @@ class ChannelTable:
     CHANNEL_TYPES = CHANNEL_TYPES
     TRIAX = TRIAX
 
-    def __init__(self, columns: Mapping[str, Any] | pd.DataFrame) -> None:
+    def __init__(self, columns: Mapping[str, Any] | pd.DataFrame,
+                 environments: Mapping[str, Environment] | None = None
+                 ) -> None:
         import pandas as pd
 
         if isinstance(columns, pd.DataFrame):
@@ -353,6 +440,9 @@ class ChannelTable:
         # the schema and nothing else: an older file's extras, and a
         # controller's run settings, stop here
         self.frame: pd.DataFrame = self._typed(frame[list(self.SCHEMA)])
+        self.environments: dict[str, Environment] = {}
+        for name, environment in (environments or {}).items():
+            self.set_environment(name, environment)
 
     @classmethod
     def _typed(cls, frame: pd.DataFrame) -> pd.DataFrame:
@@ -517,6 +607,11 @@ class ChannelTable:
         # reason, where a file gets the benefit of the doubt.
         if name not in self.COLUMNS:
             raise KeyError(f'no column {name!r}')
+        if name == 'control' and self.environments:
+            raise ValueError(
+                'this table\'s control channels are per environment ('
+                + ', '.join(self.environments)
+                + '); set them with set_control')
         spec = self.COLUMNS[name]
         coerced = self._coerce(name, value)
         if spec.unique and coerced != '':
@@ -725,7 +820,23 @@ class ChannelTable:
         if not keep:
             raise ValueError('cannot delete every channel; delete the '
                              'object instead')
+        gone = {int(self.frame['channel'].iloc[i]) for i in doomed}
         self.frame = self.frame.iloc[keep].reset_index(drop=True)
+        # a deleted control or drive leaves its loop, and its column
+        # leaves the transformation with it: the matrix stays over the
+        # channels that are still there, rather than over a channel
+        # count the table no longer has
+        for environment in self.environments.values():
+            for form, listed in (('response', 'controls'),
+                                 ('reference', 'drives')):
+                numbers = list(getattr(environment, listed))
+                stay = [k for k, n in enumerate(numbers) if n not in gone]
+                setattr(environment, listed, [numbers[k] for k in stay])
+                matrix = environment.matrix(form)
+                if matrix is not None and len(stay) != len(numbers):
+                    setattr(environment, f'{form}_transformation',
+                            matrix[:, stay])
+        self._sync_controls()
 
     @property
     def num_channels(self) -> int:
@@ -903,9 +1014,251 @@ class ChannelTable:
         'monitor'), '' where undeclared."""
         return [str(v) for v in self.frame['role']]
 
-    def controls(self) -> np.ndarray:
-        """Which channels are control channels, as a boolean array."""
-        return np.array([_parse_flag(str(v)) for v in self.frame['control']])
+    def controls(self, environment: str | None = None) -> np.ndarray:
+        """Which channels are control channels, as a boolean per row.
+
+        Parameters
+        ----------
+        environment : str, optional
+            One of `environments`: that loop's control channels. Left
+            out, the Control column, which is the union of every
+            environment's when the table has any.
+
+        Returns
+        -------
+        numpy.ndarray
+            True where the channel is a control channel, one per row.
+
+        Raises
+        ------
+        ValueError
+            If there is no environment of that name.
+        """
+        if environment is None:
+            return np.array([_parse_flag(str(v)) for v in self.frame['control']])
+        return self._flags(self._environment(environment).controls)
+
+    def drives(self, environment: str) -> np.ndarray:
+        """Which channels the environment drove, as a boolean per row.
+
+        Parameters
+        ----------
+        environment : str
+            One of `environments`.
+
+        Returns
+        -------
+        numpy.ndarray
+            True where the channel is one of that loop's drives.
+
+        Raises
+        ------
+        ValueError
+            If there is no environment of that name.
+        """
+        return self._flags(self._environment(environment).drives)
+
+    def _flags(self, numbers: Sequence[int]) -> np.ndarray:
+        wanted = {int(n) for n in numbers}
+        return np.array([int(n) in wanted for n in self.frame['channel']],
+                        dtype=bool)
+
+    def _environment(self, name: str) -> Environment:
+        if name not in self.environments:
+            raise ValueError(
+                f'no environment {name!r}; the table has '
+                + (', '.join(self.environments) or 'none'))
+        return self.environments[name]
+
+    def rows_of(self, numbers: Sequence[int]) -> list[int]:
+        """The rows of the given channel numbers, in the given order.
+
+        Parameters
+        ----------
+        numbers : sequence of int
+            Channel numbers (the `channel` column).
+
+        Returns
+        -------
+        list of int
+            Their rows.
+
+        Raises
+        ------
+        ValueError
+            If a number is no channel of the table.
+        """
+        held = {int(n): r for r, n in enumerate(self.frame['channel'])}
+        missing = [int(n) for n in numbers if int(n) not in held]
+        if missing:
+            raise ValueError(f'no such channels: {missing}')
+        return [held[int(n)] for n in numbers]
+
+    def set_environment(self, name: str, environment: Environment) -> None:
+        """Record a control loop, or replace the one of that name.
+
+        Parameters
+        ----------
+        name : str
+            The environment's name, as the controller names it.
+        environment : Environment
+            Its channels and matrices. Every channel number must be a
+            channel of the table, listed once; a response transformation
+            must be two-dimensional with one column per control channel,
+            and a reference transformation one per drive.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If the name is blank or any of that fails. Nothing is
+            recorded then.
+        """
+        name = str(name).strip()
+        if not name:
+            raise ValueError('an environment needs a name')
+        checked = Environment(
+            controls=[int(n) for n in environment.controls],
+            drives=[int(n) for n in environment.drives])
+        for listed in ('controls', 'drives'):
+            numbers = getattr(checked, listed)
+            if len(set(numbers)) != len(numbers):
+                raise ValueError(f'{name}: a channel is listed twice among '
+                                 f'its {listed}')
+            try:
+                self.rows_of(numbers)
+            except ValueError as refusal:
+                raise ValueError(f'{name} {listed}: {refusal}') from None
+        for form, listed in (('response', 'controls'),
+                             ('reference', 'drives')):
+            matrix = environment.matrix(form)
+            if matrix is None:
+                continue
+            matrix = np.asarray(matrix, dtype=float)
+            count = len(getattr(checked, listed))
+            if matrix.ndim != 2 or matrix.shape[1] != count:
+                raise ValueError(
+                    f'{name}: the {form} transformation is '
+                    f'{matrix.shape} but the environment has {count} '
+                    f'{listed}')
+            setattr(checked, f'{form}_transformation', matrix.copy())
+        self.environments[name] = checked
+        self._sync_controls()
+
+    def remove_environment(self, name: str) -> None:
+        """Forget a control loop. The Control column keeps what it
+        showed, which a table without environments may then edit.
+
+        Parameters
+        ----------
+        name : str
+            The environment to forget.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If there is no environment of that name.
+        """
+        self._environment(name)
+        del self.environments[name]
+        if self.environments:
+            self._sync_controls()
+
+    def _sync_controls(self) -> None:
+        """The Control column is the environments' union while there
+        are any — one statement, read everywhere the column is."""
+        if not self.environments:
+            return
+        union = {n for env in self.environments.values() for n in env.controls}
+        self.frame['control'] = ['True' if int(n) in union else 'False'
+                                 for n in self.frame['channel']]
+
+    def set_control(self, environment: str, row: int, value: object) -> None:
+        """Check or clear Control on one channel for one environment.
+
+        A channel checked joins the loop's control channels, after the
+        ones it has; cleared, it leaves them. The Control column follows
+        as the union.
+
+        Parameters
+        ----------
+        environment : str
+            Which loop.
+        row : int
+            Which channel.
+        value : object
+            True or False, in any spelling `Control` accepts.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If there is no such environment, the flag cannot be read, or
+            the environment transforms its control channels: the
+            matrix's columns are those channels, so it is set with them
+            (`set_environment`), not one at a time.
+        """
+        held = self._environment(environment)
+        flag = _parse_flag(str(value))
+        if held.response_transformation is not None:
+            raise ValueError(
+                f'{environment} transforms its control channels; the '
+                'transformation\'s columns are those channels, so set them '
+                'together with set_environment')
+        number = int(self.frame['channel'].iloc[int(row)])
+        if flag and number not in held.controls:
+            held.controls.append(number)
+        elif not flag and number in held.controls:
+            held.controls.remove(number)
+        self._sync_controls()
+
+    def transformation(self, environment: str, form: str = 'response'):
+        """A control loop's transformation as a labeled matrix.
+
+        Parameters
+        ----------
+        environment : str
+            Which loop.
+        form : str, default 'response'
+            'response' for the matrix over its control channels, applied
+            to what they measure, or 'reference' for the one over its
+            drives, applied to the drive signals.
+
+        Returns
+        -------
+        core.transform.MatrixAt
+            The rows numbered from 1, as the controller's records of
+            them are named, and a column per control (or drive) channel
+            headed by its DOF, in the controller's order.
+
+        Raises
+        ------
+        ValueError
+            If there is no such environment, or it holds no such
+            transformation.
+        """
+        from .transform import MatrixAt
+
+        held = self._environment(environment)
+        matrix = held.matrix(form)
+        if matrix is None:
+            raise ValueError(f'{environment} holds no {form} transformation')
+        numbers = held.controls if form == 'response' else held.drives
+        dofs = self.dof_strings()
+        return MatrixAt(form=form,
+                        rows=[str(k + 1) for k in range(matrix.shape[0])],
+                        columns=[dofs[r] for r in self.rows_of(numbers)],
+                        values=matrix.copy())
 
     def types(self) -> list[str]:
         """Each channel's type (what it measures), '' where undeclared."""
@@ -948,7 +1301,8 @@ class ChannelTable:
             return NotImplemented
         return (self.column_names == other.column_names
                 and all(np.array_equal(self[name], other[name])
-                        for name in self.column_names))
+                        for name in self.column_names)
+                and self.environments == other.environments)
 
     def __repr__(self) -> str:
         return (f'ChannelTable({self.num_channels} channels, '

@@ -134,6 +134,10 @@ def _merge_tables(objects):
     whole, describing = _described(objects)
     unique = whole.drop_duplicates(subset=describing).reset_index(drop=True)
     unique['channel'] = np.arange(1, len(unique) + 1)
+    # the merged table carries no environments: a control loop belongs
+    # to one acquisition's channel numbers, and these were just
+    # renumbered. The Control column rides along as a plain column,
+    # so what each pass controlled still shows
     return ChannelTable(unique)
 
 

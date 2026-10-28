@@ -240,6 +240,7 @@ from .object_tables import (
     modal_fit_table_model,
     shape_table_model,
     shape_values_model,
+    transformation_model,
     units_table_model,
 )
 from .panes import DataPane, ScenePane
@@ -1459,6 +1460,28 @@ class MainWindow(QMainWindow):
             'channels — breakpoints, every cross term, the bands — and '
             'make it')
         self.author_action.triggered.connect(self._author_toggled)
+        # a channel table's control loops (Brandon, 2026-10-28): which
+        # environment's control channels the Control column shows, and
+        # the table itself or one of that loop's transformations
+        self.environment_combo: QComboBox = QComboBox()
+        self.environment_combo.setToolTip(
+            "Which environment's control channels the Control column "
+            'shows, and whose transformation the view drop-down offers')
+        self.environment_combo.currentIndexChanged.connect(
+            lambda _index: self.render_current())
+        self.environment_action: QAction = self.table_bar.addWidget(
+            self.environment_combo)
+        self.table_view_combo: QComboBox = QComboBox()
+        self.table_view_combo.setToolTip(
+            'The channels, or what the controller put over them: the '
+            'response transformation, a row per controlled response over '
+            'the control channels, or the reference transformation over '
+            'the drives')
+        self.table_view_combo.currentIndexChanged.connect(
+            lambda _index: self.render_current())
+        self.table_view_action: QAction = self.table_bar.addWidget(
+            self.table_view_combo)
+        self._hide_table_views()
         self.table_bar.addAction(self.author_action)
         self.author_action.setVisible(False)
         self._author_wanted: bool = False
@@ -2935,6 +2958,11 @@ class MainWindow(QMainWindow):
             combo.setCurrentIndex(values.index(default))
         combo.setToolTip(tooltip)
         combo.blockSignals(False)
+
+    def _hide_table_views(self):
+        """A channel table's environment and view drop-downs, away."""
+        self.environment_action.setVisible(False)
+        self.table_view_action.setVisible(False)
 
     def _hide_shape_values(self):
         """The values toggle and its two drop-downs, all away."""
@@ -10196,6 +10224,7 @@ class MainWindow(QMainWindow):
                 parts.append(self._render_series(series + overlay))
                 if synthesis_note:
                     parts.append(synthesis_note)
+                parts.append(self._transformed_rows_note(series))
         if picture_sets and not series:
             parts.append(self._render_photos(picture_sets))
         if reports:
@@ -10244,7 +10273,10 @@ class MainWindow(QMainWindow):
                 self.mac_action.setVisible(False)
                 self._hide_shape_values()
                 self.table_bar.show()
-        elif self.author_action.isVisible() and channels and not shapes:
+        elif channels and not shapes and (
+                self.author_action.isVisible()
+                or self.environment_action.isVisible()
+                or self.table_view_action.isVisible()):
             self.mode_table_action.setVisible(False)
             self.mac_bars_action.setVisible(False)
             self.mac_action.setVisible(False)
@@ -22492,6 +22524,21 @@ class MainWindow(QMainWindow):
             self._compliance_channels = []
             self.render_current()
 
+    def _transformed_rows_note(self, series):
+        """Which rows of the drawn objects are rows of a response
+        transformation (`Project.transformed_rows`), naming the
+        environment and the channel table that holds the matrix — the
+        one place the numbered rows of a transformed run are explained.
+        """
+        said = []
+        for name, _obj, _records in series:
+            for table_name, environment, rows in \
+                    self.project.transformed_rows(name):
+                said.append(f'{name}: rows {", ".join(rows)} are the '
+                            f'{environment} response transformation '
+                            f'({table_name})')
+        return '; '.join(dict.fromkeys(said))
+
     def _render_table(self, table, rows=None, name=None):
         # the geometry the table answers to — its group's, else the
         # active one — brings the derived direction columns with it
@@ -22503,14 +22550,64 @@ class MainWindow(QMainWindow):
             dofs, types = table.dof_strings(), table.types()
             set_role = (lambda row, text: self._apply_channel_role(
                 name, dofs[row], types[row], text))
+        environment, form = self._table_views(table)
+        if form is not None:
+            # one of the loop's transformations, in the table's place:
+            # read-only, so no rows to delete and no role to route
+            model = self._set_table_model(transformation_model(
+                table, environment, form, self))
+            self._show_table_views(table)
+            view = model.obj
+            over = 'control' if form == 'response' else 'drive'
+            return (f'{environment} {form} transformation: '
+                    f'{len(view.rows)} rows over {len(view.columns)} '
+                    f'{over} channels')
         self._set_table_model(channel_table_model(
             table, self, rows=rows,
             geometry=None if found is None else found[1],
-            set_role=set_role))
+            set_role=set_role, environment=environment))
+        self._show_table_views(table)
         self._arm_row_deletion(name, 'channel', rows)
         if rows is not None:
             return f'{len(rows)} of {table.num_channels} channels'
         return self._status_for(table)
+
+    def _table_views(self, table):
+        """(environment, form) the two drop-downs say for `table`: the
+        environment whose control channels the Control column shows
+        (None for a table with no environments), and 'response' or
+        'reference' when one of its transformations is to be shown in
+        the table's place, else None. The drop-downs are filled here
+        from the table, keeping their choices while those still apply.
+        """
+        loops = list(table.environments)
+        self._fill_combo(self.environment_combo, [(n, n) for n in loops],
+                         'Which environment\'s control channels the Control '
+                         'column shows, and whose transformation the view '
+                         'drop-down offers')
+        environment = self.environment_combo.currentData() if loops else None
+        views = [('Channels', 'channels')]
+        if environment is not None:
+            held = table.environments[environment]
+            if held.response_transformation is not None:
+                views.append(('Response transformation', 'response'))
+            if held.reference_transformation is not None:
+                views.append(('Reference transformation', 'reference'))
+        self._fill_combo(self.table_view_combo, views,
+                         'The channels, or what the controller put over them: '
+                         'the response transformation, a row per controlled '
+                         'response over the control channels, or the '
+                         'reference transformation over the drives')
+        form = self.table_view_combo.currentData()
+        return environment, (form if form in ('response', 'reference')
+                             else None)
+
+    def _show_table_views(self, table):
+        """The environment drop-down when there is a choice of
+        environments, the view drop-down when the picked one holds a
+        transformation; neither otherwise."""
+        self.environment_action.setVisible(len(table.environments) > 1)
+        self.table_view_action.setVisible(self.table_view_combo.count() > 1)
 
     def _set_table_model(self, model):
         # every table edit that changes an object reaches the journal
@@ -22539,6 +22636,7 @@ class MainWindow(QMainWindow):
         self.shape_values_table.hide()
         self._values_arrows = None
         self._hide_shape_values()
+        self._hide_table_views()
         self.mac_action.setVisible(False)
         self.mode_table_action.setEnabled(True)
         if self.report_editor is not None:

@@ -625,10 +625,27 @@ def save_channel_table(table: ChannelTable, group: h5py.Group) -> None:
             group.create_dataset(name, data=table[name])
         else:
             _write_strings(group, name, list(table[name]))
+    if not table.environments:
+        return
+    # the control loops, one subgroup each, numbered rather than named:
+    # a controller's environment name is free text, and h5py reads a
+    # slash in a group name as a path
+    loops = group.create_group('environments')
+    for k, (name, environment) in enumerate(table.environments.items()):
+        sub = loops.create_group(str(k))
+        sub.attrs['name'] = name
+        sub.create_dataset('controls', data=np.asarray(environment.controls,
+                                                      dtype=np.int64))
+        sub.create_dataset('drives', data=np.asarray(environment.drives,
+                                                    dtype=np.int64))
+        for form in ('response', 'reference'):
+            matrix = environment.matrix(form)
+            if matrix is not None:
+                sub.create_dataset(f'{form}_transformation', data=matrix)
 
 
 def load_channel_table(group: h5py.Group) -> ChannelTable:
-    from ..core.channel_table import ChannelTable
+    from ..core.channel_table import ChannelTable, Environment
 
     columns = {}
     for name in group.attrs['column_order']:
@@ -639,7 +656,21 @@ def load_channel_table(group: h5py.Group) -> ChannelTable:
         data = group[name]
         columns[name] = (data[()] if data.dtype.kind in 'iuf'
                          else _read_strings(group, name))
-    return ChannelTable(columns)
+    environments = {}
+    if 'environments' in group:
+        loops = group['environments']
+        for key in sorted(loops, key=int):
+            sub = loops[key]
+            environments[str(sub.attrs['name'])] = Environment(
+                controls=[int(n) for n in sub['controls'][()]],
+                drives=[int(n) for n in sub['drives'][()]],
+                response_transformation=(
+                    sub['response_transformation'][()]
+                    if 'response_transformation' in sub else None),
+                reference_transformation=(
+                    sub['reference_transformation'][()]
+                    if 'reference_transformation' in sub else None))
+    return ChannelTable(columns, environments=environments)
 
 
 def save_shapes(shapes: ShapeSet, group: h5py.Group) -> None:

@@ -70,7 +70,7 @@ from typing import Any
 
 import numpy as np
 
-from ..core.channel_table import ChannelTable
+from ..core.channel_table import ChannelTable, Environment
 from ..core.data import (
     Frf,
     MultipleCoherence,
@@ -1414,6 +1414,7 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
         feedback = columns.get('feedback_device', [''] * num_channels)
         drive_channels = [i for i, value in enumerate(feedback)
                           if str(value).strip()]
+        _record_environments(ds, table, drive_channels, scales_dims)
 
         # the streams the window keeps, sized before any is read, so
         # the progress is one count over all of them
@@ -1711,22 +1712,56 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
                 ordinate_unit=units,
                 comment='transient control signal')
 
-    # a run also states its *control* channels, through its
-    # specification: the requirement is written per control channel, so
-    # a response channel whose DOF the specification names is a control
-    # channel. The file's own statement, mapped rather than guessed —
-    # and role-guarded, so a drive sharing a controlled DOF stays a
-    # reference.
-    named = {dof for obj in out.values()
-             if isinstance(obj, (Specification, TransientSpecification,
-                                 SineSweepSpecification))
-             for dof in obj.response_dof}
-    if named:
-        roles = table.roles()
-        for row, dof in enumerate(table.dof_strings()):
-            if dof in named and roles[row] == 'response':
-                table.set_cell('control', row, 'True')
     return out
+
+
+def _record_environments(ds, table, drive_channels, scales_dims):
+    """Each environment's control loop onto the channel table: its
+    control channels and drives by number, and its transformations.
+
+    The file states the control channels outright, per environment
+    (`control_channel_indices`), and that is what marks the table's
+    Control column — the union, since a combined run's sine and random
+    may control different channels. Until 2026-10-28 the column was
+    marked by matching each specification's DOFs against the table,
+    which a transformed environment never matches (its specification
+    is over the matrix's rows, '1', '2', '3'), so Brandon's sine
+    controls went unmarked beside the random's.
+
+    The drives are the environment's own reference channels when it
+    names them (modal), else the table's drives, which is how the
+    spectra find them too. A reference transformation whose columns do
+    not fit those drives cannot be labeled and is left out with a
+    warning rather than imported over the wrong channels.
+    """
+    for env_name, group in ds.groups.items():
+        if 'control_channel_indices' not in group.variables:
+            continue
+        indices = np.asarray(group.variables['control_channel_indices'][()],
+                             dtype=int)
+        if 'reference_channel_indices' in group.variables:
+            drives = [int(i) for i in np.asarray(
+                group.variables['reference_channel_indices'][()], dtype=int)]
+        else:
+            drives = list(drive_channels)
+        found = _response_transformation(group, indices, scales_dims)
+        reference = None
+        if 'reference_transformation_matrix' in group.variables:
+            matrix = np.asarray(
+                group.variables['reference_transformation_matrix'][()],
+                dtype=float)
+            if matrix.ndim != 2 or matrix.shape[1] != len(drives):
+                warnings.warn(
+                    f'{env_name}: the reference transformation is '
+                    f'{matrix.shape} but the run drives {len(drives)} '
+                    'channels; not imported', stacklevel=2)
+            else:
+                reference = matrix
+        table.set_environment(env_name, Environment(
+            controls=[int(i) + 1 for i in indices],
+            drives=[d + 1 for d in drives],
+            response_transformation=None if found is None else found[0],
+            reference_transformation=reference))
 
 
 def _environment_rate(group, ds):

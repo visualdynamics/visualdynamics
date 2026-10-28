@@ -131,14 +131,30 @@ def cell_value_text(value: Any) -> str:
     return '' if np.isnan(value) else shape_value_text(value)
 
 
+def transformation_table(table: Any, environment: str,
+                         form: str = 'response'
+                         ) -> tuple[list[str], list[list[str]]]:
+    """``(headers, rows)`` of a control loop's transformation
+    (`ChannelTable.transformation`): a row per transformation row,
+    numbered from 1, then a column per control (or drive) channel
+    headed by its DOF.
+    """
+    view = table.transformation(environment, form)
+    return (['Row', *view.columns],
+            [[label, *(cell_value_text(v) for v in view.values[i])]
+             for i, label in enumerate(view.rows)])
+
+
 def table_of(obj: Any, geometry: Any = None,
-             objects: Mapping[str, Any] | None = None
+             objects: Mapping[str, Any] | None = None,
+             environment: str | None = None
              ) -> tuple[list[str], list[list[str]]] | None:
     """``(headers, rows)`` for an object that has a table, else None.
 
     A shape set gives its modal parameters (mode, frequency, damping,
     description). A channel table gives its columns, plus the direction
-    columns derived from `geometry` when one is given. Matched modes
+    columns derived from `geometry` when one is given, its Control
+    column that of `environment` when one is named. Matched modes
     give the pairs beside both sets' parameters (`matched_rows`), with
     the sets looked up in `objects`. Every cell is text, formatted the
     way it is usually quoted rather than the way it is stored: a damping
@@ -167,8 +183,14 @@ def table_of(obj: Any, geometry: Any = None,
 
         names = obj.column_names
         derived = list(DERIVED_COLUMNS) if geometry is not None else []
+        controls = obj.controls(environment)
+
+        def cell(name, r):
+            if name == 'control':
+                return str(bool(controls[r]))
+            return str(obj[name][r])
         return ([title_of(name) for name in names + derived],
-                [[str(obj[name][r]) for name in names]
+                [[cell(name, r) for name in names]
                  + (obj.derived_cells(r, geometry) if derived else [])
                  for r in range(obj.num_channels)])
     return None

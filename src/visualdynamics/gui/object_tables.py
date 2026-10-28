@@ -125,6 +125,42 @@ def shape_values_model(shapes: ShapeSet, parent: QObject | None = None,
     return _ShapeValuesModel(shapes, view, columns, modal_dofs(shapes), parent)
 
 
+class _MatrixModel(TableModel):
+    """A labeled matrix (`transform.MatrixAt`), read-only: the rows
+    headed by their labels and the columns by theirs."""
+
+    def __init__(self, view: Any, columns: Sequence[Column],
+                 parent: QObject | None = None) -> None:
+        super().__init__(view, columns, lambda v: len(v.rows), parent)
+
+    def headerData(self, section: int, orientation: Qt.Orientation,
+                   role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        labels = (self.obj.rows if orientation == Qt.Orientation.Vertical
+                  else self.obj.columns)
+        return str(labels[section])
+
+
+def transformation_model(table: ChannelTable, environment: str,
+                         form: str = 'response',
+                         parent: QObject | None = None) -> TableModel:
+    """A control loop's transformation as a table, read-only
+    (`ChannelTable.transformation`): a row per row of the matrix,
+    numbered from 1, and a column per control (or drive) channel headed
+    by its DOF, in the controller's order. The text is `core.tables`',
+    which a script's `Project.table(..., environment=, form=)` reads
+    too. Raises ValueError where `transformation` does."""
+    from ..core.tables import cell_value_text
+
+    view = table.transformation(environment, form)
+    columns = [Column(str(label),
+                      lambda v, r, c=c: v.values[r, c],
+                      format=cell_value_text)
+               for c, label in enumerate(view.columns)]
+    return _MatrixModel(view, columns, parent)
+
+
 def matched_modes_model(matched: MatchedModes, objects: Mapping[str, Any],
                         parent: QObject | None = None) -> TableModel:
     """A MatchedModes object as a table, in the mode table's format.
@@ -169,10 +205,23 @@ def _column_journal(name, index):
     return journal
 
 
+def _control_setter(environment, index):
+    def setter(table: Any, row: int, text: str) -> None:
+        table.set_control(environment, index(row), text)
+    return setter
+
+
+def _control_journal(environment, index):
+    def journal(_table, row, text):
+        return f'.set_control({environment!r}, {index(row)}, {text!r})'
+    return journal
+
+
 def channel_table_model(table: ChannelTable, parent: QObject | None = None,
                         rows: Sequence[int] | None = None,
                         geometry: Geometry | None = None,
-                        set_role: Callable | None = None) -> TableModel:
+                        set_role: Callable | None = None,
+                        environment: str | None = None) -> TableModel:
     """A channel table, with an editor of the right type for each
     column.
 
@@ -197,6 +246,11 @@ def channel_table_model(table: ChannelTable, parent: QObject | None = None,
     in place of the table. A table linked with the time data it
     describes shows that data's roles, and a change made here goes to
     the data (`Project.set_channel_role`), which journals it.
+
+    `environment`, when given, is one of the table's control loops: the
+    Control column shows that loop's control channels and an edit sets
+    them (`ChannelTable.set_control`). A table with environments is
+    always shown with one picked, since its column is theirs.
     """
     # The derived direction columns: Brandon, 2026-09-20.
     rows = None if rows is None else [int(r) for r in rows]
@@ -205,12 +259,19 @@ def channel_table_model(table: ChannelTable, parent: QObject | None = None,
     for name, spec in table.COLUMNS.items():
         title = title_of(name)
         if spec.kind == 'flag':
+            # the one flag is Control, read through `controls` so the
+            # text spellings a paste leaves in the column all show as
+            # the check they mean
             columns.append(Column(
                 title,
-                lambda t, r, n=name, i=index: bool(t.controls()[i(r)])
-                if n == 'control' else bool(t[n][i(r)]),
-                set=_column_setter(name, index),
-                journal=_column_journal(name, index), checkbox=True))
+                lambda t, r, i=index: bool(t.controls(environment)[i(r)]),
+                set=(_control_setter(environment, index)
+                     if environment is not None
+                     else _column_setter(name, index)),
+                journal=(_control_journal(environment, index)
+                         if environment is not None
+                         else _column_journal(name, index)),
+                checkbox=True))
             continue
         if spec.kind == 'choice':
             shown = ([shown_dimension(c) for c in spec.choices]

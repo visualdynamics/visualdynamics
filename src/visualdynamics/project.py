@@ -1279,6 +1279,47 @@ class Project(dict):
             changed += self._push_roles(history_name)
         return list(dict.fromkeys(changed))
 
+    def transformed_rows(self, name: Any) -> list[tuple[str, str, list[str]]]:
+        """Which of a data object's response DOFs are rows of a response
+        transformation in its channel table.
+
+        A transformed environment's specification and spectra are over
+        the matrix's rows, which the controller's file names only by
+        number, so they import as '1', '2', ... (`io.rattlesnake`). This
+        ties such a row back to the matrix: the window's note on the
+        object, and a script's.
+
+        Parameters
+        ----------
+        name : str or object
+            The data object.
+
+        Returns
+        -------
+        list of (str, str, list of str)
+            `(table name, environment, rows)` for each environment of
+            the linked channel table (`channel_table_for`) whose
+            response transformation has a row among the object's
+            response DOFs, in the table's order. Empty when none has.
+        """
+        name = self.name_of(name)
+        dofs = getattr(self.get(name), 'response_dof', None)
+        found = self.channel_table_for(name)
+        if dofs is None or found is None:
+            return []
+        table_name, table = found
+        asked = set(dofs)
+        out = []
+        for env_name, environment in table.environments.items():
+            matrix = environment.response_transformation
+            if matrix is None:
+                continue
+            rows = [str(k + 1) for k in range(matrix.shape[0])]
+            hit = [row for row in rows if row in asked]
+            if hit:
+                out.append((table_name, env_name, hit))
+        return out
+
     def _role_partners(self, name: str) -> list[tuple[str, list]]:
         """The objects in `name`'s group on the other side of the
         history/table pairing, each with the table's rows mapped to the
@@ -5654,7 +5695,8 @@ class Project(dict):
         return path
 
     def table(self, name: Any, *, values: bool = False, dofs: Any = None,
-              form: str = 'shapes') -> tuple[list[str], list[list[str]]]:
+              form: str = 'shapes', environment: str | None = None
+              ) -> tuple[list[str], list[list[str]]]:
         """(headers, rows) for an object that can be shown as a table.
 
         The rows are a channel table's instrumentation, a shape set's
@@ -5664,8 +5706,12 @@ class Project(dict):
         set gives its shape values instead, as the app's Shape Values
         table shows them: at every DOF of the set, or at `dofs`, and as
         the shapes or one of the transformations through them
-        (`core.transform.matrix_at`). An object with no table raises
-        ValueError.
+        (`core.transform.matrix_at`). With `environment`, a channel
+        table's Control column is that control loop's, and with `form`
+        'response' or 'reference' as well the rows are that loop's
+        transformation instead, as the app shows it with the
+        environment and the view picked on the table's bar. An object
+        with no table raises ValueError.
 
         Parameters
         ----------
@@ -5681,14 +5727,20 @@ class Project(dict):
         form : str, default 'shapes'
             With `values`, what: 'shapes' (`Φ`, a row per DOF),
             'response' (`Φ⁺`, a row per mode) or 'reference' (`Φᵀ`).
+            With `environment`, 'response' or 'reference' for that
+            loop's transformation (`ChannelTable.transformation`).
+        environment : str, optional
+            For a channel table, one of its environments
+            (`ChannelTable.environments`).
 
         Returns
         -------
         tuple of (list of str, list of list of str)
             The column headings and the rows, both as text.
         """
+        from .core.channel_table import TRANSFORMATION_FORMS
         from .core.shapes import ShapeSet
-        from .core.tables import shape_values, table_of
+        from .core.tables import shape_values, table_of, transformation_table
 
         name = self.name_of(name)
         if values:
@@ -5696,7 +5748,13 @@ class Project(dict):
                 raise ValueError(f'{name} is a {type(self[name]).__name__}; '
                                  'only a shape set has shape values')
             return shape_values(self[name], self._shape_dofs(name, dofs), form)
-        built = table_of(self[name], objects=self)
+        if environment is not None:
+            if not isinstance(self[name], ChannelTable):
+                raise ValueError(f'{name} is a {type(self[name]).__name__}; '
+                                 'only a channel table has environments')
+            if form in TRANSFORMATION_FORMS:
+                return transformation_table(self[name], environment, form)
+        built = table_of(self[name], objects=self, environment=environment)
         if built is None:
             raise ValueError(f'{name} is a {type(self[name]).__name__}, '
                              'which does not read as a table')

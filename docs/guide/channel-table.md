@@ -97,19 +97,20 @@ them beside the basis geometry, and a script reads the same rows from
 ## Sensors on the geometry
 
 When a row names a model, the sensor is drawn on the geometry at its
-node: a simple body built from the datasheet's dimensions, in the 3-D
-view beside the DOF arrows. The bodies are display only. They are not
-added to the geometry, its mass or its mesh.
+node: a simple body built from the maker's outline drawing, with its
+connector or cable, in the 3-D view beside the DOF arrows. The bodies
+are display only. They are not added to the geometry, its mass or its
+mesh.
 
-| Model | Kind | Size (mm) |
+| Model | Kind | Body (mm) |
 |---|---|---|
-| PCB 356A01, 356A03 | triaxial accelerometer | 6.35 cube |
-| PCB 356A02 | triaxial accelerometer | 20.3 × 14.0 × 14.0 |
-| PCB 356A33 | triaxial accelerometer | 19.6 × 10.2 × 10.2 |
-| PCB 356A43 | triaxial accelerometer | 19.1 × 10.2 × 10.2 |
-| PCB 352A24 | uniaxial accelerometer | 12.2 × 7.1 × 4.8 |
-| PCB 352A73 | uniaxial accelerometer | 8.6 × 4.1 × 2.8 |
-| PCB 208C01 to 208C05 | force transducer | 15.88 hex, 15.88 tall |
+| PCB 356A01, 356A03 | triaxial accelerometer | 6.3 cube, cable out of −X |
+| PCB 356A02 | triaxial accelerometer | 14.0 cube, 20.3 over the connector |
+| PCB 356A33 | triaxial accelerometer | 10.2 cube, 19.6 over the connector |
+| PCB 356A43 | triaxial accelerometer | 10.2 cube, 19.1 over the connector |
+| PCB 352A24 | uniaxial accelerometer | teardrop, 9.9 long, 7.1 round end, 4.8 high |
+| PCB 352A73 | uniaxial accelerometer | 6.75 × 3.96 × 2.8, round nose, cable out of the flat end |
+| PCB 208C01 to 208C05 | force transducer | 15.88 hex, 15.88 tall, a stud each end |
 
 A model that is not in this list is still drawn, as a plain cube for an
 accelerometer or a puck for a force transducer, and the status line
@@ -132,12 +133,14 @@ alone, never from the surface the sensor is mounted on:
   connector faces the node's local +X (+Y when the sensing axis is
   along X).
 
-The face on the positive side of each sensing axis is drawn in that
-axis's arrow color: red for X, green for Y, blue for Z. A sign wrong in
-the table shows as a colored face on the wrong side. Triax legs that
-are not perpendicular, or that make a left-handed set, are an error in
-the table; the sensor is drawn as a plain body on the node's own axes,
-and the status line names the node.
+A triaxial accelerometer carries an X, a Y and a Z on the faces its
+legs point out of, as the sensors are etched. A uniaxial accelerometer
+or a force transducer carries an arrow on each side along its sensing
+axis, pointing the positive way. A sign wrong in the table shows as a
+letter or an arrow pointing the wrong way. Triax legs that are not
+perpendicular, or that make a left-handed set, are an error in the
+table; the sensor is drawn as a plain body with no letters on the
+node's own axes, and the status line names the node.
 
 *Sensors* on the 3-D view's bar turns the bodies on and off, and the
 list beside it draws them at true size or larger, up to 100 times, since

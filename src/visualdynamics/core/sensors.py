@@ -22,8 +22,8 @@ node's local +X (+Y when the sensing axis is along X), since a table
 does not say it.
 
 Orientation comes from the table alone, never from the surface a sensor
-is mounted on. A wrong sign in the table shows in the drawing as a
-colored positive face on the wrong side.
+is mounted on. A wrong sign in the table shows in the drawing: a
+triax's lettered face, or a uniaxial's arrow, points the wrong way.
 """
 
 # Brandon, 2026-10-26 and 2026-10-27 (PLAN.md, "Sensors drawn on the
@@ -35,7 +35,7 @@ colored positive face on the wrong side.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -54,9 +54,10 @@ class Sensor:
 
     `center` is the node's coordinates as the geometry holds them.
     `frame`'s columns are the body's x, y and z in global coordinates, a
-    right-handed set of unit vectors. `positive` maps a body axis (0, 1
-    or 2) to the axis letter its positive face is colored for: every leg
-    of a triax, and a uniaxial's sensing axis with its row's letter.
+    right-handed set of unit vectors. `marked` says the body carries its
+    marks, a triax's letters or a uniaxial's arrow: not when the frame is
+    the node's own axes because the table's legs could not be read, since
+    the marks would then say what the table does not.
     """
 
     node: int
@@ -66,7 +67,7 @@ class Sensor:
     frame: np.ndarray
     rows: tuple[int, ...]
     generic: bool
-    positive: dict[int, str] = field(default_factory=dict)
+    marked: bool = True
 
     @property
     def kind(self) -> str:
@@ -167,15 +168,13 @@ def place(table: Any, geometry: Any) -> tuple[list[Sensor], list[str]]:
                              'own axes')
                 sensors.append(Sensor(node, model, GENERIC['triax'], center,
                                       _local_frame(geometry, node),
-                                      tuple(rows), True))
+                                      tuple(rows), True, marked=False))
                 continue
-            positive = {0: 'X', 1: 'Y', 2: 'Z'}
         else:
             direction = str(directions[rows[0]]).strip().upper()
             frame = _axial_frame(geometry, node, direction)
-            positive = {2: direction[0]}
         sensors.append(Sensor(node, model, entry, center, frame, tuple(rows),
-                              entry is GENERIC[kind], positive))
+                              entry is GENERIC[kind]))
     for what, names in unknown.items():
         listed = ', '.join(sorted(set(names)))
         notes.append(f'not in the catalog, drawn as a generic {what}: '

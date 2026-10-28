@@ -125,10 +125,14 @@ Before saying anything is done:
   marked `slow` and deselected; run `-m slow` when the demo, the
   website or the examples are touched.
 - Docs: `properdocs build --strict` when docstrings or guides changed.
-- CI runs the same suite on every pull request, on both Pythons, and
-  is what decides whether a change can merge. It also runs weekly
+- CI runs the same suite on every pull request, on Python 3.12, 3.13
+  and 3.14, with the demonstration models in a job beside it, and is
+  what decides whether a change can merge; the merge queue runs the
+  suite once more on 3.14 on top of `main`. It also runs weekly
   against whatever the dependencies' latest releases are, since none
-  of them is pinned. The local gate is still the gate.
+  of them is pinned, and the weekly run and every push to `main` check
+  the guide's mesh table too (`-m guide`, minutes of meshing a shape,
+  left off pull requests). The local gate is still the gate.
 
 ## Verification discipline
 

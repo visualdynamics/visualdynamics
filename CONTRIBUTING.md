@@ -118,10 +118,14 @@ properdocs build --strict           # the docs site, if you changed docstrings o
 ```
 
 CI runs the same checks on every pull request, on every push to `main`,
-once a week, and on demand, on Python 3.12, 3.13 and 3.14. Nothing reaches `main` except through a pull
-request with its checks green (the tests on each Python, the
-documentation build and the branch name), and that holds for the owner
-too.
+once a week, and on demand: the suite on Python 3.12, 3.13 and 3.14,
+and the demonstration models in a job of their own on 3.14. Nothing
+reaches `main` except through a pull request with its checks green (the
+tests on each Python, the demonstration models, the documentation build
+and the branch name), and that holds for the owner too. The merge queue
+then runs the suite once more on 3.14, on top of `main`, before the
+merge. The guide's mesh table, minutes of meshing a shape, is checked
+on `main` and weekly rather than on each pull request.
 
 The `slow` mark covers the demonstration models in `visualdynamics.demo`
 that the website, the docs and the examples are built from (the drone

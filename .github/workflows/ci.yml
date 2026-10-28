@@ -100,6 +100,15 @@ jobs:
         run: ruff check .
 
       - name: Test
+        # The merge queue's run proves the change still passes on top of
+        # main; the pull request's run already proved it on all three
+        # interpreters with the demonstration model. So in the queue the
+        # suite runs on 3.14 alone and the other two jobs stop here, green
+        # in a minute, which halves a change's time to main (Brandon,
+        # 2026-10-28: 90 minutes a change, 45 of them this repeat). The
+        # jobs still exist, since a required check that never reports
+        # holds the queue until its timeout.
+        if: github.event_name != 'merge_group' || matrix.python-version == '3.14'
         # Chromium (the report editor's engine) has no usable sandbox in
         # a container, and asks for a GPU that is not there
         env:
@@ -107,7 +116,7 @@ jobs:
           # Coverage on one interpreter only: instrumentation is not free
           # on a run of the better part of half an hour, and the number does not differ
           # between them. `--cov-report=` writes the data and prints
-          # nothing; the report is assembled once, after the demo step.
+          # nothing; the report is assembled in the step after.
           COV: ${{ matrix.python-version == '3.14'
                    && '--cov=visualdynamics --cov-report=' || '' }}
         # --durations: the run takes the better part of half an hour here against three and a
@@ -128,20 +137,12 @@ jobs:
         # failed: a crash must not hide the rest of the suite.
         run: xvfb-run -a python -m pytest tests -q -n auto --durations=20 $COV
 
-      # The demonstration model, deselected from the run above because it
-      # is a forty-six-second eigensolution nobody wants on every edit. It
-      # is what the website and the docs are built from, so it is checked
-      # here rather than left to rot.
-      - name: Test the demonstration model
-        env:
-          QTWEBENGINE_CHROMIUM_FLAGS: --no-sandbox --disable-gpu
-          COV: ${{ matrix.python-version == '3.14'
-                   && '--cov=visualdynamics --cov-append --cov-report=' || '' }}
-        run: xvfb-run -a python -m pytest tests -q -m slow -n auto $COV
-
-      # Both runs together. Measuring only the first would read
-      # `demo/drone.py` at 12% and call the speedup a regression: the
-      # demonstration model is tested, just not on every edit.
+      # The suite alone: the demonstration models run in the `demo` job
+      # beside this one (they ran here, after the suite, until 2026-10-28,
+      # and the two together were the job's 45 minutes). `demo/` is
+      # therefore read low here — drone.py at 12% — and that is not a
+      # regression: the demonstration models are tested, in their own
+      # job, just not measured.
       - name: Coverage
         if: matrix.python-version == '3.14'
         run: |
@@ -149,8 +150,9 @@ jobs:
           {
             echo "## Coverage: ${total}%"
             echo
-            echo "Statements reached by the suite and the demonstration"
-            echo "model together, on Python ${{ matrix.python-version }}."
+            echo "Statements reached by the suite, on Python"
+            echo "${{ matrix.python-version }}; the demonstration models"
+            echo "run in the demo job and are not measured."
             echo
             echo "<details><summary>By module</summary>"
             echo
@@ -161,8 +163,7 @@ jobs:
           python -m coverage html
           # The floor (Brandon, 2026-09-16): a pull request that adds
           # code without tests goes red the way a license violation
-          # does. Measured at 92% on the suite alone and a little more
-          # with the demonstration model appended, the day it was set;
+          # does. Measured at 92% on the suite alone the day it was set;
           # raise it when the number rises, never lower it to pass.
           python -m coverage report --fail-under=90 > /dev/null
 
@@ -172,6 +173,56 @@ jobs:
         with:
           name: coverage-html
           path: htmlcov/
+
+  # The demonstration models, deselected from the suite because the
+  # drone alone is a forty-six-second eigensolution nobody wants on every
+  # edit. They are what the website and the docs are built from, so they
+  # are checked here rather than left to rot: in a job of their own,
+  # beside the suite rather than after it (2026-10-28; after it, the two
+  # were 45 minutes in a row, the critical path of every change). On one
+  # interpreter: the models' numbers are about the models, and the suite
+  # has already run on all three. Skipped in the merge queue, where the
+  # pull request's own run has just checked them; a skipped required
+  # job counts as passed.
+  #
+  # The guide's mesh table (`guide`, tests/test_demo_shapes.py) is
+  # minutes of tetrahedral meshing per shape, 17 of the job's minutes on
+  # this runner against 3 for everything else. It is checked on every
+  # push to main, weekly and on demand, and not on a pull request: a
+  # change that breaks the mesher is caught on main the same hour, and
+  # the mesher's own tests are in the suite.
+  demo:
+    if: github.event_name != 'merge_group'
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+          cache: pip
+
+      # as the test job's: GitHub Actions has no way to share a step
+      - name: Install the graphics libraries Qt and VTK link against
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libegl1 libgl1 libopengl0 libglx-mesa0 libxkbcommon-x11-0 \
+            libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xfixes0 libxcb-xinerama0 libnss3 \
+            libxdamage1 libxrandr2 libasound2t64
+
+      - name: Install visualdynamics and its test tools
+        run: pip install -e '.[dev,step]'
+
+      - name: Test the demonstration models
+        env:
+          QTWEBENGINE_CHROMIUM_FLAGS: --no-sandbox --disable-gpu
+          MARK: ${{ github.event_name == 'pull_request'
+                    && 'slow and not guide' || 'slow' }}
+        run: xvfb-run -a python -m pytest tests -q -m "$MARK" -n auto --durations=10
 
   # The head branch of a pull request is named for what it carries:
   # `fix/`, `feature/`, `docs/` or `tooling/` and a short lower-case

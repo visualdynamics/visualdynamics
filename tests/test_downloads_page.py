@@ -334,8 +334,47 @@ def test_ci_keeps_its_measured_worker_count_and_ceiling():
     job = workflow['jobs']['test']
     assert job['timeout-minutes'] == 60
     assert job['strategy']['fail-fast'] is False
-    runs = [s['run'] for s in job['steps'] if 'pytest tests' in s.get('run', '')]
-    assert runs and all('-n auto' in run for run in runs)
+    for name in ('test', 'demo'):
+        steps = workflow['jobs'][name]['steps']
+        runs = [s['run'] for s in steps if 'pytest tests' in s.get('run', '')]
+        assert runs and all('-n auto' in run for run in runs), name
+
+
+def test_ci_runs_the_demonstration_models_beside_the_suite():
+    """Brandon, 2026-10-28, on 90 minutes a change: the demonstration
+    models ran after the suite in the same job (26 minutes, then 17),
+    and the merge queue ran all of it again. Now the demo job runs
+    beside the suite on one interpreter and is skipped in the queue; in
+    the queue the suite runs on 3.14 alone, the other two jobs stopping
+    before it, green in a minute; and the guide's mesh table (`guide`,
+    11 CPU-minutes of meshing) is checked on main and weekly, not on a
+    pull request."""
+    import yaml
+
+    root = os.path.join(os.path.dirname(__file__), '..')
+    with open(os.path.join(root, '.github', 'workflows', 'ci.yml'),
+              encoding='utf-8') as handle:
+        workflow = yaml.safe_load(handle)
+    test, demo = workflow['jobs']['test'], workflow['jobs']['demo']
+    assert 'needs' not in demo, 'beside the suite, not after it'
+    assert demo['if'] == "github.event_name != 'merge_group'"
+    assert demo['timeout-minutes'] == 60
+    python = next(s for s in demo['steps'] if 'setup-python' in s.get('uses', ''))
+    assert python['with']['python-version'] == '3.14'
+    run = next(s for s in demo['steps'] if 'pytest tests' in s.get('run', ''))
+    assert '-m "$MARK"' in run['run']
+    assert run['env']['MARK'].split() == [
+        '${{', 'github.event_name', '==', "'pull_request'", '&&',
+        "'slow", 'and', 'not', "guide'", '||', "'slow'", '}}']
+    suite = next(s for s in test['steps'] if s.get('name') == 'Test')
+    assert suite['if'] == (
+        "github.event_name != 'merge_group' || matrix.python-version == '3.14'")
+    assert not any('-m slow' in s.get('run', '') for s in test['steps']), \
+        'the demonstration models left the test job'
+    coverage = next(s for s in test['steps'] if s.get('name') == 'Coverage')
+    assert '--cov-append' not in '\n'.join(
+        str(s.get('env', '')) for s in test['steps'])
+    assert 'not measured' in coverage['run']
 
 
 def test_ci_holds_coverage_to_a_floor():

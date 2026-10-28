@@ -196,10 +196,14 @@ line-length = 100
 # — forty-six seconds, which was most of the suite's wall clock and none
 # of it about the package. The rules that *are* about the package are
 # stated on a three-quad strip in test_fem.py instead. Run the demo's own
-# suite with `pytest -m slow` (CI does, in a step of its own).
+# suite with `pytest -m slow` (CI does, in a job of its own).
+# `guide` marks the slow tests that are minutes of meshing each, the
+# guide's tetrahedra table: CI runs them on main and weekly, not on a
+# pull request (2026-10-28), and `-m slow` here still runs them.
 addopts = '-n auto -m "not slow"'
 markers = [
     "slow: the demonstration model, built for the website and the docs — run on demand rather than on every edit",
+    "guide: the guide's mesh table, minutes of meshing a shape — checked on main and weekly, not on every pull request",
 ]
 filterwarnings = [
     # netCDF4's published wheel is built against an older numpy C API; the

@@ -65,13 +65,17 @@ def test_a_refused_mesh_is_recorded_with_its_reason(monkeypatch):
 
 
 @pytest.mark.slow
+@pytest.mark.guide
 @pytest.mark.parametrize('key', list(shapes.SHAPES))
 def test_the_guides_tetrahedra_are_as_the_table_says(key):
     """What the guide's table records (2026-10-19): the tetrahedra mesh
     all three within a percent of the recipe's volume with no element
     inside out. The bricks' rows, refusals at these sizes, are minutes
     of fitting each and are left to the tool that makes the table: the
-    public runner's hour was not enough for both."""
+    public runner's hour was not enough for both. `guide`: the three
+    together are 11 CPU-minutes here and 17 minutes of the public
+    runner's demo job, so CI runs them on main and weekly, not on every
+    pull request (2026-10-28)."""
     got = shapes.mesh(shapes.SHAPES[key](), 'tetras')
     # the worst on the round shapes is a flat one on a convex wall,
     # 0.02 here and 0.0002 on the public runner (the triangulation

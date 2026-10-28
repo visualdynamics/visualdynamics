@@ -1155,6 +1155,7 @@ class MainWindow(QMainWindow):
         self.data_pane.filter_panel.apply_asked.connect(self.filter_data)
         self.data_pane.truncate_panel.apply_asked.connect(
             self.truncate_data)
+        self.data_pane.resample_panel.apply_asked.connect(self.resample_data)
         # the specification draft: every edit re-previews, the button
         # makes the object. A specification opened to edit is drawn on
         # the plot, so its toggle sits on the plot's own bar
@@ -1492,6 +1493,12 @@ class MainWindow(QMainWindow):
         #: and integrations for numbers already held. Let go whenever
         #: the fit is not up, so a record left behind is not kept alive
         self._held_fit: tuple | None = None
+        #: and the stroke reading's integration, the same way: a rating
+        #: moved reads the held arrays against the new rating
+        self._held_stroke: tuple | None = None
+        #: and the overload check's readings, the same way: the step to
+        #: the next level, dragged on the chart, judges them again
+        self._held_overload: tuple | None = None
         #: and the modes the signature comparison found, the same way:
         #: a limit moved does not move them, and finding them again was
         #: a tenth of a second on every tick of a limit's box
@@ -13083,29 +13090,64 @@ class MainWindow(QMainWindow):
             panel.hide()
             return
         setting = history.sine_extraction or history.suggest_sine_extraction()
-        panel.show_history(history, specs[0], setting)
+        # the specification the record is read against: the one its
+        # levels were extracted against, else the first written at a
+        # channel it holds, else the project's first. Every readout
+        # read against specs[0], so with two sine specifications a
+        # record was judged against the wrong sweep (2026-10-28)
+        spec = self._sine_specification(history, specs)
+        panel.show_history(history, spec, setting)
         panel.show()
         # and a held tone, read against time where its story is; the
         # readout hides itself beside a specification that only sweeps
-        panel.dwell.show_dwell(history, specs[0], self.unit_system)
+        panel.dwell.show_dwell(history, spec, self.unit_system)
         # and what the channel carried besides the tone, once the levels
         # are extracted; the readout hides itself beside a record with
         # none, since it reads the extraction and never runs it, and
         # says so rather than checking levels whose settings have moved
-        levels = self._extracted_levels(history, specs[0])
+        levels = self._extracted_levels(history, spec)
         stale = (None if levels is None
                  else self._stale.get(self.project.name_of(levels)))
-        panel.distortion.show_distortion(history, specs[0], levels,
+        panel.distortion.show_distortion(history, spec, levels,
                                          stale=stale)
         # and whether the tone was at the frequency the profile asks for,
         # read the same way from the same levels
-        panel.frequency.show_frequency(history, specs[0], levels,
+        panel.frequency.show_frequency(history, spec, levels,
                                        stale=stale)
         # and the record as one mixed test, when the project holds the
         # floor's random specification at a channel the record has; the
         # readout hides itself otherwise
-        panel.mixed.show_mixed(history, self._mixed_floor(history), specs[0],
+        panel.mixed.show_mixed(history, self._mixed_floor(history), spec,
                                self.unit_system)
+
+    def _sine_specification(self, history, specs):
+        """The sine specification `history` is read against, of the
+        project's `specs`: the one its most recent extraction names
+        (`extract_sine` provenance), else the first written at a channel
+        the record holds, else the first."""
+        names = {}
+        for spec in specs:
+            try:
+                names[self.project.name_of(spec)] = spec
+            except (KeyError, ValueError):
+                pass
+        try:
+            record = self.project.name_of(history)
+        except (KeyError, ValueError):
+            record = None
+        if record is not None:
+            for name in reversed(list(self.project.names)):
+                made = self.project.provenance.get(name, {})
+                if (made.get('verb') == 'extract_sine'
+                        and made.get('source') == record):
+                    sweep = (made.get('params') or {}).get('specification')
+                    if sweep in names:
+                        return names[sweep]
+        dofs = {str(dof) for dof in history.response_dof}
+        for spec in specs:
+            if dofs & {str(dof) for dof in spec.response_dof}:
+                return spec
+        return specs[0]
 
     def _mixed_floor(self, history):
         """The random specification a mixed record's floor is judged
@@ -13941,12 +13983,19 @@ class MainWindow(QMainWindow):
         self.data_pane.graphics.clear()
         settings = panel.settings()
         arguments = prediction_arguments(settings)
+        # the inverse is held against its own settings; the ratings are
+        # read against it (`with_ratings`), so a rating moved does not
+        # decompose the plant again (2026-10-28)
+        inverse = {key: arguments[key] for key in ('method', 'tolerance',
+                                                    'weight')}
+        ratings = {key: value for key, value in arguments.items()
+                   if key not in inverse}
         held = self._held_prediction
         try:
             if (held is not None and held[0] is frf
                     and held[1] is frf.ordinate and held[2] is spec
-                    and held[3] is spec.ordinate and held[4] == arguments):
-                prediction = held[5]
+                    and held[3] is spec.ordinate and held[4] == inverse):
+                prediction = held[5].with_ratings(**ratings)
             else:
                 self._held_prediction = None
                 # an eight-by-four plant on 4096 lines is over a tenth of
@@ -13956,7 +14005,7 @@ class MainWindow(QMainWindow):
                     lambda progress=None: predict_drives(
                         frf, spec, progress=progress, **arguments))
                 self._held_prediction = (frf, frf.ordinate, spec,
-                                         spec.ordinate, arguments,
+                                         spec.ordinate, inverse,
                                          prediction)
         except Cancelled:
             panel.show_prediction(None, 'Not predicted: cancelled.')
@@ -14565,6 +14614,10 @@ class MainWindow(QMainWindow):
                                          series[0][0]) is not None)
         if not (history is not None and self.data_pane.showing('fit')):
             self._held_fit = None
+        if not (history is not None and self.data_pane.showing('stroke')):
+            self._held_stroke = None
+        if not (history is not None and self.data_pane.showing('overload')):
+            self._held_overload = None
         predicted = (self.data_pane.showing('prediction')
                      and self._prediction_source(series))
         if predicted:
@@ -15898,6 +15951,28 @@ class MainWindow(QMainWindow):
             f'{added}: {truncation.describe()} — '
             f'{cut.ordinate.shape[-1]} of {obj.ordinate.shape[-1]} '
             f'samples, linked to {name}')
+
+    def resample_data(self) -> None:
+        """Take the selected time history to the lower rate the resample
+        view shows, filtered first, and add the result beside it.
+
+        The rate is the record's over the panel's factor and the filter
+        order the panel's, as `Project.resample` takes them."""
+        settings = self.data_pane.resample_panel.settings()
+        obj = self.current_object()
+        if not isinstance(obj, TimeHistory):
+            self._show_status('Select a time history to resample')
+            return
+        rate = obj.sample_rate / settings['factor']
+        acted = self._act_on(
+            TimeHistory, 'Select a time history to resample',
+            self.project.resample, rate, order=settings['order'])
+        if acted is None:
+            return
+        name, _obj, added = acted
+        self.show_object(added)
+        self._show_status(f'{added}: {rate:g} Hz, filtered at order '
+                          f'{settings["order"]} first — linked to {name}')
 
     def generate_rigid_body_modes(self) -> None:
         """Make the six rigid-body mode shapes of the selected geometry,
@@ -19862,7 +19937,7 @@ class MainWindow(QMainWindow):
             (result['refused'] for _label, result in rows
              if result.get('refused')), None)
         return rows, self.unit_system.label(
-            data.ordinate_dim[0].replace('**2/frequency', ''))
+            channel_quantities(data.ordinate_dim[0])[0])
 
     def _specification_rows(self, series):
         """(rows, unit) for a specification on its own — nothing else
@@ -19899,13 +19974,13 @@ class MainWindow(QMainWindow):
         for i in wanted:
             level = specification_rms(spec, i)
             shown = float(self.unit_system.from_si(
-                level, spec.ordinate_dim[i].replace('**2/frequency', '')))
+                level, channel_quantities(spec.ordinate_dim[i])[0]))
             rows.append((pair_label(_pair_of(spec, i)),
                          {'specification_rms': shown}))
         if not rows:
             return None
         return rows, self.unit_system.label(
-            spec.ordinate_dim[wanted[0]].replace('**2/frequency', ''))
+            channel_quantities(spec.ordinate_dim[wanted[0]])[0])
 
     def _render_specifications(self, found):
         """The specification's own levels, a row per channel."""
@@ -20529,8 +20604,17 @@ class MainWindow(QMainWindow):
         channel = self._acceleration_channel(history, records)
         self._settle_on_record(name, history, records, channel)
         settings = panel.settings()
+        held = self._held_stroke
         try:
-            reading = read_stroke(history, channel, **settings)
+            if (held is not None and held[0] is history
+                    and held[1] is history.ordinate and held[2] == channel):
+                # the integration held: a rating moved reads it again
+                reading = held[3].with_ratings(**settings)
+            else:
+                self._held_stroke = None
+                reading = read_stroke(history, channel, **settings)
+                self._held_stroke = (history, history.ordinate, channel,
+                                     reading)
         except ValueError as error:
             # a channel with a sample that is not a number: the reason,
             # and no numbers that would read as a verdict
@@ -20661,9 +20745,20 @@ class MainWindow(QMainWindow):
         self._overload_serial = serial = getattr(
             self, '_overload_serial', 0) + 1
         samples = history.num_records * len(history.abscissa)
-        if samples > OVERLOAD_INLINE_SAMPLES:
+        # the step to the next level is a judgment of readings already
+        # made, so a check held is read again against a step moved;
+        # anything else read anew (2026-10-28)
+        read_with = {key: value for key, value in settings.items()
+                     if key != 'step_db'}
+        held = self._held_overload
+        if (held is not None and held[0] is history
+                and held[1] is history.ordinate and held[2] is table
+                and held[3] == read_with):
+            check = held[4].with_step(settings['step_db'])
+        elif samples > OVERLOAD_INLINE_SAMPLES:
             from ..core.progress import Cancelled
 
+            self._held_overload = None
             try:
                 check = self._run_long(
                     f'Reading {name} against its ranges…',
@@ -20676,8 +20771,13 @@ class MainWindow(QMainWindow):
                 # the plot was redrawn while the worker read: that
                 # drawing read its own, and this one belongs to nothing
                 return None
+            self._held_overload = (history, history.ordinate, table,
+                                   read_with, check)
         else:
+            self._held_overload = None
             check = history.overload_check(table, **settings)
+            self._held_overload = (history, history.ordinate, table,
+                                   read_with, check)
         record = records[0] if records else None
         band = self.data_pane.kurtosis_bounds
         build_overload(self.data_pane.graphics, history, check, record,

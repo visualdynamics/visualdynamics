@@ -464,10 +464,18 @@ def test_a_record_is_checked_on_its_first_acceleration_channel():
     assert check_pulse(shot, nominal, '2Z+').passed
     with pytest.raises(ValueError, match='not an acceleration'):
         check_pulse(shot, nominal, 0)
-    with pytest.raises(ValueError, match='no channel 9Z'):
+    with pytest.raises(ValueError, match='9Z\\+ is not an acceleration'):
         check_pulse(shot, nominal, '9Z+')
     with pytest.raises(ValueError, match='holds none'):
         check_pulse(history(np.zeros(t.size), dims=['force']), nominal)
+    # a channel whose unit is only hinted holds raw numbers: it was
+    # judged against the SI nominal and passed at the wrong scale
+    hinted = TimeHistory(t, np.atleast_2d(nominal.at(t - opens)),
+                         response_dof=['1Z+'], dimension_hint=['acceleration'])
+    with pytest.raises(ValueError, match='declare its unit'):
+        pulse_channel(hinted)
+    with pytest.raises(ValueError, match='declare its unit'):
+        check_pulse(hinted, nominal)
 
 
 # ---- the view ----------------------------------------------------------------
@@ -611,18 +619,25 @@ def test_the_panels_pulse_redraws_the_check(window, pump):
     assert window.data_pane.pulse_settings['velocity_tolerance'] == 0.08
 
 
-def test_a_record_with_no_acceleration_says_so(window, pump):
+@pytest.mark.parametrize('kind', ['force', 'undeclared'])
+def test_a_record_with_no_acceleration_is_not_offered_the_check(
+        window, pump, kind):
+    """Nothing to read a pulse from, so nothing to offer (principle 3):
+    a force, or an acceleration whose unit was never declared, which
+    was offered and read raw against the SI nominal (2026-10-28)."""
     t, opens = record()
-    window.add_object('Force', TimeHistory(
-        t, np.atleast_2d(pulse().at(t - opens)), response_dof=['101Z+'],
-        ordinate_dim=['force']))
-    window.show_object('Force')
+    values = np.atleast_2d(pulse().at(t - opens))
+    history = (TimeHistory(t, values, response_dof=['101Z+'],
+                           ordinate_dim=['force']) if kind == 'force'
+               else TimeHistory(t, values, response_dof=['101Z+'],
+                                dimension_hint=['acceleration']))
+    window.add_object('Not acceleration', history)
+    window.show_object('Not acceleration')
     pump()
-    window.data_pane.pulse_action.trigger()
-    pump()
-    panel = window.data_pane.pulse_panel
-    assert 'holds none' in panel.verdict.text()
-    assert panel.readout.text() == ''
+    pane = window.data_pane
+    assert not pane.pulse_action.isVisible()
+    assert not pane.pulse_panel.isVisibleTo(pane)
+    assert pane.shocks_action.isVisible(), 'the other readings still offered'
 
 
 def test_the_pulse_check_is_journaled_and_replays(window, pump, tmp_path,

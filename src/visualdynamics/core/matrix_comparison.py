@@ -108,6 +108,8 @@ from typing import Any
 import numpy as np
 
 from ..units import UNKNOWN
+from .compliance import record_at
+from .matrix_checks import channel_labels
 from .progress import Ticker
 
 #: how far the measured coherence may be from the specified one, either
@@ -311,25 +313,6 @@ def _channel_of(data: Any, record: int) -> tuple[tuple[str, str],
 # `record_grid` gives which record holds each entry, not its values:
 # the comparison reads the specification at the measured lines and
 # names the records in its results.
-def channel_labels(channels: Sequence[tuple[str, str]]) -> list[str]:
-    """A label per (DOF, quantity) channel: the DOF, with the quantity
-    added only where one DOF carries two channels.
-
-    Parameters
-    ----------
-    channels : sequence of (str, str)
-        The channels, as (DOF, quantity).
-
-    Returns
-    -------
-    list of str
-        One label per channel.
-    """
-    dofs = [dof for dof, _quantity in channels]
-    return [dof if dofs.count(dof) == 1 else f'{dof} {quantity}'
-            for dof, quantity in channels]
-
-
 def record_grid(data: Any, records: Sequence[int] | None = None
                 ) -> tuple[list[tuple[str, str]], list[list[int | None]]]:
     """The records of a spectral matrix laid out as the matrix: its
@@ -397,73 +380,9 @@ def _disagrees(term: np.ndarray, mirror: np.ndarray) -> bool:
     return not np.allclose(term, other, rtol=1e-6, atol=1e-9 * scale)
 
 
-def _between(frequencies: np.ndarray, values: np.ndarray,
-             lines: np.ndarray) -> np.ndarray:
-    """A cross term written at breakpoints, read at `lines` as the
-    authoring sheet reads one: the magnitude log-log between two points
-    that are both above zero and straight between two that are not (a
-    coherence of zero, two channels stated to be independent, is a
-    value and not a gap), the phase linearly. Not a number outside the
-    points."""
-    order = np.argsort(frequencies)
-    f = frequencies[order]
-    v = values[order].astype(complex)
-    out = np.full(lines.shape, np.nan, dtype=complex)
-    if f.size < 2:
-        return out
-    inside = (lines >= f[0]) & (lines <= f[-1])
-    at = lines[inside]
-    k = np.clip(np.searchsorted(f, at, side='right') - 1, 0, f.size - 2)
-    m1, m2 = np.abs(v[k]), np.abs(v[k + 1])
-    part = (at - f[k]) / (f[k + 1] - f[k])
-    with np.errstate(divide='ignore', invalid='ignore'):
-        logs = np.exp(np.log(m1) + (np.log(m2) - np.log(m1))
-                      * np.log(at / f[k]) / np.log(f[k + 1] / f[k]))
-    magnitude = np.where((m1 > 0.0) & (m2 > 0.0), logs,
-                         m1 + (m2 - m1) * part)
-    phase = np.interp(at, f, np.unwrap(np.angle(v)))
-    out[inside] = magnitude * np.exp(1j * phase)
-    return out
-
-
-def _read_at(data: Any, record: int, lines: np.ndarray) -> np.ndarray:
-    """One record of a specification read at `lines`, the way it is
-    drawn, and not a number where it is not written.
-
-    An autospectrum is written where it is above zero, and between
-    breakpoints ('log_log') is read log-log with its gaps
-    (`compliance.log_interpolate`). A cross term is written wherever it
-    is a number, zero included, and is read between breakpoints by
-    `_between`; whether its coherence is defined is for its two
-    autospectra to say. On lines or bands ('bin') a record takes the
-    value of the bin the line falls in."""
-    from .compliance import log_interpolate
-    from .data import autospectrum
-
-    frequencies = np.asarray(data.abscissa, dtype=float)
-    values = np.asarray(data.ordinate)[record]
-    auto = autospectrum(data, record)
-    written = np.isfinite(frequencies) & (
-        data.written(record) if auto else np.isfinite(values))
-    if getattr(data, 'interpolation', 'bin') == 'log_log':
-        if auto:
-            return log_interpolate(lines, frequencies, np.real(values))
-        return _between(frequencies[written], values[written], lines)
-    left, right = data.bin_bounds()
-    order = np.argsort(left)
-    left, right = left[order], right[order]
-    out = np.full(lines.shape, np.nan, dtype=float if auto else complex)
-    if not left.size:
-        return out
-    # the last bin starting at or below each line, if that bin reaches it
-    k = np.searchsorted(left, lines, side='right') - 1
-    found = k >= 0
-    k = np.maximum(k, 0)
-    found &= (lines >= left[k]) & (lines < right[k])
-    source = order[k]
-    found &= written[source]
-    out[found] = (np.real(values) if auto else values)[source[found]]
-    return out
+# The specification is read at the measured lines by `compliance.record_at`,
+# the one reader the drive prediction shares (its own reader read a
+# zero at a breakpoint as a gap, and the two disagreed, 2026-10-28).
 
 
 # ---- the readings -------------------------------------------------------------
@@ -1119,7 +1038,7 @@ def compare_matrix(specification: Any, measured: Any, *,
 
     # ---- the cross terms: coherence and phase, line by line
     autos_measured = {k: levels[k].measured_record for k in range(n)}
-    autos_specified = {k: _read_at(specification, diagonal[k], lines)
+    autos_specified = {k: record_at(specification, diagonal[k], lines)
                        for k in range(n)}
     # the measured cross terms found by the channels the autospectra
     # were paired with, either way round: a term held only the other way
@@ -1179,8 +1098,8 @@ def compare_matrix(specification: Any, measured: Any, *,
             mirrors = []
             both = grid[r][c] is not None and grid[c][r] is not None
             if both and _disagrees(
-                    _read_at(specification, grid[r][c], lines),
-                    _read_at(specification, grid[c][r], lines)):
+                    record_at(specification, grid[r][c], lines),
+                    record_at(specification, grid[c][r], lines)):
                 mirrors.append('specification')
             a = where[_channel_of(measured, p)[0]]
             b = where[_channel_of(measured, q)[0]]
@@ -1222,7 +1141,7 @@ def compare_matrix(specification: Any, measured: Any, *,
                 notes.append(note)
             # the term of r against c: a record held the other way round
             # is the conjugate, its phase reversed
-            spec_term = _read_at(specification, spec_index, lines)
+            spec_term = record_at(specification, spec_index, lines)
             spec_term = spec_term if flip > 0 else np.conj(spec_term)
             held_term = (ordinate[theirs] if measured_flip > 0
                          else np.conj(ordinate[theirs]))

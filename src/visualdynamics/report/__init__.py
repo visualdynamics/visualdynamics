@@ -193,6 +193,11 @@ def _report_payload(report, objects, unit_system=None, edit=False,
 
     active = enabled_features(report)
     conventions = 'plot_conventions' in active
+    # record captions: every measured spectrum's figure carries the
+    # caption block its records carry, as the per-block check box gives
+    # one figure (the feature stood registered and unbuilt while the
+    # block's own check box did the same thing, 2026-10-28)
+    captions = 'record_captions' in active
     # calibration in date: the channel table against the test date
     calibration = 'calibration_in_date' in active
     # skeleton sections: the page laid out on the sections a test
@@ -226,7 +231,8 @@ def _report_payload(report, objects, unit_system=None, edit=False,
 
             built = build_prediction(block, objects, us, object_groups)
         else:
-            built = _build_block(block, objects, us, object_groups)
+            built = _build_block(_captioned(block) if captions else block,
+                                 objects, us, object_groups)
         if built is None:
             if not edit:
                 continue
@@ -534,6 +540,10 @@ def _field_value(obj, field, us):
     return None
 
 
+#: any reference left on the page, and the figure or table citation
+#: it may be
+_ANY_REFERENCE = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
+_CITATION = re.compile(r'(figure|table)\s*:\s*(.+)', re.IGNORECASE)
 _FIGURE = re.compile(r'\{\{\s*(figure|table)\s*:\s*([^{}]+?)\s*\}\}',
                      re.IGNORECASE)
 
@@ -549,23 +559,32 @@ def _resolve_figures(text, labeled, edit=False):
     """{{figure:<start of caption>}} becomes 'Figure 3' — whatever
     number that figure carries right now. Same for {{table:...}}.
 
-    A reference that matches no figure never reaches a reader. On the
-    reading page the sentence holding it is left out: a sentence that
-    cites a figure is about that figure, and without it the sentence
-    describes a plot that is not there. A line that is not prose (a
-    heading, a table row) keeps its words and loses only the reference.
-    On the edit page the reference is marked in place instead, so a
-    person who typed a caption wrong sees it rather than losing the
-    sentence.
+    A reference that resolves to nothing never reaches a reader: a
+    figure or table reference that matches no caption, or a field
+    reference (`resolve_references`) left standing because its object
+    or field is not there. On the reading page the sentence holding it
+    is left out: a sentence that cites a figure is about that figure,
+    and one that quotes a value is about that value. A line that is
+    not prose (a heading, a table row) keeps its words and loses only
+    the reference. On the edit page the reference is marked in place
+    instead, so a person who typed a caption or a field wrong sees it
+    rather than losing the sentence.
     """
     # Brandon, 2026-10-27: the report printed '({{figure:Excitation
     # degrees of freedom (force)}})' for a figure a run without force
     # channels never built. The templates now name what they built
     # (core.report.dof_references); this is the guard for anything
-    # that still does not, text typed in the editor included.
+    # that still does not, text typed in the editor included. A field
+    # reference the page could not fill ({{@basis:Srs.min_frequency}}
+    # on a run with no SRS) was printed as written the same way, and
+    # is guarded here too (2026-10-28).
     def label_of(match: re.Match) -> str | None:
-        wanted = match.group(1).lower()
-        target = match.group(2).strip().lower()
+        inner = match.group(1).strip()
+        cited = _CITATION.fullmatch(inner)
+        if cited is None:
+            return None
+        wanted = cited.group(1).lower()
+        target = cited.group(2).strip().lower()
         for label, caption in labeled:
             if (label.lower().startswith(wanted)
                     and caption.lower().startswith(target)):
@@ -577,24 +596,37 @@ def _resolve_figures(text, labeled, edit=False):
         if found is not None:
             return found
         if edit:
-            return f'[no {match.group(1).lower()} starts "{match.group(2).strip()}"]'
+            inner = match.group(1).strip()
+            cited = _CITATION.fullmatch(inner)
+            if cited is None:
+                return f'[no value for {inner}]'
+            return f'[no {cited.group(1).lower()} starts "{cited.group(2).strip()}"]'
         return ''
 
     if edit:
-        return _FIGURE.sub(mark, text)
+        return _ANY_REFERENCE.sub(mark, text)
 
     def prose(line: str) -> str:
-        if not _FIGURE.search(line):
+        if not _ANY_REFERENCE.search(line):
             return line
         if line.lstrip().startswith(('#', '|')):
             # not a sentence to drop: the words stay, the reference goes
-            return re.sub(r'\s*\(\s*\)', '', _FIGURE.sub(mark, line)).rstrip()
+            return re.sub(r'\s*\(\s*\)', '', _ANY_REFERENCE.sub(mark, line)).rstrip()
         kept = [sentence for sentence in _SENTENCE_END.split(line)
                 if all(label_of(m) is not None
-                       for m in _FIGURE.finditer(sentence))]
-        return _FIGURE.sub(mark, ' '.join(kept))
+                       for m in _ANY_REFERENCE.finditer(sentence))]
+        return _ANY_REFERENCE.sub(mark, ' '.join(kept))
 
     return '\n'.join(prose(line) for line in text.split('\n'))
+
+
+def _captioned(block):
+    """A plot block with its record caption asked for, as the record
+    captions feature asks it of every plot block; any other block as it
+    is. The stored block is not changed."""
+    if block.get('kind') != 'plot' or block.get('record_caption'):
+        return block
+    return {**block, 'record_caption': True}
 
 
 def _build_block(block, objects, us, object_groups=None):
@@ -3536,10 +3568,18 @@ def _trim_plot(block: dict, budget: int) -> None:
     if _numeric_list(block.get('x')) and len(block['x']) > budget:
         thinned.append(thin(block, block['x']))
     if thinned:
-        note = _thinned_note(max(d for d, _ in thinned),
-                             max(h for _, h in thinned))
-        block['note'] = (block['note'] + ' ' + note
-                         if block.get('note') else note)
+        note = block.get('note') or ''
+        held = max(h for _, h in thinned)
+        earlier = re.search(r'Thinned for the file: \d+ points drawn of (\d+)',
+                            note)
+        if earlier:
+            # thinned already by its builder: one sentence, counting
+            # from the record, not two with the second understating it
+            # (2026-10-28)
+            held = max(held, int(earlier.group(1)))
+            note = re.sub(r'\s*Thinned for the file:[^.]*\.', '', note).strip()
+        sentence = _thinned_note(max(d for d, _ in thinned), held)
+        block['note'] = (note + ' ' + sentence if note else sentence)
 
 
 def _trim_plots(node: Any, budget: int) -> None:

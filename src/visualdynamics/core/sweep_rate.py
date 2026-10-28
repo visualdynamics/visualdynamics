@@ -75,7 +75,7 @@ source.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -449,11 +449,6 @@ class SweepRateCheck:
     def ratio(self) -> float:
         """The rate as a multiple of the rule's rate for this mode."""
         return abs(self.rate) / self.limit
-
-    @property
-    def cycles_needed(self) -> float:
-        """The cycles the mode needs to build: about Q."""
-        return self.q
 
     @property
     def too_fast(self) -> bool:
@@ -907,8 +902,3 @@ def read_swept_q(level: Any, specification: SineSweepSpecification | SineTone,
         return None
     return swept_q(top, q_read, segment[6], segment[5], margin=margin,
                    height=height)
-
-
-def checks_text(checks: Sequence[SweepRateCheck]) -> str:
-    """Every check's `describe`, one per line."""
-    return '\n'.join(check.describe() for check in checks)

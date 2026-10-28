@@ -334,14 +334,9 @@ def _record(amplitude: np.ndarray, samples: np.ndarray, start: np.ndarray,
 def _spectrum(record: np.ndarray, points: np.ndarray, rate: float,
               q: float, kind: str) -> np.ndarray:
     """The record's spectrum at `points`, of `kind`, from `core.srs`."""
-    from .srs import peaks
+    from .srs import peaks, spectra
 
-    highest, lowest = peaks(record, points, rate, q=q)
-    if kind == 'positive':
-        return highest
-    if kind == 'negative':
-        return -lowest
-    return np.maximum(highest, -lowest)
+    return spectra(*peaks(record, points, rate, q=q))[kind]
 
 
 def _judged(specification: Any, record: int, dof: str, points: np.ndarray,

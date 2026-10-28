@@ -1828,10 +1828,22 @@ def main(which=('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
 
 
 if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Take the screenshots of the workflow guides.')
+    parser.add_argument('workflows', nargs='*', metavar='WORKFLOW',
+                        help='the workflows to shoot (every one when none '
+                             'is named)')
+    parser.add_argument('--out', default=str(OUT),
+                        help='the directory the screenshots are written '
+                             'into (default: docs/guide/images)')
+    args = parser.parse_args()
+    OUT = pathlib.Path(args.out)
     # every workflow unless some are named: the default once stopped
     # at four and the sine and system-identification pages quietly
     # kept their old pictures (2026-09-03)
-    picked = tuple(a.lstrip('-') for a in sys.argv[1:])
+    picked = tuple(args.workflows)
     main(picked or ('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
                     'mixed', 'tree', 'fem', 'fem_solids', 'plan',
                     'report_features'))

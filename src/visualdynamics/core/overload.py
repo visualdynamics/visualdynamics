@@ -447,6 +447,19 @@ class OverloadCheck:
     step_db: float = STEP_DB
     margin: float = RAIL_MARGIN
 
+    def with_step(self, step_db: float) -> OverloadCheck:
+        """This check with the step to the next level at `step_db`, the
+        readings kept: nothing read from the record depends on the
+        step, so dragging the headroom floor does not read every
+        channel's statistics again (2.2 s for eight channels of a
+        five-minute record, on every drag)."""
+        from dataclasses import replace
+
+        step_db = float(step_db)
+        return OverloadCheck(tuple(replace(c, step_db=step_db)
+                                   for c in self.channels),
+                             step_db=step_db, margin=self.margin)
+
     @property
     def checked(self) -> list[ChannelOverload]:
         """The channels read against a range."""

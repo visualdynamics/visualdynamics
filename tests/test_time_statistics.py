@@ -920,3 +920,20 @@ def test_the_frame_is_sized_from_the_band_until_one_is_typed(
 def test_the_statistics_reading_is_flat(window, pump, clean):
     pane = _statistics(window, pump, history(clean))
     assert not pane.waterfall_action.isVisible()
+
+
+def test_the_kurtosis_is_the_one_estimator_with_samples_dropped():
+    """`time_statistics` reads its kurtosis off the centered samples it
+    already has (`kurtosis_of_centered`); the number is `kurtosis`'s, a
+    record with samples that are not numbers included."""
+    from visualdynamics.core.kurtosis import kurtosis, kurtosis_of_centered
+
+    x = flat_random(2.0, RATE, 7)
+    x[::97] = np.nan
+    reading = time_statistics(x, RATE)
+    assert reading.kurtosis == pytest.approx(kurtosis(x), rel=1e-12)
+    finite = x[np.isfinite(x)]
+    centered = finite - finite.mean()
+    assert kurtosis_of_centered(centered, float(np.mean(centered ** 2))) \
+        == pytest.approx(kurtosis(x), rel=1e-12)
+    assert np.isnan(kurtosis_of_centered(np.zeros(5), 0.0))

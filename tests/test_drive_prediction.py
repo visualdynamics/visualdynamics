@@ -385,6 +385,83 @@ def test_a_breakpoint_specification_is_read_log_log_at_the_frf_lines():
     assert not prediction.judged[at(prediction, 15.0)]
 
 
+def _two_channel_case():
+    """A two-channel specification at breakpoints with its cross term
+    written zero at the middle one (coherence 0.81, 0, 0.81), a unit
+    plant, and a measured matrix with no cross term."""
+    from visualdynamics.core.data import Frf, Psd, Specification
+
+    bp = np.array([20.0, 100.0, 2000.0])
+    auto = np.full(3, 0.01)
+    cross = np.array([0.009, 0.0, 0.009])
+    spec = Specification(bp, np.array([auto, cross, cross, auto]),
+                         response_dof=['1Z+', '1Z+', '2Z+', '2Z+'],
+                         reference_dof=['1Z+', '2Z+', '1Z+', '2Z+'],
+                         ordinate_dim='acceleration**2/frequency')
+    f = np.arange(0.0, 2005.0, 5.0)
+    one, none = np.full(len(f), 1.0 + 0j), np.zeros(len(f))
+    frf = Frf(f, np.array([one, none, none, one]),
+              response_dof=['1Z+', '1Z+', '2Z+', '2Z+'],
+              reference_dof=['1Z+', '2Z+', '1Z+', '2Z+'],
+              ordinate_dim='acceleration/voltage')
+    measured = Psd(f, np.array([np.full(len(f), 0.01), none, none,
+                                np.full(len(f), 0.01)]),
+                   response_dof=['1Z+', '1Z+', '2Z+', '2Z+'],
+                   reference_dof=['1Z+', '2Z+', '1Z+', '2Z+'],
+                   ordinate_dim=['acceleration**2/frequency'] * 4)
+    return spec, frf, measured, f
+
+
+def test_the_prediction_and_the_comparison_read_one_specification():
+    """The same cross term read two ways gave two coherences at one
+    line, 0.81 in the prediction (the sheet's reader bridged the zero
+    as a gap) and 0.32 in the comparison (2026-10-28). One reader now:
+    a zero at a breakpoint is a value, and the magnitude runs straight
+    from it, so at 50 Hz the term is 0.009 * (100 - 50) / 80 = 0.005625
+    and the coherence 0.3164."""
+    from visualdynamics.core.matrix_comparison import compare_matrix
+
+    spec, frf, measured, f = _two_channel_case()
+    k = int(np.flatnonzero(f == 50.0)[0])
+    prediction = predict_drives(frf, spec)
+    target = prediction.target[k]
+    predicted = abs(target[0, 1]) ** 2 / (target[0, 0] * target[1, 1]).real
+    compared = compare_matrix(spec, measured).pair(0, 1).specified_coherence[k]
+    expected = (0.009 * 50.0 / 80.0) ** 2 / 0.01 ** 2
+    assert predicted == pytest.approx(expected, rel=1e-12)
+    assert compared == pytest.approx(expected, rel=1e-12)
+    at_zero = int(np.flatnonzero(f == 100.0)[0])
+    assert prediction.target[at_zero, 0, 1] == 0.0
+
+
+def test_the_plant_is_decomposed_once_and_the_ratings_read_against_it(
+        monkeypatch):
+    """One SVD per prediction (it was two, two thirds of a 20 x 20
+    prediction's time), and `with_ratings` gives the demands a fresh
+    prediction with those ratings gives, without decomposing again."""
+    spec, frf, _measured, _f = _two_channel_case()
+    calls = []
+    real = np.linalg.svd
+    monkeypatch.setattr(np.linalg, 'svd',
+                        lambda *a, **k: calls.append(1) or real(*a, **k))
+    plain = predict_drives(frf, spec)
+    assert calls == [1]
+    rating = ShakerRating(force=1000.0, stroke=0.05, velocity=1.5,
+                          moving_mass=10.0)
+    rated = plain.with_ratings(drive_limit=0.5, shakers=rating,
+                               duration=30.0)
+    assert calls == [1], 'no decomposition for a rating'
+    fresh = predict_drives(frf, spec, drive_limit=0.5, shakers=rating,
+                           duration=30.0)
+    assert [d.describe() for d in rated.demands] == \
+        [d.describe() for d in fresh.demands]
+    assert rated.notes == fresh.notes
+    assert rated.duration == 30.0 and plain.demands != rated.demands
+    assert plain.notes == rated.notes[:plain.plain_notes]
+    with pytest.raises(ValueError, match='duration'):
+        plain.with_ratings(duration=-1.0)
+
+
 def test_a_specification_on_lines_is_read_per_bin():
     """A density on 10 Hz lines holds its value across each line's bin,
     so the FRF's 5 Hz lines inside a bin read that bin's level."""

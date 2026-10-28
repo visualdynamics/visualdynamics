@@ -121,7 +121,7 @@ from .kurtosis import (
     NOMINAL,
     analyzed_span,
     frame_kurtosis,
-    kurtosis,
+    kurtosis_of_centered,
 )
 
 if TYPE_CHECKING:                                    # pragma: no cover
@@ -702,8 +702,8 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
     skewness = (float(np.mean(centered ** 3)) / std ** 3 if std > 0.0
                 else float('nan'))
     # one estimator of kurtosis in the package, so this and the bars
-    # can never disagree
-    kurt = kurtosis(data)
+    # can never disagree; the centered samples and m2 are in hand
+    kurt = kurtosis_of_centered(centered, m2)
 
     # the peak, signed, and its time on the record's clock: found in
     # the pieces so its sample index is the record's own

@@ -780,3 +780,47 @@ def test_the_settings_hold_at_their_edges(run):
     with pytest.raises(ValueError, match='the record has 1 channel; there '
                                          'is no channel 1'):
         one.overload_check(1.0, records=[1])
+
+
+def test_the_step_moved_judges_the_readings_again_without_reading(run, channels):
+    """Nothing read from the record depends on the step to the next
+    level, so `with_step` keeps every reading and rejudges: the same
+    answer as a check made with that step."""
+    check = run.overload_check(channels, step_db=6.0)
+    moved = check.with_step(9.0)
+    fresh = run.overload_check(channels, step_db=9.0)
+    assert moved.step_db == 9.0 and moved.margin == check.margin
+    for a, b in zip(moved.channels, fresh.channels):
+        assert a.statistics is b.statistics or (
+            a.statistics.peak == b.statistics.peak)
+        assert a.step_db == 9.0 and a.flags() == b.flags()
+        assert a.next_headroom_db == pytest.approx(b.next_headroom_db)
+    assert [c.record for c in moved.flagged] == [c.record for c in fresh.flagged]
+
+
+def test_dragging_the_floor_in_the_window_does_not_read_the_record_again(
+        window, pump, monkeypatch):
+    """The headroom floor dragged is the step moved; the window rejudges
+    the check it holds (2026-10-28: it read every channel's statistics
+    again on every drag, 2.2 s for eight channels of a long record)."""
+    history_ = history(flat_random(12.0, RATE, 1403) / 2.0)
+    window.add_object('Run', history_)
+    window.add_object('Ranges', table([1], [10], [400]))
+    window.project.link('Run', 'Ranges')
+    window.show_object('Run')
+    pump()
+    pane = window.data_pane
+    pane.overload_action.trigger()
+    pump()
+    reads = []
+    real = TimeHistory.overload_check
+    monkeypatch.setattr(TimeHistory, 'overload_check',
+                        lambda *a, **k: reads.append(1) or real(*a, **k))
+    window._overload_step_moved(9.0, None)
+    pump()
+    assert reads == [], 'the held check, judged against the new step'
+    assert pane.overload_settings['step_db'] == 9.0
+    assert window._held_overload is not None
+    pane.overload_action.trigger()
+    pump()
+    assert window._held_overload is None

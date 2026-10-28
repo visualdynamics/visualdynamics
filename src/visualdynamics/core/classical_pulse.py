@@ -906,28 +906,14 @@ def check_pulse(history: TimeHistory, pulse: ClassicalPulse,
 def pulse_channel(history: TimeHistory,
                   channel: int | str | None = None) -> int:
     """The row of `history` a pulse is read from: `channel` by index or
-    DOF, or the first acceleration channel; refused when it is not an
-    acceleration, since a pulse's velocity change is the area under an
-    acceleration and nothing else."""
-    rows = range(history.num_records)
-    if channel is None:
-        row = next((i for i in rows
-                    if history.known_dim(i) == 'acceleration'), None)
-        if row is None:
-            raise ValueError('a pulse is read from an acceleration, and '
-                             'this record holds none')
-        return row
-    if isinstance(channel, str):
-        dofs = [str(dof) for dof in history.response_dof]
-        if channel not in dofs:
-            raise ValueError(f'the record has no channel {channel}')
-        row = dofs.index(channel)
-    else:
-        row = int(channel)
-        if not 0 <= row < history.num_records:
-            raise ValueError(f'the record has {history.num_records} '
-                             f'channels; there is no channel {row}')
-    if history.known_dim(row) != 'acceleration':
-        raise ValueError(f'{history.response_dof[row]} is not an '
-                         'acceleration, and a pulse is read from one')
-    return row
+    DOF, or the first acceleration channel whose unit is declared
+    (`core.shaker.acceleration_channel`, the one rule for the stroke
+    and the replication fit too); refused otherwise, since a pulse's
+    velocity change is the area under an acceleration in a known scale
+    and nothing else."""
+    # It read a channel by `known_dim` (2026-10-28), so a record whose
+    # unit was only hinted was judged raw against an SI nominal: a 50 g
+    # half-sine stored in g passed as 5.1 g with every point inside.
+    from .shaker import acceleration_channel
+
+    return acceleration_channel(history, channel)

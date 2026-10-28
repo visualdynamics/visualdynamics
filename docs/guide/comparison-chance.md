@@ -23,7 +23,7 @@ width in decibels and the degrees of freedom:
 | 50                 | 8.8 %           | 5.9 %        | 0.13 %        |
 | 100                | 1.6 %           | 1.2 %        | 0.0007 %      |
 | 120                | 0.85 %          | 0.65 %       | 0.0001 %      |
-| 200                | 0.072 %         | 0.062 %      | 0.000004 %    |
+| 200                | 0.072 %         | 0.062 %      | 0.00000004 %  |
 
 On a 400-line comparison at 120 degrees of freedom, three or four lines
 are outside a ±1.5 dB band on any one average, in different places on
@@ -76,7 +76,7 @@ says so in a note. A group does not reach across a stretch the
 specification leaves unwritten, and the last group of a stretch may
 hold fewer lines.
 
-## In the window
+## In the app
 
 Select a specification and the PSD measured against it, and choose
 **Chance** on the plot bar, beside Spectra, RMS Error and Lines Out.
@@ -97,7 +97,7 @@ and for each pair of limits the count outside, below and above, beside
 the number expected by chance. Every edit redraws the plot. The reading
 is recorded in the console as its `plot_chance` call.
 
-## In a script
+## From a script
 
 ```python
 import numpy as np

@@ -15,6 +15,8 @@ is an alpha, the `.vdyn` format may still change; the commitment that
 a later version opens every earlier file starts with the first release
 that is not an alpha.
 
+## Start here
+
 - [Projects, links, and the Basis](projects.md): the structure
   everything else reads
 - [The project tree](project-tree.md): what a selection shows, whether
@@ -23,99 +25,37 @@ that is not an alpha.
   what can be done with it
 - [Units](units.md): SI inside, display units where values are shown
   or written out
+- [The channel table](channel-table.md): the one object that is a
+  spreadsheet, and its rules
+- [Planning a test's instrumentation](plan-instrumentation.md): the
+  accelerometers for a modal test chosen from the finite element modes,
+  on the surfaces a person can reach
+- [Importing a time history from delimited text](text-import.md): a
+  CSV or a recorder's text export, its layout found and checked
+
+## Plotting and figures
+
 - [Plotting](plotting.md): every plot the app draws, from code
 - [Composing a figure from a script](plot-composition.md): several
   readings, marks and panels on one figure, written to a file
-- [Importing a time history from delimited text](text-import.md): a
-  CSV or a recorder's text export, its layout found and checked
+- [A figure in a page of your own](figures-in-a-page.md): one figure
+  exported as a data file and the renderer a page mounts, trimmed by
+  channel and by peak
+
+## Workflows
+
 - [The modal workflow](workflows/modal-workflow.md): the app and a
   script, step by step
-- [How the mode fitting works](modal-fitting.md): the algorithm, and
-  how it differs from the classical batch methods
 - [The random vibration workflow](workflows/random-workflow.md): from
   a controller run to a compliance report
-- [Writing a random specification by slope](breakpoint-slopes.md): a
-  level, a slope in dB per octave and the next frequency, each
-  segment's area and the running rms
-- [Reading a record's time statistics](time-statistics.md): the
-  moments, the rail, the tails against the Gaussian, the expected
-  largest peak and the kurtosis frame by frame
-- [Checking each channel against its range](overload.md): the samples
-  on the rail, the headroom over the peak and the peak at the next
-  level, from the channel table's ranges
 - [The transient workflow](workflows/transient-workflow.md): a target
   waveform compared with what the test article did
-- [Judging a replication by segment](replication-segments.md): each
-  stretch of a replicated record held to the rule for its kind
 - [The shock workflow](workflows/shock-workflow.md): events, the SRS,
   and its tolerance band
-- [Judging an SRS against its tolerance](srs-tolerance.md): the band,
-  the count of points inside it, and the rule applied to the count
-- [Checking a shock record before its spectrum](shock-check.md): the
-  velocity integrated raw, and the positive and negative spectra
-- [Checking a replication reference](replication-fit.md): whether a
-  shaker can play a record, and what the high-pass that makes it
-  playable costs
-- [Will a pulse fit on the shaker](stroke.md): a pulse integrated raw
-  against the shaker's shock stroke, velocity and force
-- [Generating reference signals](generating-signals.md): random,
-  burst random, periodic random, an impulse or a pulse, and sine, made
-  at the reference DOFs from a specification or a channel table
-- [Synthesizing a shock to its spectrum](shock-synthesis.md): wavelets
-  iterated until every point is inside the band, then read against the
-  shaker's shock stroke, velocity and force
-- [Modal responses from forces](modal-responses.md): how each mode of
-  a shape set answers the forces in a time history, appended to it
-- [Taking a record to a lower sample rate](resample.md): the
-  anti-alias filter first, the span and the dropped lines, and where
-  content above the new Nyquist frequency folds
-- [Predicting the drives before the test](drive-prediction.md): the
-  drives a specification asks for through an FRF, one drive or several,
-  against the amplifier and shaker limits
 - [The sine sweep workflow](workflows/sine-workflow.md): tones tracked
   through a sweep and compared with the requirement
 - [The random and sine workflow](workflows/mixed-workflow.md): a sweep
   on top of a random, both judged from one recording
-- [How a tracking filter reads a sweep](sine-tracking.md): the
-  controller's band and detector, and why its level differs
-- [Reading Q from a peak's half-power width](half-power.md): the
-  0.707 line, its crossings, and how many lines a peak needs
-- [Reading a tone off an ASD](tone-readout.md): why a spike's height
-  is not the tone, and the tone in g peak from the lines it leaks into
-- [Reading a tone's amplitude from a record](amplitude-spectrum.md):
-  the amplitude spectrum in g peak, the window's correction stated, and
-  the flat top for a tone between lines
-- [Checking a spectrum against its record](rms-check.md): the rms from
-  the area under an ASD beside the rms of its time history, and the
-  scaling errors the gap names
-- [Checking a sweep rate against the modes it passes](sweep-rate.md):
-  the time and cycles in each half-power band, and what a fast sweep
-  does to a peak and its Q
-- [Comparing signatures before and after a test](signature-comparison.md):
-  each mode's frequency and amplitude shift, judged against limits
-- [Reading a dwell against time](dwell.md): a held tone's build-up,
-  steady level and ring-down, in cycles
-- [The two transmissibilities, and what H1 is
-  worth](transmissibility.md): the ASD ratio beside H1, and the band
-  H1's coherence and averages give
-- [Checking the matrices of a multi-input test](mimo-matrix-checks.md):
-  the plant's singular values and condition number, and whether a
-  cross-spectral specification is realizable, with its repair
-- [Checking a sine record for distortion](sine-distortion.md): the
-  record less the tracked tones against the tones, along the sweep,
-  against a limit
-- [Writing a sine profile in segments](sine-profile.md): constant
-  displacement, velocity and acceleration, every crossover solved and
-  checked, and the tone a controller runs
-- [Checking a sine tone's frequency](sine-frequency.md): the tone's own
-  frequency on the record against the specification's, along the
-  sweep, against a band
-- [A mixed-mode test as one specification](mixed-mode.md): the floor,
-  the tones and the narrowbands, and a data sheet that judges each by
-  its own rule
-- [Judging a cross-spectral matrix against its
-  specification](matrix-comparison.md): the levels on the diagonal and
-  each cross term's coherence and phase, as a grid
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):
@@ -126,14 +66,20 @@ that is not an alpha.
 - [Three shapes that are not extrusions](workflows/mesh-shapes.md):
   a cross-drilled shaft, a wye fitting and a V-block meshed into
   bricks fitted to the shape and into tetrahedra, with the numbers
-- [Planning a test's instrumentation](plan-instrumentation.md): the
-  accelerometers for a modal test chosen from the finite element modes,
-  on the surfaces a person can reach
-- [The wavelet reading](wavelet.md): a time history as a scalogram
-- [Checking a classical pulse](pulse-check.md): a half-sine, sawtooth
-  or trapezoid against its envelope and its velocity change
-- [The channel table](channel-table.md): the one object that is a
-  spreadsheet, and its rules
+
+## Modal
+
+- [How the mode fitting works](modal-fitting.md): the algorithm, and
+  how it differs from the classical batch methods
+- [Reading Q from a peak's half-power width](half-power.md): the
+  0.707 line, its crossings, and how many lines a peak needs
+- [Comparing signatures before and after a test](signature-comparison.md):
+  each mode's frequency and amplitude shift, judged against limits
+- [Modal responses from forces](modal-responses.md): how each mode of
+  a shape set answers the forces in a time history, appended to it
+
+## Reading a spectrum
+
 - [How a PSD means its area](psd-reading.md): bandwidth, integration,
   and what the numbers mean
 - [What an average is worth](averaging-confidence.md): the degrees of
@@ -143,13 +89,97 @@ that is not an alpha.
 - [Lines outside a band by chance](comparison-chance.md): the lines a
   comparison counts outside each band, beside how many the scatter of
   an average puts there, and lines combined for judging
+- [Writing a random specification by slope](breakpoint-slopes.md): a
+  level, a slope in dB per octave and the next frequency, each
+  segment's area and the running rms
+- [Checking a spectrum against its record](rms-check.md): the rms from
+  the area under an ASD beside the rms of its time history, and the
+  scaling errors the gap names
+- [Reading a tone off an ASD](tone-readout.md): why a spike's height
+  is not the tone, and the tone in g peak from the lines it leaks into
+- [Reading a tone's amplitude from a record](amplitude-spectrum.md):
+  the amplitude spectrum in g peak, the window's correction stated, and
+  the flat top for a tone between lines
+- [The two transmissibilities, and what H1 is
+  worth](transmissibility.md): the ASD ratio beside H1, and the band
+  H1's coherence and averages give
+- [A mixed-mode test as one specification](mixed-mode.md): the floor,
+  the tones and the narrowbands, and a data sheet that judges each by
+  its own rule
+- [Judging a cross-spectral matrix against its
+  specification](matrix-comparison.md): the levels on the diagonal and
+  each cross term's coherence and phase, as a grid
+- [Checking the matrices of a multi-input test](mimo-matrix-checks.md):
+  the plant's singular values and condition number, and whether a
+  cross-spectral specification is realizable, with its repair
+- [Predicting the drives before the test](drive-prediction.md): the
+  drives a specification asks for through an FRF, one drive or several,
+  against the amplifier and shaker limits
+
+## Reading a record
+
+- [Reading a record's time statistics](time-statistics.md): the
+  moments, the rail, the tails against the Gaussian, the expected
+  largest peak and the kurtosis frame by frame
+- [Checking each channel against its range](overload.md): the samples
+  on the rail, the headroom over the peak and the peak at the next
+  level, from the channel table's ranges
+- [Taking a record to a lower sample rate](resample.md): the
+  anti-alias filter first, the span and the dropped lines, and where
+  content above the new Nyquist frequency folds
+- [The wavelet reading](wavelet.md): a time history as a scalogram
+
+## Sine
+
+- [How a tracking filter reads a sweep](sine-tracking.md): the
+  controller's band and detector, and why its level differs
+- [Checking a sweep rate against the modes it passes](sweep-rate.md):
+  the time and cycles in each half-power band, and what a fast sweep
+  does to a peak and its Q
+- [Reading a dwell against time](dwell.md): a held tone's build-up,
+  steady level and ring-down, in cycles
+- [Checking a sine record for distortion](sine-distortion.md): the
+  record less the tracked tones against the tones, along the sweep,
+  against a limit
+- [Checking a sine tone's frequency](sine-frequency.md): the tone's own
+  frequency on the record against the specification's, along the
+  sweep, against a band
+- [Writing a sine profile in segments](sine-profile.md): constant
+  displacement, velocity and acceleration, every crossover solved and
+  checked, and the tone a controller runs
+
+## Shock and transient
+
+- [Judging an SRS against its tolerance](srs-tolerance.md): the band,
+  the count of points inside it, and the rule applied to the count
+- [Checking a shock record before its spectrum](shock-check.md): the
+  velocity integrated raw, and the positive and negative spectra
+- [Checking a classical pulse](pulse-check.md): a half-sine, sawtooth
+  or trapezoid against its envelope and its velocity change
+- [Will a pulse fit on the shaker](stroke.md): a pulse integrated raw
+  against the shaker's shock stroke, velocity and force
+- [Synthesizing a shock to its spectrum](shock-synthesis.md): wavelets
+  iterated until every point is inside the band, then read against the
+  shaker's shock stroke, velocity and force
+- [Checking a replication reference](replication-fit.md): whether a
+  shaker can play a record, and what the high-pass that makes it
+  playable costs
+- [Judging a replication by segment](replication-segments.md): each
+  stretch of a replicated record held to the rule for its kind
+- [Generating reference signals](generating-signals.md): random,
+  burst random, periodic random, an impulse or a pulse, and sine, made
+  at the reference DOFs from a specification or a channel table
+
+## Reports
+
 - [Reports](reports.md): symbolic bindings, live text, and one file out
 - [A report plot's caption](report-captions.md): the channel, run,
   resolution, window, DOF and requirement a spectrum's plot carries,
   read off its record
 - [Report features](report-features.md): optional additions to a
   report, turned on in a panel or by preset: the skeleton sections,
-  responses against prediction and the plot conventions
+  calibration in date, responses against prediction, record captions
+  and the plot conventions
 
 For signatures, see the API reference in the site navigation. For the
 layers of the package and the conventions behind them, see

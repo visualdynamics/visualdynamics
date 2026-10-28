@@ -96,7 +96,8 @@ SPAN_RATIO = 2.56
 #: frequency), so the span is flat to 0.1 dB, and the lowest frequency
 #: that folds into the span (1.56 spans) is 1.3 corners up. With the
 #: corner on the span the span's top line was 6.02 dB down and 0.9 of
-#: it 1.46 dB down (Brandon, 2026-10-23)
+#: it 0.65 dB down at the twelfth order (1.46 dB at the eighth the
+#: corner was first chosen at; Brandon, 2026-10-23)
 CORNER = 1.2
 
 #: the anti-alias filter's design order. Doubled by the forward and

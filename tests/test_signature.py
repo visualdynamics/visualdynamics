@@ -327,11 +327,18 @@ def test_a_mode_moved_out_of_its_window_carries_its_note_to_the_comparison():
 
 def test_a_line_with_no_value_in_the_window_is_said():
     """A NaN on the peak's flank is read as no part of it, and said: the
-    crossing beside it is placed at the last line read."""
+    line is dropped and the crossing read on the curve between its
+    neighbors, as if the line had not been measured (it was held as
+    -inf and made a crossing of its own, 2026-10-28)."""
     m = np.abs(transmissibility(F, BEFORE))
-    m[np.argmin(np.abs(F - 83.0))] = np.nan
+    hole = int(np.argmin(np.abs(F - 83.0)))
+    m[hole] = np.nan
     reading = read_peak(F, m, (70.0, 100.0))
-    assert reading.low == 83.25
+    kept = np.ones(F.size, dtype=bool)
+    kept[hole] = False
+    assert reading.low == pytest.approx(
+        read_peak(F[kept], m[kept], (70.0, 100.0)).low)
+    assert reading.low != pytest.approx(F[hole], abs=1e-9)
     assert reading.notes == (
         ('1 line between 70 and 100 Hz holds no value (NaN or infinite) '
          'and is read as no part of the peak'),)

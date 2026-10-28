@@ -3,11 +3,10 @@
 Transmissibility is the motion at one point over the motion at another,
 a response over an input, at each frequency. From random data it is
 computed two ways, and both are commonly labeled transmissibility.
-They agree where the measurement is clean and part company exactly
-where it is not, so a plot that does not say which one it is has not
-said what it is.
+They agree where the measurement is clean and differ where it is
+not, so a plot should say which one it shows.
 
-**The ASD ratio** divides the response's autospectrum by the input's
+The ASD ratio divides the response's autospectrum by the input's
 and takes the root, because an ASD is a squared quantity:
 
 \[
@@ -21,7 +20,7 @@ that the input did not cause (the sensor's noise floor, a rattle, a
 cable beating against the article, another source) is in \(G_{yy}\),
 and the ratio counts it as response.
 
-**H1** divides the cross-spectrum by the input's autospectrum:
+H1 divides the cross-spectrum by the input's autospectrum:
 
 \[
 H_1(f) = \frac{G_{xy}(f)}{G_{xx}(f)}, \qquad
@@ -44,9 +43,9 @@ the coherence is under one. It does not say which of the two is nearer
 the truth; that depends on where the content the input did not cause
 is:
 
-- **On the response** (a noise floor, a rattle, another source), H1 is
+- On the response (a noise floor, a rattle, another source), H1 is
   unbiased and the ratio reads high, by \(1/\sqrt{\gamma^2}\).
-- **On the input channel** (the input sensor's own noise), H1 reads
+- On the input channel (the input sensor's own noise), H1 reads
   low, by \(\gamma^2\), and the ratio low by \(\sqrt{\gamma^2}\), so
   the ratio is the nearer of the two. With the survey below's noise
   moved to its input channel, at 6 g rms, the truth at 1,000 Hz is
@@ -54,8 +53,9 @@ is:
 - **Leakage** at a sharp resonance, a nonlinearity or a second input
   lower the coherence as well, and bias both estimates.
 
-So the gap is a reason to look at the measurement, not a correction to
-apply to either curve.
+The gap is \(-10 \log_{10} \gamma^2\) dB and says only that the
+coherence is below one; it is not a correction to apply to either
+curve.
 
 What H1 is worth at a line follows from its coherence and the number of
 averages behind it. The normalized random error of its magnitude is

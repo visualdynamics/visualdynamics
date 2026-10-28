@@ -264,6 +264,23 @@ class StrokeReading:
     #: the shaker's shock ratings and the masses it carries
     rating: ShakerRating
 
+    def with_ratings(self, *, stroke: float | None = None,
+                     velocity: float | None = None,
+                     force: float | None = None,
+                     moving_mass: float | None = None,
+                     body_mass: float | None = None) -> StrokeReading:
+        """This reading against other ratings, the arrays kept: the
+        integration does not depend on the ratings, so a rating moved
+        in the panel does not integrate the record again. The ratings
+        are taken as `read_stroke` takes them, zero and None both
+        meaning none."""
+        from dataclasses import replace
+
+        return replace(self, rating=ShakerRating(
+            force=_rating(force), stroke=_rating(stroke),
+            velocity=_rating(velocity), moving_mass=_rating(moving_mass),
+            body_mass=_rating(body_mass)))
+
     @property
     def time(self) -> np.ndarray:
         """Each sample's time on the record's clock, in seconds."""
@@ -534,10 +551,6 @@ def read_stroke(history: TimeHistory, channel: int | str | None = None, *,
     from .data import TimeHistory
     from .filters import integrate
 
-    rating = ShakerRating(force=_rating(force), stroke=_rating(stroke),
-                          velocity=_rating(velocity),
-                          moving_mass=_rating(moving_mass),
-                          body_mass=_rating(body_mass))
     index = acceleration_channel(history, channel)
     dof = str(history.response_dof[index])
     rows = finite(history.ordinate[index], dof)[None]
@@ -551,7 +564,9 @@ def read_stroke(history: TimeHistory, channel: int | str | None = None, *,
         start=float(history.abscissa[0]), acceleration=rows[0],
         velocity=np.asarray(moving.ordinate[0].real, dtype=float),
         displacement=np.asarray(travel.ordinate[0].real, dtype=float),
-        rating=rating)
+        rating=ShakerRating()).with_ratings(
+            stroke=stroke, velocity=velocity, force=force,
+            moving_mass=moving_mass, body_mass=body_mass)
 
 
 def _number(value: float) -> str:

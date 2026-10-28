@@ -16,8 +16,7 @@ octaves](images/sine-wavelet.png)
 ## Where it lives
 
 *Wavelet* is on a time history's plot bar with the record's other
-readings (*Averaging*, *Filter*, *Sine Levels*, *Truncate*, *Kurtosis*,
-*Statistics* and *Shocks*), and at most one of them is on at a time. It opens in
+readings, and at most one of them is on at a time. It opens in
 3-D, because a scalogram is a function of two variables and a surface
 shows that directly; the *3D* button switches it to the flat picture
 shown above. In a report, the transient and shock templates include

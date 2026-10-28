@@ -656,7 +656,7 @@ def test_a_cross_term_between_breakpoints_is_read_as_the_sheet_reads_it():
     316.2 Hz, the phase a quarter of the way, 21.6 degrees. From there to
     zero at 2 kHz, straight: 50 at 1.5 kHz, the phase halfway back, 45.
     Nothing outside the points."""
-    from visualdynamics.core.matrix_comparison import _between
+    from visualdynamics.core.compliance import cross_term_at as _between
 
     f = np.array([1000.0, 100.0, 2000.0])
     values = np.array([100j, 1.0, 0.0])
@@ -678,7 +678,7 @@ def test_a_line_on_a_bins_edge_belongs_to_the_bin_above():
     """On 20 Hz lines a bin runs from 10 Hz below its line up to, not
     including, 10 Hz above: 210 Hz is the 220 Hz line's, and a line
     below the first bin has no value."""
-    from visualdynamics.core.matrix_comparison import _read_at
+    from visualdynamics.core.compliance import record_at as _read_at
 
     coarse = np.arange(20.0, 440.0, 20.0)
     spec = matrix([coarse, 4.0], {(0, 1): term(0.64, 30.0, coarse, 4.0)},

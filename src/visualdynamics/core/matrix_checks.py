@@ -112,7 +112,7 @@ Bendat and Piersol's.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Any
@@ -145,13 +145,52 @@ REPAIR_CONVERGED = 1e-9
 
 # ---- the matrices, assembled from records ---------------------------------
 
-def _labels(keys: list[tuple[str, str]]) -> list[str]:
+def channel_labels(channels: Sequence[tuple[str, str]]) -> list[str]:
     """A label per (DOF, quantity) channel: the DOF, with the quantity
-    added only where a DOF carries two (an accelerometer and a force
-    gauge at one drive point)."""
-    dofs = [dof for dof, _quantity in keys]
+    added only where one DOF carries two channels (an accelerometer and
+    a force gauge at one drive point). The matrix checks, the matrix
+    comparison and the drive prediction all name their channels here.
+
+    Parameters
+    ----------
+    channels : sequence of (str, str)
+        The channels, as (DOF, quantity).
+
+    Returns
+    -------
+    list of str
+        One label per channel.
+    """
+    dofs = [dof for dof, _quantity in channels]
     return [dof if dofs.count(dof) == 1 else f'{dof} {quantity}'
-            for dof, quantity in keys]
+            for dof, quantity in channels]
+
+
+def runs(flags: Any) -> list[tuple[int, int]]:
+    """(first, last) index of each run of consecutive true flags.
+
+    Parameters
+    ----------
+    flags : array_like
+        Booleans, one per line.
+
+    Returns
+    -------
+    list of (int, int)
+        Each run's first and last index, inclusive.
+    """
+    flags = np.asarray(flags, dtype=bool).ravel()
+    if not flags.any():
+        return []
+    edges = np.diff(np.concatenate([[0], flags.astype(np.int8), [0]]))
+    return [(int(a), int(b) - 1) for a, b in
+            zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1))]
+
+
+def nearest_line(frequency: Any, value: float) -> int:
+    """The index of the line of `frequency` nearest `value`."""
+    return int(np.argmin(np.abs(np.asarray(frequency, dtype=float)
+                                - float(value))))
 
 
 def frf_matrix(frf: Any, records: Any = None, values: Any = None
@@ -296,17 +335,7 @@ def flagged_runs(frequency: np.ndarray, flags: np.ndarray
                  ) -> list[tuple[float, float]]:
     """(first, last) frequency of each run of consecutive flagged
     lines."""
-    out = []
-    k = 0
-    flags = np.asarray(flags, dtype=bool)
-    while k < len(flags):
-        if flags[k]:
-            start = k
-            while k + 1 < len(flags) and flags[k + 1]:
-                k += 1
-            out.append((float(frequency[start]), float(frequency[k])))
-        k += 1
-    return out
+    return [(float(frequency[a]), float(frequency[b])) for a, b in runs(flags)]
 
 
 def _span_text(runs: list[tuple[float, float]], most: int = 3) -> str:
@@ -428,8 +457,7 @@ class Conditioning:
 
     def line(self, frequency: float) -> int:
         """The index of the line nearest `frequency`."""
-        return int(np.argmin(np.abs(np.asarray(self.frequency, dtype=float)
-                                    - float(frequency))))
+        return nearest_line(self.frequency, frequency)
 
     def at(self, frequency: float) -> ConditioningPoint:
         """The reading at the line nearest `frequency`."""
@@ -600,16 +628,16 @@ def read_conditioning(data: Any, records: Any = None, *,
         if len(columns) < 2:
             raise ValueError(
                 'conditioning compares references, and these records have '
-                f'one ({_labels(columns)[0]}); select an FRF from two '
+                f'one ({channel_labels(columns)[0]}); select an FRF from two '
                 'references or more')
         if not filled.all():
             r, c = np.argwhere(~filled)[0]
             raise ValueError(
-                f'the matrix is incomplete: {_labels(rows)[r]} has no FRF '
-                f'to {_labels(columns)[c]}. Select every response against '
+                f'the matrix is incomplete: {channel_labels(rows)[r]} has no FRF '
+                f'to {channel_labels(columns)[c]}. Select every response against '
                 'every reference')
-        return condition_matrix(data.abscissa, matrix, _labels(rows),
-                                _labels(columns), limit=limit,
+        return condition_matrix(data.abscissa, matrix, channel_labels(rows),
+                                channel_labels(columns), limit=limit,
                                 dimension=dimension, kind='FRF',
                                 notes=notes, progress=progress)
     if isinstance(data, Psd):
@@ -627,7 +655,7 @@ def read_conditioning(data: Any, records: Any = None, *,
         if len(channels) < 2:
             raise ValueError('conditioning compares channels, and these '
                              'records have one')
-        labels = _labels(channels)
+        labels = channel_labels(channels)
         matrix, notes = _completed(matrix, filled, labels)
         dimension, unit_notes = _one_unit(data, wanted)
         return condition_matrix(data.abscissa, matrix, labels, labels,
@@ -909,8 +937,7 @@ class Realizability:
 
     def line(self, frequency: float) -> int:
         """The index of the line nearest `frequency`."""
-        return int(np.argmin(np.abs(np.asarray(self.frequency, dtype=float)
-                                    - float(frequency))))
+        return nearest_line(self.frequency, frequency)
 
     def at(self, frequency: float) -> RealizabilityPoint:
         """The reading at the line nearest `frequency`."""
@@ -1089,7 +1116,7 @@ def read_realizability(psd: Any, records: Any = None, *,
     if len(channels) < 2:
         raise ValueError('realizability is about how channels move '
                          'together, and these records have one channel')
-    labels = _labels(channels)
+    labels = channel_labels(channels)
     matrix, notes = _completed(matrix, filled, labels)
     return check_spectral_matrix(psd.abscissa, matrix, labels,
                                  tolerance=tolerance,

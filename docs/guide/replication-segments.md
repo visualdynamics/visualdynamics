@@ -114,7 +114,7 @@ records the `plot_replication_segments` call that draws what is on
 screen. The waveform grid under the plot still holds every channel at
 every playing.
 
-## In a script
+## From a script
 
 ```python
 from visualdynamics.core.replication_segments import replication_segments

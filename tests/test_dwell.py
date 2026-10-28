@@ -532,3 +532,21 @@ def test_a_dwell_specification_draws_on_its_own(window, pump):
     pump()
     assert window.statusBar().currentMessage().startswith(
         'Dwell: the requirement at 1 DOF of Sweep on the stage')
+
+
+def test_the_record_is_read_against_the_specification_it_was_run_to(window, pump):
+    """With two sine specifications in the project the sine view read
+    every record against the first (2026-10-28): the dwell record
+    beside a sweep showed nothing. The specification is the one its
+    levels were extracted against, else the first written at a channel
+    the record holds."""
+    history, spec = _dwell_record(30.0)
+    sweep = SineSweepSpecification(
+        [SineTone('Sweep', 0.0, [20.0, 2000.0], [[1.0], [1.0]], [LINEAR],
+                  [60.0])], ['9Z+'], ordinate_unit='m/s**2')
+    window.add_object('Sweep', sweep)
+    panel = _shown(window, pump, history, spec)
+    assert window.project.sine_sweep_specifications[0] is sweep
+    assert panel.isVisibleTo(window.data_pane.sine_panel)
+    assert window._sine_specification(
+        history, window.project.sine_sweep_specifications) is spec

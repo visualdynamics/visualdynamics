@@ -1061,8 +1061,49 @@ def test_a_block_that_compares_nothing_says_so_in_its_note():
     project.add('Report', Report('R', features=['prediction']))
     project.report_prediction('Report', 'Response PSD', 'P', level=-12)
     blocks = _payload(_render(project))['blocks']
-    assert [b['kind'] for b in blocks] == ['table', 'text']
-    assert blocks[0]['rows'] == []
-    assert blocks[1]['html'] == (
+    # no numbered table with no rows (2026-10-28): the note alone
+    assert [b['kind'] for b in blocks] == ['text']
+    assert blocks[0]['html'].startswith(
+        '<p><strong>Responses against prediction:</strong> nothing compared.</p>')
+    assert blocks[0]['html'].endswith(
         '<ul>\n<li>No record of 299Y+ in this measurement.</li>\n'
         '<li>Nothing was compared.</li>\n</ul>')
+
+
+def test_a_drive_points_two_records_are_told_apart_by_the_predictions_quantity():
+    """A drive point holds an accelerometer and a force gauge at one DOF:
+    two records, one quantity each. Matched by DOF alone every drive
+    point was refused as '2 records; compare one' (2026-10-28); the
+    package's channel identity is (DOF, quantity), and the prediction
+    names its quantity."""
+    f = np.arange(0.0, 2000.0, 2.5)
+    rows = np.vstack([INPUT * G ** 2 * transmissibility(f, 385.0, 12.0) ** 2,
+                      np.full(f.size, 4.0)])
+    measured = Psd(f, rows, response_dof=['201Y+', '201Y+'],
+                   ordinate_dim=['acceleration**2/frequency',
+                                 'force**2/frequency'])
+    comparison = compare([asd_prediction()], measured, 0.0)
+    channel, = comparison.channels
+    assert channel.note == '' and channel.record == 0
+    # the tallest line of the band, on a 2.5 Hz grid about the mode
+    assert channel.rows[0].measured_level == pytest.approx(
+        INPUT * G ** 2 * transmissibility(385.0, 385.0, 12.0) ** 2, rel=5e-3)
+    # the same DOF twice in the prediction's own quantity is still two
+    twice = Psd(f, rows[[0, 0]], response_dof=['201Y+', '201Y+'],
+                ordinate_dim=['acceleration**2/frequency'] * 2)
+    assert '2 records' in compare([asd_prediction()], twice, 0.0).channels[0].note
+
+
+def test_a_block_that_compares_nothing_draws_a_note_and_no_empty_table():
+    """A numbered table with no rows is a handle to nothing
+    (2026-10-28): the note alone says what was not compared."""
+    project = Project('t')
+    project.add('Measured', response_psd([(385.0, 12.0)]))
+    project.predict('Predictions', '999Z+', 'asd', [(385.0, 5.78, 12.0)],
+                    unit='g', level_db=0.0, frequency_uncertainty=10.0)
+    project.add('Report', Report('R', features=['prediction']))
+    project.report_prediction('Report', 'Measured', 'Predictions', level=-12)
+    blocks = _payload(_render(project))['blocks']
+    assert [b['kind'] for b in blocks] == ['text']
+    assert 'nothing compared' in blocks[0]['html']
+    assert '999Z+' in blocks[0]['html']

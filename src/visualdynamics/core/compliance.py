@@ -88,6 +88,116 @@ def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
     return out
 
 
+def cross_term_at(frequencies: ArrayLike, values: ArrayLike,
+                  lines: ArrayLike) -> np.ndarray:
+    """A cross term written at breakpoints, read at `lines` the way a
+    specification is drawn: the magnitude log-log between two points
+    that are both above zero and straight between two that are not (a
+    coherence of zero, two channels stated to be independent, is a
+    value and not a gap), the phase linearly. Not a number outside the
+    points, and at lines at or below zero hertz.
+
+    Parameters
+    ----------
+    frequencies : array_like
+        The breakpoints' frequencies, in Hz, in any order.
+    values : array_like
+        The complex cross term at each breakpoint.
+    lines : array_like
+        Where to read it.
+
+    Returns
+    -------
+    numpy.ndarray
+        Complex, one value per line.
+    """
+    # Two readers of this existed, one in the matrix comparison and one
+    # in the drive prediction through the authoring sheet, and they
+    # disagreed on a zero at a breakpoint: the sheet's bridged it as a
+    # gap, so one specification read 0.81 coherence in the prediction
+    # and 0.32 in the comparison at the same line (2026-10-28). This is
+    # the one reader, and the zero is a statement.
+    frequencies = np.asarray(frequencies, dtype=float)
+    values = np.asarray(values)
+    lines = np.asarray(lines, dtype=float)
+    usable = np.isfinite(frequencies) & (frequencies > 0.0)
+    order = np.argsort(frequencies[usable])
+    f = frequencies[usable][order]
+    v = values[usable][order].astype(complex)
+    out = np.full(lines.shape, np.nan, dtype=complex)
+    if f.size < 2:
+        return out
+    inside = (lines >= f[0]) & (lines <= f[-1])
+    at = lines[inside]
+    k = np.clip(np.searchsorted(f, at, side='right') - 1, 0, f.size - 2)
+    m1, m2 = np.abs(v[k]), np.abs(v[k + 1])
+    part = (at - f[k]) / (f[k + 1] - f[k])
+    with np.errstate(divide='ignore', invalid='ignore'):
+        logs = np.exp(np.log(m1) + (np.log(m2) - np.log(m1))
+                      * np.log(at / f[k]) / np.log(f[k + 1] / f[k]))
+    magnitude = np.where((m1 > 0.0) & (m2 > 0.0), logs,
+                         m1 + (m2 - m1) * part)
+    phase = np.interp(at, f, np.unwrap(np.angle(v)))
+    out[inside] = magnitude * np.exp(1j * phase)
+    return out
+
+
+def record_at(data: Any, record: int, lines: ArrayLike) -> np.ndarray:
+    """One record of a specification read at `lines`, the way it is
+    drawn, and not a number where it is not written.
+
+    An autospectrum is written where it is above zero, and between
+    breakpoints ('log_log') is read log-log with its gaps
+    (`log_interpolate`). A cross term is written wherever it is a
+    number, zero included, and is read between breakpoints by
+    `cross_term_at`; whether its coherence is defined is for its two
+    autospectra to say. On lines or bands ('bin') a record takes the
+    value of the bin the line falls in. The matrix comparison and the
+    drive prediction both read a specification here.
+
+    Parameters
+    ----------
+    data : Psd or Specification
+        The specification.
+    record : int
+        Which record.
+    lines : array_like
+        Where to read it, in Hz.
+
+    Returns
+    -------
+    numpy.ndarray
+        Real for an autospectrum, complex for a cross term.
+    """
+    from .data import autospectrum
+
+    lines = np.asarray(lines, dtype=float)
+    frequencies = np.asarray(data.abscissa, dtype=float)
+    values = np.asarray(data.ordinate)[record]
+    auto = autospectrum(data, record)
+    written = np.isfinite(frequencies) & (
+        data.written(record) if auto else np.isfinite(values))
+    if getattr(data, 'interpolation', 'bin') == 'log_log':
+        if auto:
+            return log_interpolate(lines, frequencies, np.real(values))
+        return cross_term_at(frequencies[written], values[written], lines)
+    left, right = data.bin_bounds()
+    order = np.argsort(left)
+    left, right = left[order], right[order]
+    out = np.full(lines.shape, np.nan, dtype=float if auto else complex)
+    if not left.size:
+        return out
+    # the last bin starting at or below each line, if that bin reaches it
+    k = np.searchsorted(left, lines, side='right') - 1
+    found = k >= 0
+    k = np.maximum(k, 0)
+    found &= (lines >= left[k]) & (lines < right[k])
+    source = order[k]
+    found &= written[source]
+    out[found] = (np.real(values) if auto else values)[source[found]]
+    return out
+
+
 def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
                   lows: ArrayLike, highs: ArrayLike) -> np.ndarray:
     """The exact area under the log-log curve through these points, over

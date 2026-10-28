@@ -14,9 +14,9 @@ rates, the span and its lines, and the filter's gain at the span's top
 and at the lowest frequency that folds into it (`core.resample`), and
 under them each fold in words.
 
-Every edit redraws at once. Nothing is made: the reading shows what a
-resampling would do, and a script makes the record
-(`TimeHistory.resample`), so there is no Apply button.
+Every edit redraws at once. Apply Resample makes the record
+(`Project.resample`, the call a script makes), beside the source and
+linked to it, at the factor and the filter order shown.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QComboBox, QLabel, QLineEdit, QWidget
+from PySide6.QtWidgets import QComboBox, QLabel, QLineEdit, QPushButton, QWidget
 
 from ..core.resample import FRAME, ORDER, ResampleReading
 from .editors import SpinBox
@@ -72,6 +72,8 @@ class ResamplePanel(QWidget):
 
     #: a setting moved; here is the whole set now
     changed = Signal(dict)
+    #: Apply Resample was pressed: make the record at these settings
+    apply_asked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -121,7 +123,15 @@ class ResamplePanel(QWidget):
         self.verdict: QLabel = QLabel('')
         self.verdict.setWordWrap(True)
         grid.addWidget(self.verdict, 6 + len(ROWS), 0, 1, 2)
-        grid.setRowStretch(7 + len(ROWS), 1)
+        # the reading had no apply (2026-10-28): processing is select,
+        # see, set, apply, and a record a script made had no provenance
+        self.apply_button: QPushButton = QPushButton('Apply Resample')
+        self.apply_button.setToolTip(
+            'Make the record at the new rate, filtered first, beside '
+            'this one')
+        self.apply_button.clicked.connect(self.apply_asked.emit)
+        grid.addWidget(self.apply_button, 7 + len(ROWS), 0, 1, 2)
+        grid.setRowStretch(8 + len(ROWS), 1)
 
         for box in (self.factor_box, self.order_box):
             box.valueChanged.connect(self._edited)

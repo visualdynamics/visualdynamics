@@ -637,3 +637,18 @@ def test_stale_levels_are_said_to_be_stale_and_not_checked(window, pump):
     panel.excess_box.setValue(15.0)
     pump()
     assert panel.check is None, 'an edit does not check stale levels'
+
+
+def test_an_empty_channel_list_is_refused_not_passed():
+    """`channels=[]` read nothing and passed with nothing judged
+    (2026-10-28)."""
+    from visualdynamics.core.sine_frequency import check_frequency
+    from visualdynamics.core.sine_tracking import SineTracking, track_sine
+
+    _check, history, spec, levels = _checked()
+    with pytest.raises(ValueError, match='no channel'):
+        check_distortion(history, spec, levels, channels=[])
+    with pytest.raises(ValueError, match='no channel'):
+        check_frequency(history, spec, levels, channels=[])
+    with pytest.raises(ValueError, match='no channel'):
+        track_sine(history, spec, SineTracking(proportional=0.5), channels=[])

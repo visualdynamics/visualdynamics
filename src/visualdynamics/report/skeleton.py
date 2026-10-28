@@ -366,28 +366,34 @@ def check(report: Any, objects: Mapping[str, Any],
     sections enabled: there is then no skeleton to check it against,
     and an empty list would read as a report complete.
     """
-    from ..core.report import resolve_binding
     from .features import enabled
 
     if FEATURE not in enabled(report):
         raise ValueError(f'report {getattr(report, "title", "")!r} does not '
                          'have Skeleton sections enabled, so there is no '
                          'skeleton to check it against')
-    keys = ('source', 'geometry', 'dofs_source', 'shapes', 'measured',
-            'specification')
+    # what is drawn is what the page draws (`_build_block` returning
+    # something), not whether the block's bindings resolve: a block
+    # that resolves and still draws nothing counted as filling its
+    # section here while the page showed the section not yet written
+    # (2026-10-28)
+    from ..units import DEFAULT_SYSTEM
+    from . import _build_block
+    from .prediction import build as build_prediction
+
+    active = enabled(report)
 
     def drawn(block):
-        needed = [block.get(key) for key in keys if block.get(key)]
-        return all(resolve_binding(name, objects, object_groups) in objects
-                   for name in needed)
+        if block.get('kind') == 'prediction':
+            return ('prediction' in active and build_prediction(
+                block, objects, DEFAULT_SYSTEM, object_groups) is not None)
+        return _build_block(block, objects, DEFAULT_SYSTEM,
+                            object_groups) is not None
 
     entries = []
-    active = enabled(report)
     for block in report.blocks:
         if 'section' in block or not drawn(block):
             continue
-        if block.get('kind') == 'prediction' and 'prediction' not in active:
-            continue        # not drawn while its feature is off
         figure = _figure(block.get('kind'))
         entries.append((block, figure, figure and instrumentation(
             block, objects, object_groups)))

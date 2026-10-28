@@ -1,9 +1,8 @@
-# Report Features
+# Report features
 
 A report feature is an optional addition to a generated report. Each
 one is off until it is turned on, and a report with none turned on is
-exactly the report Visual Dynamics writes otherwise, byte for byte. A
-lab turns on what its reports need; nothing else moves.
+exactly the report Visual Dynamics writes otherwise, byte for byte.
 
 ![The report editor with the Test report preset chosen: the Report
 Features panel in the pane, and two control channels on the page drawn
@@ -84,7 +83,9 @@ level below the skeleton's. The report's blocks themselves are not
 moved: the layout is made when the page is drawn, and turning the
 feature off gives back the page as it was.
 
-**Owed sections.** A section only the author can write shows, until it
+### Owed sections
+
+A section only the author can write shows, until it
 says something, as a framed card reading NOT YET WRITTEN with what
 belongs there. Instrumentation and Results are owed only when nothing
 falls under them. The program never writes an author's words for them:
@@ -109,7 +110,9 @@ field. A section's text can hold pipe tables:
 | 2   |  0 dB |   10 min |
 ```
 
-**Before export.** Export first lists every section still owed (not yet
+### Before export
+
+Export first lists every section still owed (not yet
 written, nothing in it, or a discussion that does not say by whom) and
 asks whether to export anyway. A script asks the same question:
 
@@ -151,7 +154,9 @@ Each channel gets one of four answers:
 A sensor is taken as in calibration through its expiration date: one
 due on the 24th may be used on the 24th, not on the 25th.
 
-**Where it shows.** The channel table gains a **Calibration** column
+### Where it shows
+
+The channel table gains a **Calibration** column
 with each channel's answer, and an expired or lapsing channel's
 Expiration and Calibration cells are shaded red. Under the table a
 paragraph gives the count in date and names each channel out of date
@@ -175,7 +180,9 @@ report with no test date entered each say that calibration was not
 checked, and why. With Skeleton sections on, the column and the
 paragraph fall under Instrumentation.
 
-**The test date.** Select the channel table in the report editor and
+### The test date
+
+Select the channel table in the report editor and
 type the **Test date**, and the **Last test day** for a test over
 several days, as YYYY-MM-DD. A date written another way is refused
 rather than guessed (10/04/2026 is October 4 in one country and April
@@ -186,7 +193,9 @@ date*. The dates are kept with the report; a `.vdreport` template
 leaves them out, so a house template never judges the next test
 against the last one's date.
 
-**Setup and Method.** That section is the author's and is never
+### Setup and Method
+
+That section is the author's and is never
 written by the program. With Skeleton sections on, its pane has an
 **Insert Calibration Status** button, which puts the equipment list at
 the cursor (a table of the sensors with their make, model, serial
@@ -238,7 +247,9 @@ An ASD's levels are in the unit squared per hertz (`unit='g'` for
 g²/Hz, the way a PSD declares its unit), an amplitude's in the unit. A
 transmissibility is a ratio and takes no unit and no level.
 
-**The scaling.** A prediction stated at full level and a run at L dB
+### The scaling
+
+A prediction stated at full level and a run at L dB
 relative to full level: the predicted ASD is multiplied by 10^(L/10)
 and a predicted amplitude by 10^(L/20), so at minus 12 dB an ASD by
 0.063 and an amplitude by 0.25. A transmissibility is not scaled. The
@@ -247,7 +258,9 @@ left blank, the scaling a PSD holds for its comparison against the
 specification is used, and a level stated that disagrees with it is
 refused.
 
-**Peaks are looked for in their band.** Near each predicted peak, the
+### Peaks are looked for in their band
+
+Near each predicted peak, the
 measured peak is read by the package's half-power reader inside the
 peak's band: the predicted frequency plus or minus the model's stated
 frequency uncertainty, or a band stated for the peak. A band that holds
@@ -304,6 +317,16 @@ comparison opens on its specification's band) and is widened outward
 to whole decades. Figures of different quantities or units, such as an
 acceleration ASD and a force ASD, are scaled apart.
 
+## Record captions
+
+**Record captions** (group Figures) puts the caption block a record
+carries under every figure of a measured spectrum in the report: the
+channel, the run, the analysis settings and the requirement, read off
+the record as [Report captions](report-captions.md) describes. Without
+the feature the same block can be asked for one figure at a time, with
+the figure's own check box in the editor; the feature asks for it on
+every figure at once.
+
 ## What is planned
 
 The other features are registered so the panel shows what is coming,
@@ -320,7 +343,6 @@ and are grayed out until each is built:
 | Data index | Records | every file the report rests on, with its size and SHA-256, checked again at export |
 | Identity and issue | Issue control | number, revision, status and page n of N on every page, a paginated PDF, and amendments |
 | Flash report | Issue control | a one-page preliminary report from the day's analysis |
-| Record captions | Figures | a caption block on each spectrum, SRS and sine figure, read off the record |
 
 What stays the engineer's to write (the cause and effect of a finding,
 its approval, the discussion and the conclusion, the signatures) is

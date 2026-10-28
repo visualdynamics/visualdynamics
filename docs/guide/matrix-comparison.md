@@ -58,11 +58,12 @@ pair both ways round with the two not conjugates of each other, or two
 records for one entry, is refused: which one is meant is not in the
 data.
 
-The specification is read the way it is drawn. Between breakpoints
-each term's magnitude is read log-log and its phase linearly, the way
-the specification sheet reads a cross term, so a pair entered as one
-coherence and one phase keeps exactly that coherence and phase at
-every line between the breakpoints. On a specification of lines or
+The specification is read the way it is drawn, by the one reader the
+drive prediction and the specification sheet use too. Between
+breakpoints each term's magnitude is read log-log and its phase
+linearly, so a pair entered as one coherence and one phase keeps
+exactly that coherence and phase at every line between the
+breakpoints. On a specification of lines or
 bands, a line takes the value of the bin it falls in. A coherence of
 zero, two channels stated to be independent, is a value and is judged.
 A pair the specification writes no cross term for is not judged and is

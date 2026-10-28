@@ -115,7 +115,7 @@ reading = draft.reading('1Z+')
 print(reading.areas / g2)                           # 1.50, 16.8, 27.7 g^2
 print(reading.running / 9.80665)                    # 1.22, 4.28, 6.78 g
 plot_breakpoints(draft, path='breakpoints.png')
-spec = draft.make('by slope')                       # the specification
+spec = draft.make(comment='by slope')               # the specification
 ```
 
 `with_slope(segment, db_per_octave)` types a slope into an existing

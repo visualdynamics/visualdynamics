@@ -585,7 +585,9 @@ def test_a_curve_of_exactly_max_points_is_left_whole(tmp_path):
 
 def test_a_note_already_on_a_figure_is_kept_when_it_is_trimmed(tmp_path):
     """A record long enough for the page to thin it already carries that
-    note; trimming adds its own sentence after it."""
+    note; trimming it further leaves one sentence, counting from the
+    record (two sentences stood here, the second understating the
+    record, 2026-10-28)."""
     history = TimeHistory(np.arange(100_000) / 1000.0,
                           np.random.default_rng(0).standard_normal((1, 100_000)),
                           response_dof=['1Z+'])
@@ -595,7 +597,9 @@ def test_a_note_already_on_a_figure_is_kept_when_it_is_trimmed(tmp_path):
         tmp_path / 'b.json', history, max_points=1000)).read_text())['blocks']
     first = own['note']
     assert first.startswith('Thinned for the file:')
-    assert trimmed['note'].startswith(first + ' Thinned for the file: ')
+    assert trimmed['note'].count('Thinned for the file') == 1
+    assert 'of 100000,' in trimmed['note'] and 'every extreme kept' in trimmed['note']
+    assert len(trimmed['x']) <= 1000
 
 
 def test_sixteen_points_is_the_fewest_a_curve_may_keep(tmp_path):
@@ -690,3 +694,21 @@ def test_a_setting_that_would_do_nothing_is_refused(tmp_path):
                                          "this data is real: 'phase'"):
         visualdynamics.export_figure(tmp_path / 'a.json', psd,
                                      component='phase')
+
+
+def test_a_figure_thinned_twice_carries_one_sentence_counting_the_record(tmp_path):
+    """A time history's builder thins it and the export thins it again
+    to `max_points`: one note, from the record's own count, not two
+    with the second understating it (2026-10-28)."""
+    rate, seconds = 4096.0, 28.0
+    t = np.arange(int(rate * seconds)) / rate
+    history = TimeHistory(t, np.sin(2 * np.pi * 7.0 * t)[None],
+                          response_dof=['1Z+'], ordinate_dim='acceleration')
+    from visualdynamics.report import export_figure
+
+    path = tmp_path / 'thinned.json'
+    export_figure(str(path), history, max_points=4000)
+    block = json.loads(path.read_text())['blocks'][0]
+    note = block['note']
+    assert note.count('Thinned for the file') == 1
+    assert f'of {t.size},' in note

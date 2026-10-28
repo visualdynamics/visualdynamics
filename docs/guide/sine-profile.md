@@ -137,7 +137,7 @@ such as 'from 33 to 60 Hz the level rises at 9.2 dB per octave'.
 beside the profile read from it, it shows where breakpoints are too far
 apart for the segment they write. Five breakpoints written straight from
 the document above (0.26, 2, 2, 5 and 5 g at 5, 14, 33, 52.1 and
-500 Hz) interpolate to 0.33 in peak to peak at 7 Hz, 64 % more than the
+500 Hz) interpolate to 0.33 in peak to peak at 7 Hz, 65 % more than the
 0.2 in the segment holds.
 
 In the window, select a sine specification and turn on **Sine

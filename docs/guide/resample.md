@@ -55,7 +55,7 @@ The filter's corner is at 1.2 times the span (`CORNER`), 2,400 Hz at
 5,120 Hz, among the dropped lines and below the new Nyquist frequency.
 A zero-phase pair is 6.02 dB down at its nominal corner, so a corner on
 the span would take the span's top line 6 dB down and 0.9 of the span
-1.5 dB down; at 1.2 spans the span is flat to 0.1 dB. The lowest
+0.65 dB down; at 1.2 spans the span is flat to 0.1 dB. The lowest
 frequency that can fold into the span is the new rate less the span
 (3,120 Hz at 5,120 Hz, 1.56 spans), 1.3 corners up. The default design
 order is 12 (`ORDER`), which run forward and backward is 55.8 dB down

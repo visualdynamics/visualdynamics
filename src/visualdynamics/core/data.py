@@ -2201,6 +2201,7 @@ class TimeHistory(DataArray):
         # statement.
         from .srs import DEFAULT_Q, KINDS, PER_OCTAVE, octave_frequencies
         from .srs import peaks as srs_peaks
+        from .srs import spectra as srs_spectra
 
         rate = self.sample_rate
         windows = self.srs_windows(shocks)
@@ -2217,11 +2218,10 @@ class TimeHistory(DataArray):
         for i, record in enumerate(self.ordinate):
             for k, window in enumerate(windows):
                 first, last = window.bounds(rate)
-                highest, lowest = srs_peaks(record.real[first:last],
-                                            frequencies, rate, q=q)
-                rows['positive'].append(highest)
-                rows['negative'].append(-lowest)
-                rows['maximax'].append(np.maximum(highest, -lowest))
+                read = srs_spectra(*srs_peaks(record.real[first:last],
+                                              frequencies, rate, q=q))
+                for kind in KINDS:
+                    rows[kind].append(read[kind])
                 dofs.append(self.response_dof[i])
                 dims.append(self.ordinate_dim[i])
                 hints.append(self.dimension_hint[i])

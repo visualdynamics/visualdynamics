@@ -42,12 +42,10 @@ run the project knows of, so its run, window, frames and degrees of
 freedom read "not recorded": the name an import gave the object is
 not a run. A band sums lines, and carries their degrees of freedom:
 a banded spectrum's caption gives the range of its bands' counts, each
-worked from the narrowband lines the band sums (Satterthwaite's count
-for a sum of correlated lines, each weighted by the power it puts in
-the band, with the window's correlation between lines), beside the
-count of one narrowband line. Under the default Hann window a band of
-many lines is worth about half what its lines would be if they were
-independent. Without the narrowband spectrum and its averaging the
+worked from the narrowband lines the band sums the way the Chance
+reading combines lines ([Combining lines](comparison-chance.md#combining-lines)),
+beside the count of one narrowband line. Without the narrowband
+spectrum and its averaging the
 bands' count cannot be worked out, and the caption gives the line's
 count before banding and says so.
 
@@ -71,7 +69,7 @@ freedom. The overlap is written the same way in a caption, a label and
 a `{{Object.overlap}}` reference: two-thirds overlap is 66.7% in all
 three.
 
-## In a script
+## From a script
 
 `Project.caption_of` reads the caption for one record, or for the
 records a plot draws, from the project: the averaging from the

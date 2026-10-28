@@ -25,6 +25,8 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import numpy as np
+
 from ..plot import END_LABEL_CURVES, LINE_PATTERNS
 
 #: the figure kinds the log-log axes and the shared decades apply to
@@ -111,6 +113,14 @@ def _finite(values: Any) -> list[float]:
     return out
 
 
+def _floats(values: Sequence[Any]) -> np.ndarray:
+    """`values` as floats, a None as not-a-number."""
+    try:
+        return np.asarray(values, dtype=float)
+    except (TypeError, ValueError):
+        return np.array([math.nan if v is None else float(v) for v in values])
+
+
 def _opening(cell: Mapping[str, Any]) -> tuple[float, float, float, float] | None:
     """The window a figure opens on, in its own axis coordinates: its
     `home_x` where it has one (a comparison opens on its specification's
@@ -129,12 +139,17 @@ def _opening(cell: Mapping[str, Any]) -> tuple[float, float, float, float] | Non
     ys: list[float] = []
 
     def inside(values, on):
+        # in numpy: Python over every point of every curve of twenty
+        # figures was four times slower for the same window (2026-10-28)
         if not values:
             return
-        for at, value in zip(on, values, strict=False):
-            if (at is not None and value is not None
-                    and x0 <= at <= x1 and math.isfinite(value)):
-                ys.append(float(value))
+        n = min(len(values), len(on))
+        value = _floats(values[:n])
+        at = _floats(on[:n])
+        keep = np.isfinite(value) & np.isfinite(at) & (at >= x0) & (at <= x1)
+        if keep.any():
+            ys.append(float(value[keep].min()))
+            ys.append(float(value[keep].max()))
 
     for curve in cell.get('curves', ()):
         inside(curve.get('y'), curve.get('x') or grid)

@@ -420,6 +420,11 @@ def _rows(history: Any, specification: SineSweepSpecification,
     controller never saw is read through the same filter."""
     if channels is None:
         return _control_rows(history, specification)
+    if not list(channels):
+        # an empty list read nothing and the checks built on it passed
+        # with nothing judged (2026-10-28)
+        raise ValueError('no channel to read: give at least one DOF, or '
+                         'None for the control channels')
     dofs = list(history.response_dof)
     missing = [dof for dof in channels if dof not in dofs]
     if missing:

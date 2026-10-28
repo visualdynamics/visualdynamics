@@ -867,9 +867,18 @@ def compare(predictions: Predictions | Sequence[Prediction], measured: Any,
     channels: list[ChannelComparison] = []
     absent: list[str] = []
     for prediction in held:
-        records = [i for i in range(measured.num_records)
-                   if measured.response_dof[i] == prediction.channel
-                   and _same_input(measured, i, prediction, quantity)]
+        at_dof = [i for i in range(measured.num_records)
+                  if measured.response_dof[i] == prediction.channel
+                  and _same_input(measured, i, prediction, quantity)]
+        # the package's channel identity is (DOF, quantity): a drive
+        # point's accelerometer and force gauge share a DOF and are two
+        # records, and the prediction's quantity picks one. Matched by
+        # DOF alone, every drive point was refused as two records
+        # (2026-10-28). With none of the quantity, the refusal below
+        # still names the dimension that was there.
+        records = [i for i in at_dof
+                   if _holds_quantity(measured, i, prediction, quantity)
+                   ] or at_dof
         if not records:
             absent.append(prediction.channel if prediction.reference is None
                           else f'{prediction.channel}/{prediction.reference}')
@@ -913,6 +922,20 @@ def _same_input(measured: Any, i: int, prediction: Prediction,
         return (references is not None and prediction.reference is not None
                 and references[i] == prediction.reference)
     return references is None or references[i] == measured.response_dof[i]
+
+
+def _holds_quantity(measured: Any, i: int, prediction: Prediction,
+                    quantity: str) -> bool:
+    """Whether record `i` holds the prediction's quantity: its dimension
+    is the prediction's record dimension, or undefined (declared units
+    are refused by name later, not passed over here). A
+    transmissibility is judged by its input alone."""
+    from ..units import UNKNOWN
+
+    if quantity == 'transmissibility' or prediction.record_dimension is None:
+        return True
+    dimension = measured.ordinate_dim[i]
+    return dimension in (prediction.record_dimension, UNKNOWN)
 
 
 def _refusal(prediction: Prediction, quantity: str, measured: Any,

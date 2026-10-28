@@ -1907,11 +1907,19 @@ def read_at_lines(old_f: np.ndarray, values: np.ndarray,
     """A specification record read at new lines.
 
     At its own lines the record keeps its own values. Between them it
-    is interpolated the way a specification is read, the magnitude
-    log-log and the phase linearly, so a line the sheet added does not
-    change what a channel the sheet does not hold means. Outside its
-    range it takes its end values.
+    is interpolated the way a specification is read, so a line the
+    sheet added does not change what a channel the sheet does not hold
+    means: a cross term by `compliance.cross_term_at` (the magnitude
+    log-log between points above zero, straight through a zero, the
+    phase linearly), a real record by its magnitude log-log over the
+    points above zero. Outside its range it takes its end values.
     """
+    # A cross term was read here by its own rule, bridging a zero at a
+    # breakpoint as a gap, and the drive prediction read the sheet's
+    # rule while the matrix comparison read the specification's: the
+    # same cross term gave two coherences (2026-10-28). One reader now.
+    from .compliance import cross_term_at
+
     values = np.asarray(values)
     exact = np.isin(lines, old_f)
     if exact.all():
@@ -1923,16 +1931,19 @@ def read_at_lines(old_f: np.ndarray, values: np.ndarray,
     out = np.full(len(lines), np.nan, dtype=values.dtype)
     out[exact] = values[np.searchsorted(old_f, lines[exact])]
     new = ~exact
+    if np.iscomplexobj(values):
+        written = np.isfinite(values)
+        read = cross_term_at(old_f[written], values[written], lines[new])
+        # the end values outside the range, as the real branch holds them
+        below, above = lines[new] < old_f[0], lines[new] > old_f[-1]
+        read[below], read[above] = values[0], values[-1]
+        out[new] = read
+        return out
     if positive.sum() >= 2:
         size = np.exp(np.interp(log_new[new], log_old[positive],
                                 np.log(magnitude[positive])))
     else:
         size = np.interp(lines[new], old_f, np.nan_to_num(magnitude))
-    if np.iscomplexobj(values):
-        phase = np.interp(lines[new], old_f,
-                          np.unwrap(np.angle(values)))
-        out[new] = size * np.exp(1j * phase)
-    else:
-        out[new] = size * np.sign(np.interp(lines[new], old_f,
-                                            np.nan_to_num(values)))
+    out[new] = size * np.sign(np.interp(lines[new], old_f,
+                                        np.nan_to_num(values)))
     return out

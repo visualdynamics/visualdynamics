@@ -27,7 +27,6 @@ own rule (`gui.mixed_panel`).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Signal
@@ -341,10 +340,4 @@ class SinePanel(QWidget):
         self.mixed.apply_theme(colors)
 
 
-def with_chosen(setting: SineExtraction, chosen: float | None) -> SineExtraction:
-    """A copy of the setting with `chosen`, the cycles the automatic
-    choice picked, written on it."""
-    return replace(setting, chosen=chosen)
-
-
-__all__ = ['MODES', 'SamplePlot', 'SinePanel', 'with_chosen']
+__all__ = ['MODES', 'SamplePlot', 'SinePanel']

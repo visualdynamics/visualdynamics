@@ -335,8 +335,15 @@ def read_half_power(frequencies: Any, magnitude: Any, near: float, *,
         raise ValueError('a peak needs at least three lines to be read')
     if not np.all(np.diff(f) > 0.0):
         raise ValueError('the frequencies must be ascending')
-    # a line the source could not read (NaN) is no part of any peak
-    m = np.where(np.isfinite(m), m, -np.inf)
+    # a line the source could not read (NaN) is no part of any peak: it
+    # is dropped, so the curve runs between its neighbors. Held as -inf
+    # it made a crossing of its own at the missing line, and a Q was
+    # read off it with no note (2026-10-28).
+    finite = np.isfinite(m)
+    f, m = f[finite], m[finite]
+    if len(f) < 3:
+        raise ValueError('a peak needs at least three lines with a value '
+                         'to be read')
     if within is not None:
         low, high = sorted((float(within[0]), float(within[1])))
         band = np.flatnonzero((f >= low) & (f <= high))

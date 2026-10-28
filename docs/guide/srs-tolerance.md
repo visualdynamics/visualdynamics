@@ -109,7 +109,7 @@ Every edit redraws the judgement at once. Nothing is made, so there is
 no Apply button; the console records the `plot_srs_tolerance` call
 that draws what is on screen.
 
-## In a script
+## From a script
 
 ```python
 from visualdynamics.core.compliance import srs_tolerance, srs_tolerance_all

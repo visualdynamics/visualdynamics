@@ -193,7 +193,12 @@ def test_the_prediction_is_made_off_the_window_thread_and_held(window, pump,
     assert len(threads) == 1, 'the prediction held is drawn again'
     pane.prediction_panel.editors['drive_limit'].setValue(10.0)
     pump()
-    assert len(threads) == 2, 'a setting changed makes it again'
+    assert len(threads) == 1, ('a rating moved reads the held inverse '
+                               'against it, no prediction again')
+    assert 'against 10 V' in pane.prediction_panel.readout.text()
+    pane.prediction_panel.tolerance_box.setValue(0.05)
+    pump()
+    assert len(threads) == 2, 'the inverse changed makes it again'
     assert 'against 10 V' in pane.prediction_panel.readout.text()
     window.project['Plant'].ordinate = _frf(gain=4.0).ordinate
     window.render_current()

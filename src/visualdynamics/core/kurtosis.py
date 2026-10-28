@@ -87,9 +87,17 @@ def kurtosis(values: ArrayLike) -> float:
     if x.size < 2:
         return float('nan')
     centered = x - x.mean()
-    m2 = float(np.mean(centered ** 2))
-    if m2 <= 0.0:
+    return kurtosis_of_centered(centered, float(np.mean(centered ** 2)))
+
+
+def kurtosis_of_centered(centered: ArrayLike, m2: float) -> float:
+    """`kurtosis` of samples already centered on their mean, with their
+    second moment `m2` already taken: the time statistics have both in
+    hand, and centering a five-minute record twice was a fifth of its
+    reading. NaN for no variance."""
+    if not m2 > 0.0:
         return float('nan')
+    centered = np.asarray(centered, dtype=float)
     return float(np.mean(centered ** 4) / m2 ** 2)
 
 

@@ -116,6 +116,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from .matrix_checks import channel_labels, runs
 from .progress import Ticker
 from .shaker import ShakerRating
 
@@ -203,19 +204,7 @@ def regularized_inverse(plant: Any, *, method: str = 'truncated',
         If `method` is not one of `METHODS`, or the tolerance or the
         weight is out of its range.
     """
-    method = str(method)
-    if method not in METHODS:
-        raise ValueError(f'the inverse is {" or ".join(map(repr, METHODS))}, '
-                         f'not {method!r}')
-    tolerance = float(tolerance)
-    weight = float(weight)
-    if method == 'truncated' and not 0.0 < tolerance < 1.0:
-        raise ValueError('the truncation tolerance is a share of the '
-                         'largest singular value, above 0 and under 1, '
-                         f'not {tolerance:g}')
-    if method == 'tikhonov' and not (np.isfinite(weight) and weight > 0.0):
-        raise ValueError('the Tikhonov weight has to be above zero and '
-                         f'finite, not {weight:g}')
+    _check_inverse(method, tolerance, weight)
     plant = np.asarray(plant, dtype=np.complex128)
     lines, rows, columns = plant.shape
     inverse = np.full((lines, columns, rows), np.nan, dtype=np.complex128)
@@ -223,7 +212,57 @@ def regularized_inverse(plant: Any, *, method: str = 'truncated',
     finite = np.isfinite(plant).all(axis=(1, 2))
     if not finite.any():
         return inverse, kept
-    u, sigma, vh = np.linalg.svd(plant[finite], full_matrices=False)
+    inverse[finite], kept[finite] = inverse_from_svd(
+        *np.linalg.svd(plant[finite], full_matrices=False), method=method,
+        tolerance=tolerance, weight=weight, scale=scale)
+    return inverse, kept
+
+
+def _check_inverse(method: str, tolerance: float, weight: float) -> None:
+    if str(method) not in METHODS:
+        raise ValueError(f'the inverse is {" or ".join(map(repr, METHODS))}, '
+                         f'not {method!r}')
+    tolerance, weight = float(tolerance), float(weight)
+    if method == 'truncated' and not 0.0 < tolerance < 1.0:
+        raise ValueError('the truncation tolerance is a share of the '
+                         'largest singular value, above 0 and under 1, '
+                         f'not {tolerance:g}')
+    if method == 'tikhonov' and not (np.isfinite(weight) and weight > 0.0):
+        raise ValueError('the Tikhonov weight has to be above zero and '
+                         f'finite, not {weight:g}')
+
+
+def inverse_from_svd(u: Any, sigma: Any, vh: Any, *,
+                     method: str = 'truncated', tolerance: float = TRUNCATION,
+                     weight: float = TIKHONOV, scale: float | None = None
+                     ) -> tuple[np.ndarray, np.ndarray]:
+    """`regularized_inverse` from the plant's singular value
+    decomposition, (lines, rows, k), (lines, k) and (lines, k, columns)
+    as `numpy.linalg.svd` returns them with `full_matrices=False`:
+    the prediction decomposes the plant once and reads its condition
+    number off the same singular values.
+
+    Parameters
+    ----------
+    u, sigma, vh : array_like
+        The decomposition, every line finite.
+    method, tolerance, weight, scale
+        As `regularized_inverse` takes them.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        The inverse, (lines, columns, rows), and the directions kept
+        at each line.
+    """
+    # The prediction decomposed the plant twice, once for the condition
+    # number and once here: two thirds of a 20 x 20 prediction's time
+    # (2026-10-28).
+    _check_inverse(method, tolerance, weight)
+    method, tolerance, weight = str(method), float(tolerance), float(weight)
+    u = np.asarray(u, dtype=np.complex128)
+    sigma = np.asarray(sigma, dtype=float)
+    vh = np.asarray(vh, dtype=np.complex128)
     largest = sigma[:, :1]
     if method == 'truncated':
         keep = (sigma > 0.0) & (sigma >= tolerance * largest)
@@ -238,9 +277,8 @@ def regularized_inverse(plant: Any, *, method: str = 'truncated',
         with np.errstate(divide='ignore', invalid='ignore'):
             gain = np.where(denominator > 0.0, sigma / denominator, 0.0)
     # V diag(gain) U^H, line by line
-    inverse[finite] = np.einsum('lji,lj,lkj->lik', vh.conj(), gain, u.conj())
-    kept[finite] = keep.sum(axis=1)
-    return inverse, kept
+    inverse = np.einsum('lji,lj,lkj->lik', vh.conj(), gain, u.conj())
+    return inverse, keep.sum(axis=1)
 
 
 def through(plant: Any, density: Any) -> np.ndarray:
@@ -268,25 +306,18 @@ def _channel(dof: Any, dimension: str, side: int) -> tuple[str, str]:
     return str(dof), channel_quantities(dimension)[side]
 
 
-def _labels(keys: list[tuple[str, str]]) -> list[str]:
-    """A label per (DOF, quantity) channel: the DOF, with the quantity
-    added only where one DOF carries two."""
-    dofs = [dof for dof, _quantity in keys]
-    return [dof if dofs.count(dof) == 1 else f'{dof} {quantity}'
-            for dof, quantity in keys]
-
-
 def _plant(frf: Frf) -> tuple[list[tuple[str, str]], list[tuple[str, str]],
                               np.ndarray, np.ndarray]:
-    """The FRF's records as (rows, columns, matrix, filled): a row per
-    response channel and a column per drive, (lines, rows, columns),
-    with `filled` saying which entries a record supplied. Refuses a
-    record whose units are not declared and drives of two quantities."""
+    """The FRF's records as (rows, columns, matrix, filled), assembled
+    by `matrix_checks.frf_matrix` as every matrix reading assembles
+    them: a row per response channel and a column per drive, (lines,
+    rows, columns), with `filled` saying which entries a record
+    supplied. Refuses a record whose units are not declared, two
+    records of one entry, and drives of two quantities."""
     from ..units import UNKNOWN
+    from .matrix_checks import frf_matrix
 
-    rows: list[tuple[str, str]] = []
-    columns: list[tuple[str, str]] = []
-    keys = []
+    seen: set[tuple[str, str, str]] = set()
     for i in range(frf.num_records):
         dimension = str(frf.ordinate_dim[i])
         if dimension == UNKNOWN:
@@ -295,65 +326,36 @@ def _plant(frf: Frf) -> tuple[list[tuple[str, str]], list[tuple[str, str]],
                 f'{frf.reference_dof[i]} are not declared, so the drives '
                 'it predicts would be in a scale nobody chose; declare '
                 'them first')
-        row = _channel(frf.response_dof[i], dimension, 0)
-        column = _channel(frf.reference_dof[i], dimension, 1)
-        if row not in rows:
-            rows.append(row)
-        if column not in columns:
-            columns.append(column)
-        key = (rows.index(row), columns.index(column))
-        if key in keys:
+        key = (str(frf.response_dof[i]), str(frf.reference_dof[i]), dimension)
+        if key in seen:
             # two plants for one entry: which one was meant is not in
             # the data, and taking either would be a guess
             raise ValueError(
                 f'the FRF holds two records of {frf.response_dof[i]} over '
                 f'{frf.reference_dof[i]}; keep one')
-        keys.append(key)
+        seen.add(key)
+    rows, columns, matrix, filled = frf_matrix(frf)
     drives = sorted({quantity for _dof, quantity in columns})
     if len(drives) > 1:
         raise ValueError(
             f'the FRF is against drives of {" and ".join(drives)}; the '
             'drives predicted together have to be one quantity')
-    matrix = np.zeros((len(frf.abscissa), len(rows), len(columns)),
-                      dtype=np.complex128)
-    filled = np.zeros((len(rows), len(columns)), dtype=bool)
-    ordinate = np.asarray(frf.ordinate)
-    for i, (r, c) in enumerate(keys):
-        matrix[:, r, c] = ordinate[i]
-        filled[r, c] = True
     return rows, columns, matrix, filled
-
-
-def _per_bin(specification: Psd, values: np.ndarray,
-             lines: np.ndarray) -> np.ndarray:
-    """A density on lines read at other lines: the value of the bin
-    each one falls in, not-a-number outside every bin."""
-    left, right = specification.bin_bounds()
-    order = np.argsort(left)
-    left, right, values = left[order], right[order], values[order]
-    k = np.searchsorted(right, lines, side='right')
-    inside = k < len(right)
-    k = np.minimum(k, len(right) - 1)
-    inside &= left[k] <= lines
-    out = np.full(len(lines), np.nan, dtype=values.dtype)
-    out[inside] = values[k[inside]]
-    return out
 
 
 def _read_target(specification: Psd, channels: list[tuple[str, str]],
                  lines: np.ndarray) -> np.ndarray:
     """The specification's matrix on the control channels, at `lines`.
 
-    A curve written at breakpoints is read the way it is drawn: the
-    autospectra log-log (`compliance.log_interpolate`, not-a-number
-    outside what is written) and the cross terms magnitude log-log and
-    phase linear (`author.read_at_lines`), as the authoring sheet reads
-    them. A density on lines is read per bin. A cross term held only by
-    its mirror is its mirror's conjugate. Lines where any autospectrum
-    is not written are not-a-number throughout."""
+    Each record is read the way it is drawn, by `compliance.record_at`,
+    the reader the matrix comparison uses too: an autospectrum log-log
+    between breakpoints with its gaps, a cross term magnitude log-log
+    and phase linear with a zero taken as a value, a density on lines
+    per bin. A cross term held only by its mirror is its mirror's
+    conjugate. Lines where any autospectrum is not written are
+    not-a-number throughout."""
     from ..units import UNKNOWN
-    from .author import read_at_lines
-    from .compliance import log_interpolate
+    from .compliance import record_at
 
     references = (specification.reference_dof
                   if specification.reference_dof is not None
@@ -375,9 +377,8 @@ def _read_target(specification: Psd, channels: list[tuple[str, str]],
                 f'{specification.response_dof[i]}, {references[i]}; '
                 'keep one')
         held[(row, column)] = i
-    labels = _labels(channels)
+    labels = channel_labels(channels)
     n = len(channels)
-    breakpoints = getattr(specification, 'interpolation', 'bin') == 'log_log'
     ordinate = np.atleast_2d(np.asarray(specification.ordinate))
     target = np.zeros((len(lines), n, n), dtype=np.complex128)
     for a in range(n):
@@ -410,21 +411,13 @@ def _read_target(specification: Psd, channels: list[tuple[str, str]],
                         f'{labels[a]} and {labels[b]} are not conjugates '
                         'of each other, so the target between them '
                         'cannot be read; keep one or make them agree')
+            read = record_at(specification, record, lines)
             if a == b:
-                values = np.real(values)
-                read = (log_interpolate(lines, specification.abscissa, values)
-                        if breakpoints else
-                        _per_bin(specification, values.astype(float), lines))
+                read = np.real(read)
                 with np.errstate(invalid='ignore'):
                     read = np.where(read > 0.0, read, np.nan)
-            else:
-                values = values.astype(np.complex128)
-                read = (read_at_lines(np.asarray(specification.abscissa,
-                                                 dtype=float), values, lines)
-                        if breakpoints else
-                        _per_bin(specification, values, lines))
-                if pair not in held:
-                    read = np.conj(read)
+            elif pair not in held:
+                read = np.conj(read)
             target[:, a, b] = read
             target[:, b, a] = np.conj(read)
     unwritten = ~np.isfinite(np.real(np.einsum('lii->li', target))).all(axis=1)
@@ -516,16 +509,6 @@ def _dominant(frequency: np.ndarray, density: np.ndarray
     chosen = frequency[order[:count]]
     return (float(frequency[order[0]]),
             (float(chosen.min()), float(chosen.max())))
-
-
-def runs(flags: Any) -> list[tuple[int, int]]:
-    """(first, last) index of each run of consecutive true flags."""
-    flags = np.asarray(flags, dtype=bool)
-    if not flags.any():
-        return []
-    edges = np.diff(np.concatenate([[0], flags.astype(int), [0]]))
-    return [(int(a), int(b) - 1) for a, b in
-            zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1))]
 
 
 def _amount(value: float, dimension: str,
@@ -640,6 +623,44 @@ class DrivePrediction:
     peak_factor: float | None
     demands: list[Demand] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    #: the rows and the drives as (DOF, quantity), what the ratings are
+    #: read against; and how many of `notes` the prediction itself made,
+    #: the rest being the ratings', so a rating moved rewrites only those
+    row_channels: list[tuple[str, str]] = field(default_factory=list)
+    drive_channels: list[tuple[str, str]] = field(default_factory=list)
+    plain_notes: int = 0
+
+    def with_ratings(self, *, drive_limit: float | Mapping[str, float] | None = None,
+                     shakers: ShakerRating | Mapping[str, ShakerRating] | None = None,
+                     tables: Mapping[str, str] | None = None,
+                     limits: Mapping[str, float] | None = None,
+                     duration: float = DURATION,
+                     peak_factor: float | None = None) -> DrivePrediction:
+        """This prediction judged against other ratings, the drives and
+        responses kept: the inverse does not depend on the ratings, so a
+        rating moved does not predict again. The ratings are taken
+        exactly as `predict_drives` takes them, and one not given here
+        is not judged, whatever the prediction was made with.
+
+        Returns
+        -------
+        DrivePrediction
+            A new prediction; this one is unchanged.
+
+        Raises
+        ------
+        ValueError, TypeError
+            As `predict_drives` raises for a rating it cannot read.
+        """
+        from dataclasses import replace
+
+        out = replace(self, duration=_positive(duration, 'duration'),
+                      peak_factor=(None if peak_factor is None else
+                                   _positive(peak_factor, 'peak factor')),
+                      demands=[], notes=list(self.notes[:self.plain_notes]))
+        out.demands.extend(_demands(out, out.row_channels, out.drive_channels,
+                                    drive_limit, shakers, tables, limits))
+        return out
 
     @property
     def single(self) -> bool:
@@ -796,19 +817,12 @@ def _for_each(given: Any, labels: list[str], what: str) -> dict[str, Any]:
         return dict.fromkeys(labels, given)
     out = {}
     for key, value in given.items():
-        label = _find(str(key), labels)
+        label = str(key) if str(key) in labels else None
         if label is None:
             raise ValueError(f'{what} names {key}, which is not a drive of '
                              f'the FRF ({", ".join(labels)})')
         out[label] = value
     return out
-
-
-def _find(key: str, labels: list[str]) -> str | None:
-    """The label `key` names, or None. A label is its channel's DOF, with
-    the quantity added only where one DOF holds two (`_labels`), so a
-    DOF names a channel wherever it can."""
-    return key if key in labels else None
 
 
 def predict_drives(frf: Frf, specification: Psd, *,
@@ -931,8 +945,8 @@ def predict_drives(frf: Frf, specification: Psd, *,
     ticker = Ticker(progress)
     ticker.add(4)
     rows, columns, matrix, filled = _plant(frf)
-    row_labels = _labels(rows)
-    drive_labels = _labels(columns)
+    row_labels = channel_labels(rows)
+    drive_labels = channel_labels(columns)
     controls = _control_channels(specification, rows)
     control_index = [rows.index(key) for key in controls]
     for r in control_index:
@@ -969,7 +983,9 @@ def predict_drives(frf: Frf, specification: Psd, *,
                      f'FRF is not a number not predicted, first at {where}')
     ticker.tick()
     ticker.busy()
-    gains = np.linalg.svd(plant[judged], compute_uv=False)
+    # one decomposition: the condition number, the dead lines and the
+    # inverse all read from it
+    u, gains, vh = np.linalg.svd(plant[judged], full_matrices=False)
     if not gains.max() > 0.0:
         raise ValueError('the FRF is zero at every line the specification '
                          'is written over: the drives reach nothing')
@@ -998,8 +1014,8 @@ def predict_drives(frf: Frf, specification: Psd, *,
     inverse = np.full((len(f), len(columns), len(controls)), np.nan,
                       dtype=np.complex128)
     kept = np.zeros(len(f), dtype=int)
-    inverse[judged], kept[judged] = regularized_inverse(
-        plant[judged], method=method, tolerance=tolerance, weight=weight)
+    inverse[judged], kept[judged] = inverse_from_svd(
+        u, gains, vh, method=method, tolerance=tolerance, weight=weight)
     ticker.tick()
     drive_csd = np.full((len(f), len(columns), len(columns)), np.nan,
                         dtype=np.complex128)
@@ -1035,10 +1051,11 @@ def predict_drives(frf: Frf, specification: Psd, *,
         target=target, control=control, judged=judged, kept=kept,
         condition=condition, method=str(method), tolerance=float(tolerance),
         weight=float(weight), duration=duration, peak_factor=peak_factor,
-        notes=notes)
-    demands = _demands(prediction, rows, columns, drive_limit, shakers,
-                       tables, limits)
-    prediction.demands.extend(demands)
+        notes=notes, row_channels=list(rows), drive_channels=list(columns),
+        plain_notes=len(notes))
+    prediction = prediction.with_ratings(
+        drive_limit=drive_limit, shakers=shakers, tables=tables,
+        limits=limits, duration=duration, peak_factor=peak_factor)
     ticker.tick()
     return prediction
 
@@ -1129,7 +1146,7 @@ def _demands(prediction: DrivePrediction, rows: list[tuple[str, str]],
                                     f'{where}')
 
     for key, value in (limits or {}).items():
-        found = _find(str(key), prediction.rows)
+        found = str(key) if str(key) in prediction.rows else None
         if found is None:
             raise ValueError(f'a limit is given at {key}, which is not a '
                              'channel of the FRF')
@@ -1151,7 +1168,7 @@ def _table(prediction: DrivePrediction, rows: list[tuple[str, str]],
     of a single-input test. Refused unless it is a predicted
     acceleration."""
     if asked is not None:
-        found = _find(str(asked), prediction.rows)
+        found = str(asked) if str(asked) in prediction.rows else None
         if found is None:
             raise ValueError(f'the table of the shaker at {label} is '
                              f'{asked}, which is not a channel of the FRF')

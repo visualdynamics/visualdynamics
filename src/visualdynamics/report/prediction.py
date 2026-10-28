@@ -96,9 +96,17 @@ def build(block: Mapping[str, Any], objects: Mapping[str, Any], us: Any,
     except (TypeError, ValueError) as refusal:
         return [{'kind': 'text',
                  'text': f'**{CAPTION}:** nothing compared; {refusal}.'}]
+    compared = [channel for channel in comparison.channels
+                if not channel.note]
+    if not compared:
+        # a numbered table with no rows is a handle to nothing: the
+        # note alone says what was not compared and why (2026-10-28)
+        return [{'kind': 'text',
+                 'text': f'**{CAPTION}:** nothing compared.\n\n'
+                         + _note(comparison)}]
     grid = _grid(measured)
     out = [_figure(channel, comparison, measured, us, grid)
-           for channel in comparison.channels if not channel.note]
+           for channel in compared]
     out.append(_table(block, comparison, measured, name, us))
     out.append({'kind': 'text', 'text': _note(comparison)})
     return out

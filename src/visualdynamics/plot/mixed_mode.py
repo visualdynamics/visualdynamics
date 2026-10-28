@@ -36,6 +36,8 @@ from typing import Any
 
 import numpy as np
 
+from ..core.matrix_checks import runs
+
 #: the sheet's columns, in order
 COLUMNS = ('Part', 'Frequency [Hz]', 'Written', 'Measured', 'Error',
            'Tolerance', 'Verdict')
@@ -213,13 +215,6 @@ def _log(value: float) -> float:
     return float(np.log10(max(float(value), 1e-300)))
 
 
-def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
-    """(first, last) index of each run of True in `mask`."""
-    edges = np.diff(np.r_[0, mask.astype(np.int8), 0])
-    return list(zip(np.flatnonzero(edges == 1),
-                    np.flatnonzero(edges == -1) - 1))
-
-
 def draw_mixed_mode(plot: Any, reading: Any, *, unit_system: Any = None,
                     colors: Any = None, legend: bool = True,
                     markers: bool = True) -> list[Any]:
@@ -291,7 +286,7 @@ def draw_mixed_mode(plot: Any, reading: Any, *, unit_system: Any = None,
     hatch.setAlpha(HATCH_ALPHA)
     left = np.asarray(reading.left_out, dtype=bool)[keep]
     spacing = float(reading.floor.spacing)
-    for first, last in _runs(left):
+    for first, last in runs(left):
         low, high = f[first] - 0.5 * spacing, f[last] + 0.5 * spacing
         region = pg.LinearRegionItem(
             values=(_log(max(low, f[0])), _log(high)), movable=False,

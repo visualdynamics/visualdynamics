@@ -739,6 +739,34 @@ def test_a_record_with_no_acceleration_does_not_offer_it(window, pump, kind):
     assert not pane.stroke_panel.isVisibleTo(pane)
 
 
+def test_a_rating_moved_reads_the_held_integration(window, pump, monkeypatch):
+    """The integration does not depend on the ratings, so a rating
+    edited in the panel reads the arrays already held against the new
+    rating (2026-10-28: each spin-box step integrated the record twice
+    over, 0.09 s on a five-minute record); another record is read."""
+    from visualdynamics.core import stroke as module
+
+    record = pulse(50.0, 0.011)
+    pane = _shown(window, pump, record, 'Pulse')
+    pane.stroke_action.trigger()
+    pump()
+    panel = pane.stroke_panel
+    reads = []
+    real = module.read_stroke
+    monkeypatch.setattr(module, 'read_stroke',
+                        lambda *a, **k: reads.append(1) or real(*a, **k))
+    before = panel.settings()['stroke']
+    panel.boxes['stroke'].setValue((before or 0.05) * 2.0)
+    panel.boxes['stroke'].editingFinished.emit()
+    pump()
+    assert reads == [], 'the held arrays, read against the new rating'
+    assert window._held_stroke is not None
+    assert pane.stroke_settings['stroke'] not in (None, before)
+    pane.stroke_action.trigger()                 # put away: let go
+    pump()
+    assert window._held_stroke is None
+
+
 def test_a_record_with_a_sample_that_is_not_a_number_says_so(window, pump):
     record = pulse(50.0, 0.011)
     record.ordinate[0, 100] = np.nan

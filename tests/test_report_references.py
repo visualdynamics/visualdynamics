@@ -111,3 +111,28 @@ def test_a_quantity_off_the_geometry_draws_no_figure_and_is_not_cited(
     page = render_html(report, project, object_groups=project.object_groups,
                        unit_system=visualdynamics.SI)
     assert 'The response degrees of freedom (Figure' in page
+
+
+def test_a_field_reference_the_page_cannot_fill_never_reaches_a_reader():
+    """{{@basis:TimeHistory.sample_rate}} on a project with no time
+    history was printed as written (2026-10-28); it goes the way a
+    missing figure's citation goes."""
+    text = ('Sampled at {{@basis:TimeHistory.sample_rate}} Hz. '
+            'Second sentence. See {{figure:Response degrees}}.')
+    assert _resolve_figures(text, LABELED) == 'Second sentence. See Figure 2.'
+    assert _resolve_figures(text, LABELED, edit=True) == (
+        'Sampled at [no value for @basis:TimeHistory.sample_rate] Hz. '
+        'Second sentence. See Figure 2.')
+    assert _resolve_figures('## Rate {{Run.sample_rate}}', LABELED) == '## Rate'
+
+
+def test_a_modal_report_from_files_quotes_no_unfilled_field(tmp_path):
+    project = visualdynamics.Project(project_type='Modal Test')
+    project.import_file(fixture_path('plate', 'frfs.npz'))
+    project.import_file(fixture_path('plate', 'geometry.npz'))
+    project.work_up()
+    report = TEMPLATE_BUILDERS['modal'](project, project.object_groups)
+    page = render_html(report, project, object_groups=project.object_groups,
+                       unit_system=visualdynamics.SI)
+    assert '{{' not in page.split('<script id="data"')[0]
+    assert '@basis:TimeHistory' not in page

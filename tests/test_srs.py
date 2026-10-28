@@ -60,20 +60,56 @@ def test_the_gain_at_resonance_is_the_amplification(q):
     assert highest[0] == pytest.approx(exact, rel=0.02)
 
 
-def test_the_recursion_matches_scipy_running_the_same_filter():
-    """The recursion is written out by hand because scipy is a test
-    dependency and not a runtime one. This is what says the hand-written
-    one is the filter the coefficients describe."""
-    lfilter = pytest.importorskip('scipy.signal').lfilter
+def _recursion(x, b, a):
+    """The second-order recursion written out by hand, the state a
+    vector across frequencies and the loop over time: what `peaks` was
+    until scipy's lfilter took over the pass (2026-10-28), kept here as
+    the reference the coefficients describe."""
+    b0, b1, b2 = b[:, 0], b[:, 1], b[:, 2]
+    a1, a2 = a[:, 1], a[:, 2]
+    y1 = np.zeros(b0.shape)
+    y2 = np.zeros(b0.shape)
+    highest = np.zeros(b0.shape)
+    lowest = np.zeros(b0.shape)
+    x1 = x2 = 0.0
+    for sample in x:
+        y = b0 * sample + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        np.maximum(highest, y, out=highest)
+        np.minimum(lowest, y, out=lowest)
+        y2, y1 = y1, y
+        x2, x1 = x1, sample
+    return highest, lowest
 
+
+@pytest.mark.parametrize('kind', ['half-sine', 'noise'])
+def test_the_pass_is_the_recursion_the_coefficients_describe(kind):
+    """`peaks` runs each oscillator through scipy's lfilter; this is
+    what says it is the same second-order recursion, on a shock and on
+    a record with no structure to hide a mistake behind."""
     frequencies = srs.octave_frequencies(20.0, 1000.0)
-    shock = half_sine()
+    shock = (half_sine() if kind == 'half-sine'
+             else np.random.default_rng(3).standard_normal(5000))
     b, a = srs.ramp_invariant(frequencies, RATE, srs.damping_for())
     highest, lowest = srs.peaks(shock, frequencies, RATE)
-    for k in range(len(frequencies)):
-        reference = lfilter(b[k], a[k], shock)
-        assert highest[k] == pytest.approx(reference.max(), rel=1e-10)
-        assert lowest[k] == pytest.approx(reference.min(), rel=1e-10)
+    want_high, want_low = _recursion(shock, b, a)
+    assert np.allclose(highest, want_high, rtol=1e-10, atol=0.0)
+    assert np.allclose(lowest, want_low, rtol=1e-10, atol=0.0)
+    assert (highest >= 0.0).all() and (lowest <= 0.0).all()
+    empty_high, empty_low = srs.peaks(np.empty(0), frequencies, RATE)
+    assert not empty_high.any() and not empty_low.any()
+
+
+def test_the_three_spectra_are_read_off_the_peaks_once():
+    highest, lowest = np.array([1.0, 2.0, 0.5]), np.array([-3.0, -1.0, 0.0])
+    read = srs.spectra(highest, lowest)
+    assert np.array_equal(read['positive'], highest)
+    assert np.array_equal(read['negative'], [3.0, 1.0, 0.0])
+    assert np.array_equal(read['maximax'], [3.0, 2.0, 0.5])
+    shock = half_sine()
+    frequencies = srs.octave_frequencies(20.0, 1000.0)
+    assert np.array_equal(srs.maximax(shock, frequencies, RATE),
+                          srs.spectra(*srs.peaks(shock, frequencies, RATE))
+                          ['maximax'])
 
 
 def test_damping_and_q_are_each_others_inverse():

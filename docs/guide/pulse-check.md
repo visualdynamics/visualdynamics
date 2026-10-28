@@ -48,7 +48,7 @@ to the limit. Built that way it agrees with the duration and edge
 tolerances rather than contradicting them, so a pulse a twentieth long
 is inside the envelope as well as inside its duration tolerance. At a
 half-sine's crest the envelope's lower edge, the lowest of the
-admissible durations less a fifth, sits at 0.788 of the peak, and the
+admissible durations less a fifth, sits at 0.785 of the peak, and the
 peak itself is held to 0.8 apart.
 
 ## How the measured pulse is read
@@ -133,7 +133,8 @@ first swings at 15 g, is flagged: the pulse is in, and 44 samples after
 it are outside the band of 10 g, each marked. The velocity change is
 within a percent of nominal, because only the ringing's first swing
 falls inside the window. The band after the pulse is where the ringing
-shows, and it should show somewhere: the test article felt it.
+shows, and it should show somewhere: the test article was excited by
+it.
 
 ![A 50 g half-sine with a fixture ringing after it, the samples past the
 band after the pulse marked](images/pulse-check-ringing.png)
@@ -171,4 +172,4 @@ whatever the record did.
   tenth, the same pulse sits on the edge of its band.
 - A flagged record that may be a sensor problem. Integrate the record
   to velocity over its whole length first: a zero shift or a saturated
-  channel makes the pulse and its velocity change fiction.
+  channel makes the pulse and its velocity change unreliable.

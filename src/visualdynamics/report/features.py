@@ -195,7 +195,7 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         'record_captions', 'Record captions', 'Figures',
         "A caption block on each spectrum, SRS and sine figure, read off "
         "the record: channel, run, analysis settings and requirement.",
-        requires=('record_caption',), available=False),
+        requires=('record_caption',)),
     ReportFeature(
         'plot_conventions', 'Plot conventions', 'Figures',
         'ASD and SRS figures open on log-log axes. Curves are told apart '

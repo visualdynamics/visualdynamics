@@ -126,12 +126,10 @@ part by part:
    number allowed. A floor with no line left to judge is not judged, and
    the reading says so.
 4. Each narrowband is judged at the degrees of freedom of a narrow
-   band. A fixed band's level is the mean of its lines. Under a window
-   adjacent lines vary together (by 0.44 under Hann), so the mean of
-   its lines is worth fewer degrees of freedom than their count times
-   a line's, about the count over 1.94 under Hann; the band is worth
-   what the averaging's own line correlation leaves it, the rule the
-   Chance reading counts combined lines by. A swept band stays over any one frequency only as long
+   band. A fixed band's level is the mean of its lines, worth what
+   their correlation under the window leaves it, about half their
+   count under Hann ([Combining lines](comparison-chance.md#combining-lines)).
+   A swept band stays over any one frequency only as long
    as it takes to move its own width, so it is read in slices half that
    long, each worth only the few frames it holds, and its level is the
    slices pooled. Its tolerance is the stated one, or the floor's,

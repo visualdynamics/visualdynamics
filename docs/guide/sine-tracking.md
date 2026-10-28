@@ -59,7 +59,7 @@ filtered readings on the specification at
 
 A band takes time to follow a change in level, roughly one over its
 width. A level that doubles part way through a sweep is followed in a
-millisecond by an unfiltered peak detector, in 9 ms through a 50 %
+millisecond by an unfiltered peak detector, in 7 ms through a 50 %
 band at 250 Hz, in 37 ms through a 10 % band, and in 180 ms through a
 5 Hz fixed band (the time to reach half way, in each case). On a
 sweep at 100 Hz/s, 180 ms is 18 Hz of the frequency axis, read low.
@@ -131,7 +131,7 @@ the band itself is still as narrow as set. Shown in a window, the
 cursor can be dragged along either time axis, and the shape, the
 marks, the weight and the readout follow it.
 
-## In a script
+## From a script
 
 ```python
 from visualdynamics.core.sine_tracking import (SineTracking, track_sine,

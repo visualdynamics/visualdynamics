@@ -24,11 +24,11 @@ from visualdynamics.report import features as rf
 from visualdynamics.report import page, plot_conventions, render_html
 
 LIVE = ('skeleton_sections', 'prediction', 'calibration_in_date',
-        'plot_conventions', 'shared_decades')
+        'record_captions', 'plot_conventions', 'shared_decades')
 #: the built features the test report preset names (responses against
 #: prediction is built but in no preset)
-PRESET_LIVE = ('skeleton_sections', 'calibration_in_date', 'plot_conventions',
-               'shared_decades')
+PRESET_LIVE = ('skeleton_sections', 'calibration_in_date', 'record_captions',
+               'plot_conventions', 'shared_decades')
 #: the plot conventions and their option
 CONVENTIONS = ('plot_conventions', 'shared_decades')
 
@@ -201,7 +201,7 @@ def test_the_presets_enable_what_they_can_and_say_what_they_skipped():
     assert selection.enabled == PRESET_LIVE
     skipped = [key for key in rf.PRESETS['test_report'].features
                if key not in LIVE]
-    assert len(selection.notes) == len(skipped) == 7
+    assert len(selection.notes) == len(skipped) == 6
     assert selection.notes[1] == ('Test report: Findings register skipped, '
                                   'not yet available')
     flash = rf.configure(report, preset='flash_report')
@@ -746,3 +746,29 @@ def test_a_refusal_shows_on_the_panel_and_changes_nothing(editing):
     assert edits == [], 'nothing changed: no edit to journal, no rebuild'
     editor._operate({'op': 'features', 'enable': ['plot_conventions']})
     assert edits == [1] and editor.features_panel.notes.text() == ''
+
+
+def test_record_captions_put_the_facts_on_every_spectrum_figure(run):
+    """The feature is real: on, every measured spectrum's figure carries
+    the caption block one figure's check box asks for (2026-10-28: it
+    stood registered and grayed as not yet available while the per-block
+    check box did the same thing)."""
+    project, name = run
+    report = project[name]
+    plain = _render(project, name)
+    assert 'facts' not in json.dumps(_payload(plain)['blocks'])
+    rf.configure(report, enable=['record_captions'])
+    try:
+        captioned = _payload(_render(project, name))
+        spectra = [cell for block in captioned['blocks']
+                   for cell in _cells(block)
+                   if 'g²/Hz' in json.dumps(cell) or 'frequency' in json.dumps(cell)]
+        with_facts = [cell for cell in spectra if cell.get('facts')
+                      or any(c.get('facts') for c in cell.get('curves', ())
+                             if isinstance(c, dict))]
+        assert with_facts, 'a measured spectrum carries its caption block'
+        assert all(not b.get('record_caption') for b in report.blocks), \
+            'the stored blocks are not changed'
+    finally:
+        rf.configure(report, disable=['record_captions'])
+    assert rf.FEATURES['record_captions'].available

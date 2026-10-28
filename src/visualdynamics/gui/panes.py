@@ -1391,11 +1391,11 @@ class DataPane(QWidget):
                 sticky=True),
         Reading('shocks', 'shock_panel', 'shocks'),
         Reading('wavelet', 'wavelet_panel', 'averaging', sticky=True),
-        # offered wherever the shocks are: a record that may hold a
-        # pulse
-        Reading('pulse', 'pulse_panel', 'shocks', sticky=True),
-        # both integrate acceleration, so they are offered for a record
-        # that holds some in a declared unit and nowhere else
+        # all three integrate acceleration, so they are offered for a
+        # record that holds some in a declared unit and nowhere else
+        # (the pulse was offered wherever the shocks are, and read a
+        # hinted channel raw, 2026-10-28)
+        Reading('pulse', 'pulse_panel', 'fit', sticky=True),
         Reading('fit', 'replication_fit_panel', 'fit',
                 flat=True, sticky=True),
         Reading('stroke', 'stroke_panel', 'fit', flat=True, sticky=True),

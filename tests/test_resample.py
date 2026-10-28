@@ -805,3 +805,44 @@ def test_a_fold_reads_the_spike_within_a_line_of_the_frequency_given():
     near = (f > 4590.0) & (f < 4615.0)
     assert fold.source == g[near].max()
     assert fold.source > g[np.argmin(np.abs(f - 4600.0))] * 2.0
+
+
+# ---- the verb and its apply --------------------------------------------------
+
+def test_the_project_resamples_as_the_record_does_and_records_how():
+    """`Project.resample` is the one way the app and a script make the
+    record (the reading had no apply and no verb, 2026-10-28): the same
+    arrays as `TimeHistory.resample`, linked to the source, with a
+    provenance a refresh can run again."""
+    import visualdynamics
+
+    project = visualdynamics.Project()
+    project.add('Record', record())
+    made = project.resample('Record', FINE / 4, order=8)
+    assert made == f'Record at {FINE / 4:g} Hz'
+    direct = project['Record'].resample(FINE / 4, order=8)
+    np.testing.assert_array_equal(project[made].ordinate, direct.ordinate)
+    assert project[made].sample_rate == pytest.approx(FINE / 4)
+    assert project.provenance[made]['verb'] == 'resample'
+    assert project.provenance[made]['params'] == {
+        'rate': FINE / 4, 'anti_alias': True, 'order': 8}
+    assert project.provenance[made]['source'] == 'Record'
+    with pytest.raises(ValueError):
+        project.resample('Record', FINE / 3.3)
+
+
+def test_apply_resample_makes_the_record_at_the_panels_settings(window, pump):
+    window.add_object('Record', record())
+    window.show_object('Record')
+    pump()
+    pane = window.data_pane
+    pane.resample_action.trigger()
+    pump()
+    pane.resample_panel.factor_box.setValue(8)
+    pump()
+    pane.resample_panel.apply_button.click()
+    pump()
+    added = [name for name in window.project if name.startswith('Record at')]
+    assert added == [f'Record at {FINE / 8:g} Hz']
+    assert window.project.provenance[added[0]]['verb'] == 'resample'
+    assert window.project[added[0]].sample_rate == pytest.approx(FINE / 8)

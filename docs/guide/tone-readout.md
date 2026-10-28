@@ -40,8 +40,8 @@ name = project.compute_psds('Run')
 asd = project[name]
 reading = asd.read_tone(19.44, window=project.averaging_of(name))
 reading.amplitude / 9.80665          # 1.942, the tone in g peak
-reading.spike / 9.80665  2         # 0.978, the spike in g²/Hz
-reading.on_line / 9.80665  2       # 1.258, its height were it on a line
+reading.spike / 9.80665 ** 2         # 0.978, the spike in g²/Hz
+reading.on_line / 9.80665 ** 2       # 1.258, its height were it on a line
 reading.offset                       # 0.44 of a line off the nearest
 print(reading.describe('g', 1 / 9.80665))
 # 19.44 Hz: 1.94 g peak; its spike 0.978 g²/Hz (1.26 on a line) is not the tone

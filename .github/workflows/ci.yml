@@ -42,9 +42,16 @@ on:
 
 # A pull request pushed to twice, or *Run workflow* pressed twice,
 # leaves a superseded run burning minutes for an answer nobody reads.
+# A push to main is the exception: the release workflow runs when a
+# main run completes, and a run cancelled by the next push never
+# completes, so its release is never cut. 0.1.0a75 was lost that way
+# (2026-10-28: the next push came 42 minutes later and the version
+# rode along with it, so the release followed from that run; one that
+# bumped the version again would have skipped a75 for good). A later
+# push to main waits for the earlier run instead.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   test:

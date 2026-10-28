@@ -239,7 +239,7 @@ def test_the_owed_card_says_what_belongs_there():
 
 def test_written_words_replace_the_card_as_markdown_with_live_references():
     report = Report('R', features=[sk.FEATURE])
-    sk.write(report, 'article', 'A **bracket**, {{Spec.name}}.\n\n## Mounts')
+    sk.write(report, 'article', 'A **bracket**, {{Spec.num_channels}} channel.\n\n## Mounts')
     psd = Psd(abscissa=np.linspace(10.0, 100.0, 10), ordinate=np.ones((1, 10)),
               response_dof=['1X+'], ordinate_dim=['acceleration**2/frequency'])
     psd.name = 'the profile'
@@ -712,3 +712,22 @@ def test_export_lists_what_is_owed_and_asks(editing, monkeypatch, tmp_path):
     asked.clear()
     editor._operate({'op': 'export'})
     assert asked == [] and saved == [1, 1]
+
+
+def test_the_check_counts_a_section_filled_only_by_what_the_page_draws():
+    """A block whose bindings resolve but that draws nothing (a plot
+    selecting a dimension the record lacks) left Results 'filled' in
+    the check while the page showed it not yet written (2026-10-28):
+    one rule, the page's."""
+    f = np.arange(0.0, 500.0, 2.5)
+    project = visualdynamics.Project()
+    project.add('PSD', Psd(f, np.full((1, f.size), 1e-3), response_dof=['1Z+'],
+                           ordinate_dim='acceleration**2/frequency'))
+    report = Report('R', [{'kind': 'plot', 'source': 'PSD', 'mode': 'curves',
+                           'select': 'dim:length'}],
+                    features=['skeleton_sections'])
+    page_html = render_html(report, project, unit_system=visualdynamics.SI,
+                            object_groups=project.object_groups)
+    assert 'NOT YET WRITTEN' in page_html
+    owed = [o.key for o in sk.check(report, project, project.object_groups)]
+    assert 'results' in owed

@@ -535,6 +535,11 @@ def _tone_lines(history: Any, specification: SineSweepSpecification,
                       else cycles)
     held = [str(dof) for dof in level.response_dof]
     wanted = held if channels is None else [str(dof) for dof in channels]
+    if not wanted:
+        # an empty list read nothing, and the check passed with nothing
+        # judged (2026-10-28)
+        raise ValueError('no channel to read: give at least one DOF, or '
+                         "None for the levels' channels")
     missing = [dof for dof in wanted if dof not in held]
     if missing:
         raise ValueError(f'the levels hold no reading for {missing}; they '

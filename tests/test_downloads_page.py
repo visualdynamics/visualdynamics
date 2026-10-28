@@ -222,6 +222,11 @@ def test_ci_runs_on_every_push_to_main_and_both_pythons():
     assert on['schedule'] == [{'cron': '0 13 * * 1'}], 'weekly'
     matrix = workflow['jobs']['test']['strategy']['matrix']
     assert matrix['python-version'] == ['3.12', '3.13', '3.14']
+    # a main run is never cancelled by the next push: the release
+    # workflow waits on its completion, and 0.1.0a75's run was cancelled
+    # by the push 42 minutes behind it (2026-10-28)
+    assert workflow['concurrency']['cancel-in-progress'] == \
+        "${{ github.event_name != 'push' }}"
 
 
 def test_the_publish_job_waits_for_every_build():

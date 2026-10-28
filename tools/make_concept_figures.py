@@ -6,6 +6,12 @@ what the code actually draws. Regenerate after anything touching the
 PSD reading rules:
 
     QT_QPA_PLATFORM=offscreen ./.venv/bin/python tools/make_concept_figures.py
+
+`--only NAME [NAME ...]` draws the named figures alone (the function
+names below, `psd_reading` say) and `--out DIR` draws into another
+directory, so one figure can be tried without rewriting the guide's.
+`--help` draws nothing: a run of this script with an argument it did
+not know regenerated every figure in the guide once (2026-10-28).
 """
 
 from __future__ import annotations
@@ -1726,5 +1732,29 @@ def main():
     print('done')
 
 
+def parse(argv=None):
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Draw the concept figures of the guide.')
+    parser.add_argument('--out', default=str(OUT),
+                        help='the directory the figures are written into '
+                             '(default: docs/guide/images)')
+    parser.add_argument('--only', nargs='+', metavar='NAME',
+                        help='draw these figures alone, by function name')
+    return parser.parse_args(argv)
+
+
 if __name__ == '__main__':
-    main()
+    args = parse()
+    OUT = pathlib.Path(args.out)
+    if args.only:
+        OUT.mkdir(parents=True, exist_ok=True)
+        for name in args.only:
+            figure = globals().get(name)
+            if not callable(figure) or name.startswith('_'):
+                sys.exit(f'no figure named {name!r}')
+            figure()
+        print('done')
+    else:
+        main()

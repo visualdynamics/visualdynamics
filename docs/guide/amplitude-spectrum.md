@@ -27,9 +27,9 @@ sum of the window's squares, which is what `compute_psds` uses; the two
 differ by the window's noise bandwidth, and the amplitude correction
 applied to a Hann density reads every ASD 1.5 times too high.
 
-`compute_spectra` is left as it was: a rectangular window, no scaling
-(a sine on a line reads \(A N / 2\)) and a complex mean across the
-averages. The amplitude spectrum sits beside it.
+`compute_spectra` is a different reading: a rectangular window, no
+scaling (a sine on a line reads \(A N / 2\)) and a complex mean across
+the averages. The amplitude spectrum is read beside it, not from it.
 
 ## Which window
 

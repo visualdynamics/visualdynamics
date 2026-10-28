@@ -17,11 +17,10 @@ or 3 dB high has the same shape as the right one.
 The errors the check catches are few and each leaves its own gap:
 
 - The window's amplitude correction applied to a density. A density
-  takes the energy correction, the sum of the window's squares; the
-  amplitude correction is the sum of the window itself, for reading a
-  tone's height. Their ratio is the window's equivalent noise bandwidth,
-  so the mistake reads every line that many times too high: 1.5 for
-  Hann, +1.76 dB.
+  takes the energy correction and a tone's height the amplitude
+  correction ([Reading a tone's amplitude](amplitude-spectrum.md)), and
+  their ratio is the window's noise bandwidth, so the mistake reads
+  every line that many times too high: 1.5 for Hann, +1.76 dB.
 - The one-sided doubling left out (a two-sided density, −3.01 dB) or
   applied twice (+3.01 dB).
 - One side in g and the other in m/s², ±19.83 dB.

@@ -2424,6 +2424,49 @@ class Project(dict):
                             f'{source} Filtered',
                             recipe=('filter_data', {}))
 
+    def resample(self, source: Any, rate: float, *, anti_alias: bool = True,
+                 order: int | None = None) -> str:
+        """Take a time history to a lower sample rate (Apply Resample in
+        the resample view) and add the result beside it.
+
+        Every channel goes through the zero-phase anti-alias low-pass
+        and then every q-th sample is kept (`TimeHistory.resample`,
+        which says what the filter is). The resample view shows what
+        the resampling does to a channel's spectrum before it is made.
+
+        Parameters
+        ----------
+        source : str or object
+            The time history, by name or as the object itself.
+        rate : float
+            The new sample rate, in Hz, a whole division of the
+            record's.
+        anti_alias : bool, default True
+            Filter before decimating.
+        order : int, optional
+            The anti-alias filter's design order,
+            `core.resample.ORDER` when omitted.
+
+        Returns
+        -------
+        str
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
+        """
+        # The reading had no apply and no verb (2026-10-28): a script
+        # could make the record but the app could not, and a record a
+        # script made had no provenance. Processing is select, see, set,
+        # apply (principle 13).
+        source = self.name_of(source)
+        history = self[source]
+        made = history.resample(float(rate), anti_alias=anti_alias,
+                                order=order)
+        return self._derive(source, made, f'{source} at {rate:g} Hz',
+                            recipe=('resample', {
+                                'rate': float(rate),
+                                'anti_alias': bool(anti_alias),
+                                'order': order}))
+
     def truncate_data(self, source: Any) -> str:
         """Cut a time history to its truncation span (Apply Truncation in
         the truncate view): every channel between start and stop, on the
@@ -5984,6 +6027,7 @@ class Project(dict):
         # the smoothing and the refinement the levels were read with
         'extract_sine': 'sine_extraction',
         'integrate': 'content', 'differentiate': 'content',
+        'resample': 'content',
         # the settings and the nodes both: a moved node, or a turned
         # displacement system, changes the shapes as surely as a moved
         # reference point does
@@ -6599,6 +6643,7 @@ _VERB_APPLIES: tuple = (
     ('differentiate', _differentiable),
     ('filter_data', _is_time),
     ('truncate_data', _is_time),
+    ('resample', _is_time),
     ('detect_shocks', _is_time),
     ('compute_spectra', _is_time),
     ('compute_psds', _is_time),
@@ -6822,7 +6867,7 @@ _JOURNALED_VERBS = (
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'make_realizable',
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
-    'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
+    'detect_shocks', 'filter_data', 'truncate_data', 'resample', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'generate_signal', 'compute_modal_responses',
     'plan_instrumentation',
@@ -6882,6 +6927,8 @@ _RECOMPUTE = {
     'filter_data': lambda p, s, k: p[s].filter(),
     'extract_sine': lambda p, s, k: _extract_again(p, s, k),
     'truncate_data': lambda p, s, k: p[s].truncate(),
+    'resample': lambda p, s, k: p[s].resample(
+        k['rate'], anti_alias=k.get('anti_alias', True), order=k.get('order')),
     # `get` with the module default, so a recipe that recorded None
     # stays raw — None is a choice here, not an absence
     'integrate': lambda p, s, k: p[s].integrate(

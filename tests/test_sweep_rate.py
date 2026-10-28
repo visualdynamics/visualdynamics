@@ -288,7 +288,6 @@ def test_the_chapter_sweep_is_too_fast_for_the_mode_it_searches():
     assert check.limit == pytest.approx(1.190, abs=0.001)
     assert check.ratio == pytest.approx(3.36, abs=0.01)
     assert check.cycles == pytest.approx(11.9, abs=0.05)
-    assert check.cycles_needed == 40.0
     assert check.too_fast and check.verdict == 'too fast'
     assert round(100 * check.peak_share) == 81
     assert check.start == pytest.approx(60 * np.log2(21.725 / 10.0) / 4.0)

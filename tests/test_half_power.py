@@ -608,3 +608,28 @@ def test_the_drawn_reading_sits_on_the_curve_in_display_units():
     finally:
         pane.close()
         pane.deleteLater()
+
+
+def test_a_line_with_no_value_on_a_flank_is_no_crossing():
+    """Held as -inf, a NaN line made a crossing of its own at the
+    missing line, and a Q was read off it (2026-10-28); dropped, the
+    curve runs between its neighbors."""
+    fn, q = 60.0, 20.0
+    f = lines_across(fn, q, 12)
+    m = accelerance(f, fn, q)
+    whole = read_half_power(f, m, fn, warn=False)
+    holed = np.abs(m).copy()
+    k = int(np.argmax(holed)) + 3                # on the upper flank
+    holed[k] = np.nan
+    gapped = read_half_power(f, holed, fn, warn=False)
+    assert gapped.q == pytest.approx(whole.q, rel=0.05)
+    assert gapped.high != pytest.approx(f[k], abs=1e-9)
+    # a NaN at the half-power line itself places no crossing there
+    at_half = int(np.argmin(np.abs(np.abs(m) - whole.height / np.sqrt(2))))
+    holed = np.abs(m).copy()
+    holed[at_half] = np.nan
+    assert read_half_power(f, holed, fn, warn=False).q == pytest.approx(
+        whole.q, rel=0.05)
+    with pytest.raises(ValueError, match='three lines'):
+        read_half_power(f[:5], [1.0, np.nan, np.nan, np.nan, 1.0], f[2],
+                        warn=False)

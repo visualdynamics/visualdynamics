@@ -421,8 +421,13 @@ def test_text_placeholders_fill_from_the_live_objects(project):
     shapes = project['Shape Set']
     assert f'{shapes.num_shapes} modes up to '\
            f'{float(np.max(shapes.frequency)):g} Hz.' in text
-    assert '{{Time.no_such_field}}' in text, 'unresolved stays visible'
-    assert '{{Nobody.num_samples}}' in text
+    # a reference the page cannot fill never reaches a reader: the
+    # sentence holding it is left out, and the edit page marks it
+    # (2026-10-28; it was printed as written)
+    assert 'Unresolved' not in text and '{{' not in text
+    edited = _payload(render_html(report, objects, edit=True))['blocks'][0]
+    assert '[no value for Time.no_such_field]' in edited['html']
+    assert '[no value for Nobody.num_samples]' in edited['html']
 
 
 def test_figure_references_follow_the_numbering(project):

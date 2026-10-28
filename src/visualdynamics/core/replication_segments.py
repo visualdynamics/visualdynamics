@@ -509,7 +509,7 @@ def _srs_checks(reference: np.ndarray, control: np.ndarray,
     """Each polarity's shock response spectrum against the reference's,
     point by point."""
     from .replication import SRS_FLOOR_DB
-    from .srs import octave_frequencies, peaks
+    from .srs import octave_frequencies, peaks, spectra
 
     low = sample_rate / reference.size if band is None else band[0]
     high = sample_rate / 5.0 if band is None else min(band[1],
@@ -519,11 +519,11 @@ def _srs_checks(reference: np.ndarray, control: np.ndarray,
                              np.empty(0), 0, None)
                 for kind in ('positive', 'negative')]
     frequencies = octave_frequencies(low, high, per_octave)
-    want_up, want_down = peaks(reference, frequencies, sample_rate, q=q)
-    got_up, got_down = peaks(control, frequencies, sample_rate, q=q)
+    wanted = spectra(*peaks(reference, frequencies, sample_rate, q=q))
+    gotten = spectra(*peaks(control, frequencies, sample_rate, q=q))
     out = []
-    for kind, want, got in (('positive', want_up, got_up),
-                            ('negative', -want_down, -got_down)):
+    for kind in ('positive', 'negative'):
+        want, got = wanted[kind], gotten[kind]
         # where the reference asks for something, whatever the control
         # holds: a control with no response there fails
         keep = np.isfinite(want) & (want > 0.0)

@@ -29,7 +29,12 @@ Values table shows as the response transformation.
 
 **Typed**, it is whatever matrix a controller holds, with its inputs
 and outputs named. A virtual point is a node of its own (`1000X+` …
-`1000RZ+`), and the direction says which outputs are rotations.
+`1000RZ+`), and the direction says which outputs are rotations. A
+controller run's matrices are already on the channel table, one per
+environment ([The channel table](channel-table.md)): each has a column
+per control channel, headed by the channel's DOF, and its rows
+numbered, because the run's file does not name them. Name the rows and
+the matrix is a typed transformation, read like any other.
 
 The units follow from the kinds. An entry joining two translations is
 a plain number, a rotation from translations is per length, and a
@@ -106,6 +111,10 @@ typed = Transformation.typed(
     [[0.5, 0.5], [-0.05, 0.05]], ['1Z+', '2Z+'],
     ['1000Z+', '1000RY+'], length_unit='in')
 typed.condition     # 10.0: the half-span in inches
+
+view = project.channel_table.transformation('Random')   # a loop's matrix
+loop = Transformation.typed(view.values, view.columns,  # columns: the controls
+                            ['1000Z+', '1000RY+'], length_unit='in')
 ```
 
 `apply` takes a time history or spectrum row by row and a

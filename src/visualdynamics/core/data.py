@@ -3013,7 +3013,8 @@ class TimeHistory(DataArray):
             averages than references, or a channel holds a sample that
             is not a finite number in the frames read.
         """
-        from .partial_coherence import _labels, read_partial_coherence
+        from .matrix_checks import channel_labels
+        from .partial_coherence import read_partial_coherence
 
         frequencies, keys, drives, responses, cross, averages = \
             self._cross_spectral_frame('partial coherence', references,
@@ -3033,7 +3034,7 @@ class TimeHistory(DataArray):
                     'record or move the frames past them')
         matrix = np.stack([np.stack([cross(i, j) for j in order], axis=-1)
                            for i in order], axis=-2)
-        names = _labels([keys[i][:2] for i in order])
+        names = channel_labels([keys[i][:2] for i in order])
         return read_partial_coherence(
             frequencies, matrix, names[:len(drives)], names[len(drives):],
             averages=averages)

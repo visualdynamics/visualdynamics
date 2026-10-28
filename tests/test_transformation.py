@@ -17,6 +17,7 @@ import pytest
 
 import visualdynamics
 from visualdynamics.core.averaging import Averaging
+from visualdynamics.core.channel_table import ChannelTable, Environment
 from visualdynamics.core.rigid import MassProperties, rigid_body_shapes
 from visualdynamics.core.transform import matrix_at, to_modal
 from visualdynamics.core.transformation import (
@@ -84,6 +85,33 @@ def test_the_conditioning_of_the_beam_is_the_span_over_the_length_scale():
     assert np.allclose(t.singular_values, [np.sqrt(0.5), np.sqrt(0.005)])
     assert t.condition == pytest.approx(10.0)
     assert 'conditioning 10' in t.describe()
+
+
+def test_a_control_loops_matrix_reads_as_a_transformation_once_its_rows_are_named():
+    """A controller run's response transformation is on the channel
+    table, one per environment (`ChannelTable.transformation`), its
+    columns the control channels' DOFs in the controller's order and
+    its rows numbered, since the file does not name them. Named, the
+    rows make it the beam typed by hand, and drawn it is the table's
+    matrix the same way round."""
+    table = ChannelTable({'channel': [1, 2, 3],
+                          'node': ['1', '2', '3'],
+                          'direction': ['Z+'] * 3,
+                          'unit': ['m/s^2', 'm/s^2', 'N'],
+                          'role': ['response', 'response', 'reference']})
+    table.set_environment('Random', Environment(
+        controls=[1, 2], drives=[3],
+        response_transformation=[[0.5, 0.5], [-0.05, 0.05]]))
+    view = table.transformation('Random')
+    t = Transformation.typed(view.values, view.columns,
+                             ['1000Z+', '1000RY+'], length_unit='in')
+    assert t.inputs == ('1Z+', '2Z+')
+    assert np.array_equal(t.matrix, _beam().matrix)
+    assert t.condition == pytest.approx(10.0)
+    drawn = t.matrix_at()
+    assert drawn.form == view.form == 'response'
+    assert drawn.columns == view.columns
+    assert len(drawn.rows) == len(view.rows) == 2
 
 
 def test_the_beam_recovers_bounce_and_pitch_in_si():

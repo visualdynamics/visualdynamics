@@ -66,6 +66,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .data import ordinary_coherence
+from .matrix_checks import nearest_line
 
 #: a conditioned autospectrum at or under this share of the autospectrum
 #: it was conditioned from is a channel the other references explain
@@ -83,9 +84,7 @@ COUPLED = 0.9
 
 # Beside the ordinary and multiple coherence already here: which drive
 # explains a response (partial), and whether the drives were
-# independent (reference and virtual). `_labels` below is the channel
-# labeling the matrix checks propose as well; it stays here until that
-# lands.
+# independent (reference and virtual).
 
 
 def multiple_coherence(grr: np.ndarray, gry: np.ndarray,
@@ -256,7 +255,7 @@ class PartialCoherence:
         """The coherences of one response at the line nearest
         `frequency`."""
         k = self.index(response)
-        line = int(np.argmin(np.abs(self.frequency - float(frequency))))
+        line = nearest_line(self.frequency, frequency)
         first = self.principal[0, line]
         with np.errstate(divide='ignore', invalid='ignore'):
             shares = (self.principal[:, line] / first if first > 0.0
@@ -323,13 +322,6 @@ class PartialCoherence:
             parts.append(f'{one} and {other} coherent over {COUPLED:g} on '
                          f'{share:.0%} of the lines')
         return ', '.join(parts)
-
-
-def _labels(keys: Sequence[tuple[str, str]]) -> list[str]:
-    """A channel's DOF, with its quantity only where a DOF carries two."""
-    dofs = [dof for dof, _quantity in keys]
-    return [dof if dofs.count(dof) == 1 else f'{dof} {quantity}'
-            for dof, quantity in keys]
 
 
 def read_partial_coherence(frequency: np.ndarray, matrix: np.ndarray,

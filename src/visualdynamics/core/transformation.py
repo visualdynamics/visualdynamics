@@ -16,8 +16,11 @@ The matrix `T` maps inputs to outputs, `y = T u`. Built from geometry it
 is the pseudo-inverse of the six rigid-body shapes at the input DOFs,
 `T = Φ⁺`, the same matrix `transform.to_modal` applies through a rigid
 set (`transform.matrix_at`'s response form); typed, it is whatever the
-user states, with its inputs and outputs named. Either way it is
-applied the same way, to a time history or spectrum row by row,
+user states, with its inputs and outputs named. A controller run's
+matrices arrive on the channel table, one per environment
+(`channel_table.ChannelTable.transformation`), with a column per control
+channel headed by its DOF and the rows numbered; named, the rows make
+one a typed transformation. Either way it is applied the same way, to a time history or spectrum row by row,
 `y = T u`, and to a cross-spectral density or a specification as the
 quadratic form `G_yy = T G_uu Tᵀ`, which needs every cross term between
 the inputs: the phase between two channels is what tells a translation

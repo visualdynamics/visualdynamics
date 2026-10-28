@@ -663,7 +663,7 @@ def test_a_pulse_read_from_a_record_with_no_acceleration_is_refused():
     objects['History'].ordinate_dim = np.array(['force'])
     shown = _shown(report, objects, 'pulse')
     assert shown.status == cb.NOT_JUDGED
-    assert 'is read from an acceleration' in shown.words
+    assert 'integrates acceleration, and this record holds none' in shown.words
 
 
 # ---- sine distortion -------------------------------------------------------------------------

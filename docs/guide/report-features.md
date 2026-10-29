@@ -219,21 +219,30 @@ same function its view in the app and a script call.
 
 | Check | What it reads | Made |
 |---|---|---|
-| Time statistics | a random test's record: mean, rms, skewness, kurtosis over the record and frame by frame, crest factor, each against its band; the histogram against the Gaussian and the kurtosis frame by frame for each channel outside a band, or for the channel furthest from Gaussian when none is | from the report |
+| Time statistics | a random test's record: mean, rms, skewness, kurtosis over the record and frame by frame, crest factor, and, when the channel table states a channel's range, its samples on the rail, each against its band; the histogram against the Gaussian and the kurtosis frame by frame for each channel outside a band, or for the channel furthest from Gaussian when none is | from the report |
+| RMS check | each autospectrum against the time history it came from: the rms from the area under the spectrum beside the record's rms, and the gap in dB against its threshold, a gap that is the window's alone read as the window's | from the report |
+| Lines by chance | each channel's lines outside its abort band (or its warning band when it has no abort pair), beside how many chance alone puts there at the measurement's degrees of freedom; with `combine` N, groups of N adjacent lines judged together; the miss from the target drawn against the band | from the report |
 | Shock validity | a shock record: each acceleration channel integrated raw over each shock window, and whether its velocity returns to rest; the velocity drawn | from the report |
 | SRS points rule | each measured shock response spectrum against its requirement's band, point by point; the distance from the requirement drawn against the band | from the report |
 | Classical pulse | a shock record against the envelope of its nominal pulse, with its peak, duration, edges and velocity change | from its own block |
 | Sine distortion | each tone of a sine record: the record less the tracked tones against the tones, at every line; the distortion drawn along the sweep | from the report, one block per tone |
+| Sine frequency | each tone of a sine record: the tone's own frequency on each channel against the specified frequency, at every line; the error drawn along the sweep against the band | from the report, one block per tone |
 | Sweep rate | each pass of the sweep through a mode's half-power band against the rule's rate; the sweep drawn through the bands | from the report with a shape set, or from its own block with the modes the plan names |
 | Signature shifts | two signatures before and after the test, mode by mode against frequency and amplitude limits; the two drawn over each other | from its own block |
 | Replication segments | a replicated record judged segment by segment, beside the whole-record rms error | from its own block |
 
 A check is made **from the report** when the report already draws
 every object it reads, so a random report carries the time statistics
-of its record, a shock report the velocity check and the points rule,
-and a sine report the distortion of each tone; the time statistics are
-not made for a shock, transient or sine report, whose records are not
-meant to be Gaussian. MIL-STD-810H (2019), Method 514.8, in the text
+of its record, the rms check of its spectra and their lines by chance,
+a shock report the velocity check and the points rule, and a sine
+report the distortion and the frequency of each tone; the time
+statistics and the lines by chance are not made for a shock, transient
+or sine report, whose records are not meant to be Gaussian. The samples
+on the rail are counted against the level each channel clips at, the
+smaller of its DAQ Range and its Sensor Range in the project's channel
+table over its sensitivity (the same range the overload check reads);
+a channel the table gives no range is not counted, and its cell is a
+dash. MIL-STD-810H (2019), Method 514.8, in the text
 under Table 514.8-II, asks for a drive that departs from a Gaussian
 distribution to
 be documented with its time history, its skewness and kurtosis, and its
@@ -255,6 +264,9 @@ project.report_check_block('Report', 'signature', source='Survey before',
 project.report_check_block('Report', 'segments', segments=[
     [6.0, 30.0, 'stationary', 'rough road'],
     [31.9, 32.7, 'shock', 'pothole']])
+project.report_check_block('Report', 'chance', combine=8)
+project.report_check_block('Report', 'frequency', tone='Sweep 1',
+                           tolerance=0.001)
 ```
 
 The settings are the keyword arguments of the check's reading (the

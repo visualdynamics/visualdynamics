@@ -111,8 +111,9 @@ def test_the_feature_is_built_and_off_by_default():
 
 def test_every_check_has_a_reader_and_a_view():
     assert set(cb._READERS) == set(cb._SHOWERS) == set(cb.CHECKS)
-    assert cb.AUTOMATIC == ('time_statistics', 'shock_validity',
-                            'srs_points', 'distortion', 'sweep_rate')
+    assert cb.AUTOMATIC == ('time_statistics', 'rms', 'chance',
+                            'shock_validity', 'srs_points', 'distortion',
+                            'frequency', 'sweep_rate')
     for found in cb.CHECKS.values():
         fields = dict(found.fields)
         assert set(found.needs) <= set(fields)
@@ -153,7 +154,8 @@ def test_a_random_report_carries_the_time_statistics_of_its_record():
     report, objects = _random_report(_noise())
     found = cb.items(report, objects)
     assert [(item.check.key, dict(item.bound)) for item in found] == [
-        ('time_statistics', {'source': 'History'})]
+        ('time_statistics', {'source': 'History', 'table': ''})], \
+        'no channel table, no range'
 
 
 def test_a_check_is_made_only_from_what_the_report_shows():
@@ -305,7 +307,8 @@ def test_time_statistics_agree_with_the_reading_channel_by_channel():
     report, objects = _random_report(history)
     shown = _shown(report, objects, 'time_statistics')
     assert shown.headers == ['Channel', 'Mean', 'RMS', 'Skewness', 'Kurtosis',
-                             'Crest factor', 'Frames out', 'Verdict']
+                             'Crest factor', 'Frames out', 'On the rail',
+                             'Verdict']
     assert len(shown.rows) == 3
     for row in range(3):
         stats = record_statistics(history, row)
@@ -314,6 +317,7 @@ def test_time_statistics_agree_with_the_reading_channel_by_channel():
         assert cells[3] == f'{stats.skewness:.3f}'
         assert cells[4] == f'{stats.kurtosis:.3f}'
         assert cells[5] == f'{stats.crest:.3f}'
+        assert cells[7] == cb.DASH, 'no channel table, no rail counted'
         assert cells[-1] == stats.describe()
         assert (shown.marks[row][-1] == 'over') == bool(stats.flagged)
     assert shown.status == cb.FLAGGED, 'the clipped channel'
@@ -435,7 +439,7 @@ def test_a_dead_channel_is_not_judged_and_named():
     shown = _shown(report, objects, 'time_statistics')
     assert shown.status == cb.PARTLY
     assert shown.rows[1][-1] == f'not judged: {cb.DOES_NOT_VARY}'
-    assert shown.rows[1][1:-1] == [cb.DASH] * 6
+    assert shown.rows[1][1:-1] == [cb.DASH] * 7
     assert f'Not judged: 2Z+, {cb.DOES_NOT_VARY}.' in shown.words
 
 
@@ -693,7 +697,8 @@ def test_the_distortion_check_is_made_per_tone_and_agrees_with_its_reading(
     from visualdynamics.core.sine_distortion import check_distortion
 
     report, objects = _sine_report(*sweep)
-    (item,) = cb.items(report, objects)
+    item, beside = cb.items(report, objects)
+    assert beside.check.key == 'frequency', 'its frequency, read beside it'
     assert item.settings == {'tone': 'Up'}
     assert cb.title_of(item) == 'Sine distortion, Up'
     shown = cb.show(item, objects, SI)
@@ -1112,8 +1117,8 @@ def test_the_random_run_report_carries_its_time_statistics():
     blocks = _payload(render_html(project[name], project, unit_system=SI,
                                   object_groups=project.object_groups)
                       )['blocks']
-    ((title, _word, _html),) = _heads(blocks)
-    assert title == 'Time statistics'
+    assert [title for title, _word, _html in _heads(blocks)] == [
+        'Time statistics', 'RMS check', 'Lines by chance']
     table = next(block for block in blocks if block['kind'] == 'table'
                  and block['caption'].startswith('Time statistics'))
     assert len(table['rows']) == project.time_history.num_records
@@ -1417,3 +1422,416 @@ def test_the_window_waits_while_its_worker_is_busy(window, pump):
     finally:
         window._importing = False
         window._report_settle.stop()
+
+
+# ---- the rail, from the channel table ---------------------------------------------------
+
+
+def _table(ranges, sensitivity=1000.0, count=3):
+    """A channel table for `_noise`'s channels: each DAQ Range in volts
+    (blank for none) over `sensitivity` mV per m/s²."""
+    from visualdynamics.core.channel_table import ChannelTable
+
+    return ChannelTable({
+        'channel': list(range(1, count + 1)),
+        'node': list(range(1, count + 1)), 'direction': ['Z+'] * count,
+        'unit': ['m/s^2'] * count, 'channel_type': ['acceleration'] * count,
+        'sensitivity': [sensitivity] * count,
+        'daq_range': [str(value) for value in ranges]})
+
+
+def test_the_rail_is_counted_against_the_channel_tables_range():
+    from visualdynamics.core.time_statistics import record_statistics
+
+    history = _noise(channels=3)
+    history.ordinate[2] = np.clip(history.ordinate[2], -1.5, 1.5)
+    report, objects = _random_report(history)
+    # 1.5 V over 1000 mV per m/s² clips at 1.5 m/s²; the second channel
+    # states no range
+    objects['Table'] = _table([1.5, '', 1.5])
+    shown = _shown(report, objects, 'time_statistics')
+    clipped = record_statistics(history, 2, full_scale=1.5)
+    assert clipped.rail > 0 and 'rail' in clipped.flagged
+    assert shown.rows[2][7] == str(clipped.rail)
+    assert shown.marks[2][7] == 'over'
+    assert shown.rows[0][7] == str(record_statistics(
+        history, 0, full_scale=1.5).rail)
+    assert shown.rows[1][7] == cb.DASH, 'no range stated, no rail counted'
+    assert 'samples on the rail' in shown.words
+    assert shown.criterion.endswith(
+        "On the rail: at most 0 samples within 0.1 % of the channel's "
+        'range, from the channel table.')
+    objects['Table'] = _table(['', '', 1.5])
+    one = _shown(report, objects, 'time_statistics')
+    assert [row[7] for row in one.rows[:2]] == [cb.DASH] * 2
+    assert one.criterion.endswith(
+        "On the rail: at most 0 samples within 0.1 % of the channel's "
+        'range, from the channel table.'), 'one channel with a range'
+    objects.pop('Table')
+    cb.forget()
+    bare = _shown(report, objects, 'time_statistics')
+    assert [row[7] for row in bare.rows] == [cb.DASH] * 3
+    assert 'On the rail' not in bare.criterion
+
+
+def test_a_reading_with_no_channel_table_is_kept():
+    report, objects = _random_report(_noise())
+    (item,) = cb.items(report, objects)
+    assert item.objects(objects)['table'] is None
+    first = cb.read(item, objects)
+    assert cb.read(item, objects) is first, 'kept, though no table is bound'
+    objects['Table'] = _table([1.5, 1.5], count=2)
+    (item,) = cb.items(report, objects)
+    assert cb.read(item, objects) is not first, 'a table bound reads again'
+
+
+def test_a_check_block_saved_before_the_table_field_binds_it_by_default():
+    report, objects = _random_report(_noise())
+    objects['Table'] = _table([1.5, 1.5], count=2)
+    cb.add(report, 'time_statistics', {'source': 'History'})
+    assert report.blocks[-1]['table'] == '@basis:ChannelTable'
+    del report.blocks[-1]['table']
+    (item,) = cb.items(report, objects)
+    assert dict(item.bound)['table'] == 'Table'
+
+
+# ---- the rms check ------------------------------------------------------------------------
+
+
+def _rms_report(history, psd=None):
+    psd = history.compute_psds() if psd is None else psd
+    report = Report('R', [{'kind': 'plot', 'source': 'History'},
+                          {'kind': 'plot', 'source': 'PSD'}],
+                    features=['check_blocks'])
+    return report, {'History': history, 'PSD': psd}
+
+
+def test_the_rms_rows_are_the_checks_own():
+    from visualdynamics.core.rms_check import check_record
+
+    history = _noise(channels=2)
+    report, objects = _rms_report(history)
+    assert [item.check.key for item in cb.items(report, objects)] == [
+        'time_statistics', 'rms']
+    shown = _shown(report, objects, 'rms')
+    assert shown.headers == ['Channel', 'From the spectrum',
+                             'From the time history', 'Gap', 'Verdict']
+    for record in range(2):
+        check = check_record(objects['PSD'], history, record)
+        row = shown.rows[record]
+        assert row[0] == f'{record + 1}Z+'
+        assert row[1] == f'{check.spectrum_rms:.4g} m/s²'
+        assert row[2] == f'{check.time_rms:.4g} m/s²'
+        assert row[3] == f'{check.gap_db:+.3f} dB'.replace('-', '−')
+        assert row[4] == 'agree'
+    assert shown.status == cb.PASSED
+    assert shown.words == ("The spectrum carries the record's mean square on "
+                           'all 2 channels.')
+    assert shown.criterion.startswith('The rms from the area under each '
+                                      'autospectrum')
+    assert 'within 0.05 dB either way' in shown.criterion
+    assert shown.figures == []
+
+
+def test_a_spectrum_twice_its_records_mean_square_is_flagged_with_the_cause():
+    history = _noise(channels=2)
+    psd = history.compute_psds()
+    psd.ordinate[1] = 2.0 * psd.ordinate[1]
+    report, objects = _rms_report(history, psd)
+    shown = _shown(report, objects, 'rms')
+    assert shown.status == cb.FLAGGED
+    assert shown.rows[1][4] == 'flagged'
+    assert shown.marks == [[None] * 5, [None, None, None, 'over', 'over']]
+    assert shown.words.startswith('1 of 2 channels flagged: 2Z+, the '
+                                  'spectrum reads 3.01 dB high: twice the '
+                                  'mean square')
+    one = Report('R', [], features=['check_blocks'])
+    cb.add(one, 'rms', {'source': 'History', 'measured': 'PSD'},
+           {'threshold_db': 5.0})
+    shown = _shown(one, objects, 'rms')
+    assert shown.status == cb.PASSED, 'a threshold the block names holds'
+    assert 'within 5 dB either way' in shown.criterion
+
+
+def test_a_dead_or_not_a_number_rms_channel_is_not_judged_by_name():
+    history = _noise(channels=3)
+    history.ordinate[1] = 0.0
+    history.ordinate[2, 100] = np.nan
+    report, objects = _rms_report(history)
+    shown = _shown(report, objects, 'rms')
+    assert shown.status == cb.PARTLY
+    assert shown.rows[1][3:] == [cb.DASH, (
+        'not judged: it reads zero, as a dead or disconnected channel '
+        'does')]
+    assert shown.rows[2][1] == cb.DASH
+    assert shown.rows[2][4] == ('not judged: the record or its spectrum '
+                                'holds a value that is not a number')
+    assert 'Not judged: 2Z+, it reads zero' in shown.words
+    history.ordinate[0] = 0.0
+    cb.forget()
+    report, objects = _rms_report(history)
+    shown = _shown(report, objects, 'rms')
+    assert shown.status == cb.NOT_JUDGED
+    assert shown.words.startswith('No channel could be checked.')
+
+
+def test_an_rms_check_of_a_spectrum_it_cannot_read_says_why():
+    history = _noise(channels=1)
+    banded = Psd(np.array([31.5, 63.0]), np.ones((1, 2)), response_dof=['1Z+'],
+                 ordinate_dim=['acceleration**2/frequency'],
+                 bandwidth=np.array([23.0, 46.0]))
+    _report, objects = _rms_report(history, banded)
+    # a banded spectrum is not what the report's spectrum binds to, so it
+    # is checked from a block of its own
+    report = Report('R', [], features=['check_blocks'])
+    cb.add(report, 'rms', {'source': 'History', 'measured': 'PSD'})
+    shown = _shown(report, objects, 'rms')
+    assert shown.status == cb.NOT_JUDGED
+    assert shown.rows[0][-1].startswith('not judged: the rms check sums the '
+                                        'evenly spaced lines')
+    cross = Psd(np.arange(0.0, 100.0, 1.0), np.ones((1, 100)) + 0j,
+                response_dof=['1Z+'], reference_dof=['2Z+'],
+                ordinate_dim=['acceleration**2/frequency'])
+    cb.forget()
+    report, objects = _rms_report(history, cross)
+    shown = _shown(report, objects, 'rms')
+    assert shown.status == cb.NOT_JUDGED
+    assert shown.words == ('The spectrum holds no autospectrum to check.')
+
+
+def test_an_rms_check_of_a_channel_the_record_does_not_hold_is_refused():
+    history = _noise(channels=1)
+    psd = history.compute_psds()
+    psd.response_dof = np.array(['9Z+'])
+    report, objects = _rms_report(history, psd)
+    shown = _shown(report, objects, 'rms')
+    assert shown.status == cb.NOT_JUDGED
+    assert shown.rows[0][0] == '9Z+'
+    assert shown.rows[0][-1].startswith('not judged: ')
+    cb.forget()
+    report, objects = _rms_report(history)
+    shown = _shown(report, objects, 'rms')
+    assert shown.words == ("The spectrum carries the record's mean square on "
+                           '1 channel.')
+
+
+# ---- lines by chance -----------------------------------------------------------------------
+
+
+def _chance_report(psd, spec=None, combine=None):
+    from test_chance import flat_spec
+
+    spec = flat_spec(channels=psd.num_records) if spec is None else spec
+    report = Report('R', [{'kind': 'plot', 'source': 'Spec',
+                           'measured': 'PSD'}], features=['check_blocks'])
+    if combine is not None:
+        cb.add(report, 'chance', {'source': 'Spec', 'measured': 'PSD'},
+               {'combine': combine})
+    return report, {'Spec': spec, 'PSD': psd}
+
+
+def _flat_psd(db, dof=120.0):
+    """`test_chance.lines`, one record per row of `db`."""
+    from test_chance import lines
+
+    rows = [lines(np.asarray(row, dtype=float), dof=dof) for row in db]
+    out = Psd(rows[0].abscissa, np.vstack([row.ordinate for row in rows]),
+              response_dof=[f'{k + 1}Z+' for k in range(len(rows))],
+              ordinate_dim='acceleration**2/frequency')
+    out.statistical_dof = np.full(len(rows), dof)
+    return out
+
+
+def test_the_chance_rows_are_the_readings_own():
+    from test_chance import at_cells
+
+    from visualdynamics.core.chance import compare_chance, describe_chance
+
+    psd = _flat_psd([np.zeros(401), at_cells({10: 4.0, 11: 4.0})])
+    report, objects = _chance_report(psd)
+    assert [item.check.key for item in cb.items(report, objects)] == [
+        'chance']
+    shown = _shown(report, objects, 'chance')
+    assert shown.headers == ['Channel', 'Judged', 'DOF judged', 'Outside',
+                             'By chance', 'Verdict']
+    first = compare_chance(objects['Spec'], psd, 0, 0)
+    second = compare_chance(objects['Spec'], psd, 1, 1)
+    assert shown.rows[0] == ['1Z+', f'{first["lines"]} lines', '120', (
+        '0 (0 below, 0 above)'), f'{first["abort_expected"]:.2g}',
+        'inside the abort band']
+    assert shown.rows[1][3] == '2 (0 below, 2 above)'
+    assert shown.rows[1][5] == 'outside the abort band'
+    assert shown.marks[1] == [None, None, None, 'over', None, 'over']
+    assert shown.status == cb.FLAGGED
+    assert shown.words == (f'1Z+: {describe_chance(first, "abort")}; '
+                           f'2Z+: {describe_chance(second, "abort")}.')
+    assert shown.criterion.startswith('Every line inside the abort band, '
+                                      'each line judged alone;')
+    (figure,) = shown.figures
+    assert figure['logx']
+    assert [curve['label'] for curve in figure['curves']] == [
+        '1Z+', '2Z+', 'abort band, lower edge', 'abort band, upper edge']
+    assert figure['curves'][2]['y'][0] == pytest.approx(-3.0)
+    groups = first['groups']
+    centers = np.log10(np.sqrt(groups['low'] * groups['high']))
+    assert np.allclose(np.array(figure['curves'][0]['x'], dtype=float),
+                       centers, rtol=1e-6)
+    assert np.allclose(np.array(figure['x'], dtype=float), centers,
+                       rtol=1e-6)
+    assert figure['caption'].startswith("Each channel's miss from its target "
+                                        'in dB, line by line')
+
+
+def test_lines_combined_are_judged_as_groups_at_their_dof():
+    from test_chance import at_cells
+
+    from visualdynamics.core.chance import compare_chance
+
+    psd = _flat_psd([at_cells({10: 4.0, 11: 4.0})])
+    report, objects = _chance_report(psd, combine=4)
+    shown = _shown(report, objects, 'chance')
+    result = compare_chance(objects['Spec'], psd, 0, 0, combine=4)
+    assert shown.rows[0][1] == f'{result["lines"]} groups'
+    assert shown.rows[0][2] == f'{result["judged_dof"]:.4g}'
+    assert shown.rows[0][3] == (f'{result["abort_lines"]} '
+                                f'({result["abort_below"]} below, '
+                                f'{result["abort_above"]} above)')
+    assert shown.criterion.startswith('Every group inside the abort band, '
+                                      '4 adjacent lines combined')
+    assert 'group by group' in shown.figures[0]['caption']
+
+
+def test_a_dead_chance_channel_is_flagged_never_passed():
+    psd = _flat_psd([np.zeros(401), np.zeros(401)])
+    psd.ordinate[1] = 0.0
+    report, objects = _chance_report(psd)
+    shown = _shown(report, objects, 'chance')
+    assert shown.status == cb.FLAGGED
+    assert shown.rows[1][3].endswith(' below, 0 above)')
+    assert shown.rows[1][5] == 'outside the abort band'
+
+
+def test_a_chance_channel_with_no_finite_line_or_band_is_not_judged():
+    from test_chance import flat_spec
+
+    psd = _flat_psd([np.zeros(401), np.zeros(401)])
+    psd.ordinate[1] = np.nan
+    report, objects = _chance_report(psd)
+    shown = _shown(report, objects, 'chance')
+    assert shown.status == cb.PARTLY
+    assert shown.rows[1][-1] == ('not judged: no line of the measurement '
+                                 'inside the specification is a finite '
+                                 'density')
+    cb.forget()
+    report, objects = _chance_report(psd, flat_spec(channels=2, warning=None,
+                                                    abort=None))
+    shown = _shown(report, objects, 'chance')
+    assert shown.status == cb.NOT_JUDGED
+    assert shown.rows[0][-1] == ('not judged: the specification carries no '
+                                 'band')
+    assert shown.words.startswith('No channel could be judged.')
+
+
+def test_one_line_that_is_not_a_number_leaves_the_rest_judged():
+    psd = _flat_psd([np.zeros(401)])
+    psd.ordinate[0, 50] = np.nan
+    report, objects = _chance_report(psd)
+    shown = _shown(report, objects, 'chance')
+    assert shown.status == cb.PASSED
+    assert int(shown.rows[0][1].split()[0]) < 389
+
+
+def test_a_chance_pair_that_cannot_be_compared_is_refused_by_name():
+    psd = _flat_psd([np.zeros(401)])
+    psd.statistical_dof = None
+    report, objects = _chance_report(psd)
+    shown = _shown(report, objects, 'chance')
+    assert shown.status == cb.NOT_JUDGED
+    assert 'degrees of freedom' in shown.rows[0][-1]
+    other = _flat_psd([np.zeros(401)])
+    other.response_dof = np.array(['9Z+'])
+    cb.forget()
+    report, objects = _chance_report(other)
+    shown = _shown(report, objects, 'chance')
+    assert shown.words == ('The specification and the measurement have no '
+                           'channel in common.')
+
+
+def test_lines_by_chance_are_not_counted_for_a_shock_or_a_sine_report():
+    psd = _flat_psd([np.zeros(401)])
+    report, objects = _chance_report(psd)
+    objects['Shock'] = ShockSpecification(
+        np.array([100.0, 1000.0]), np.ones((1, 2)), response_dof=['1Z+'],
+        ordinate_dim=['acceleration'])
+    report.blocks.append({'kind': 'plot', 'source': 'Shock'})
+    assert 'chance' not in [item.check.key
+                            for item in cb.items(report, objects)]
+
+
+# ---- sine frequency ------------------------------------------------------------------------
+
+
+def test_the_frequency_check_is_made_per_tone_and_agrees_with_its_reading(
+        sweep):
+    from visualdynamics.core.sine_frequency import check_frequency
+
+    report, objects = _sine_report(*sweep)
+    _distortion, item = cb.items(report, objects)
+    assert item.settings == {'tone': 'Up'}
+    assert cb.title_of(item) == 'Sine frequency, Up'
+    shown = cb.show(item, objects, SI)
+    check = check_frequency(*sweep, tone='Up')
+    assert shown.status == cb.PASSED
+    assert shown.words.startswith(check.describe())
+    frequency, error, relative = check.worst('101Z+')
+    assert shown.rows[0] == [
+        'Up', '101Z+',
+        f'{100.0 * relative:+.3g} % ({error:+.3g} Hz)'.replace('-', '−'),
+        f'{frequency:.4g} Hz',
+        f'0 of {int(check.judged[0].sum())}', 'within the band']
+    assert shown.criterion == ("The tone's own frequency, read over 10 "
+                               'cycles at each line, within ±2 % of the '
+                               'specified frequency.')
+    (figure,) = shown.figures
+    assert [curve['label'] for curve in figure['curves']] == [
+        '101Z+', 'band, lower edge', 'band, upper edge']
+    upper = np.array(figure['curves'][-1]['y'], dtype=float)
+    assert np.allclose(upper, 2.0, rtol=1e-9)
+    lower = np.array(figure['curves'][-2]['y'], dtype=float)
+    assert np.allclose(lower, -2.0, rtol=1e-9)
+    drawn = np.array([np.nan if v is None else v
+                      for v in figure['curves'][0]['y']], dtype=float)
+    want = np.where(check.judged[0], 100.0 * check.relative[0], np.nan)
+    assert np.allclose(drawn, want, rtol=1e-5, equal_nan=True)
+
+
+def test_a_tone_off_its_frequency_is_flagged():
+    from test_sine_frequency import _levels
+    from test_sine_frequency import _sweep as _off_sweep
+
+    history, spec = _off_sweep(scale=1.015)
+    levels = _levels(history, spec)
+    _report, objects = _sine_report(history, spec, levels)
+    one = Report('R', [], features=['check_blocks'])
+    cb.add(one, 'frequency', {'source': 'History', 'specification': 'Spec',
+                              'measured': 'Levels'},
+           {'tolerance': 0.0125})
+    shown = _shown(one, objects, 'frequency')
+    assert shown.status == cb.FLAGGED
+    assert shown.rows[0][-1] == 'outside the band'
+    assert shown.marks[0] == [None, None, 'over', None, 'over', 'over']
+    assert 'within ±1.25 % of the specified frequency' in shown.criterion
+    assert "moved this sweep's clock" in shown.words
+
+
+def test_a_dead_frequency_channel_is_not_judged_and_does_not_pass(sweep):
+    history, spec, levels = sweep
+    dead = TimeHistory(history.abscissa, np.zeros_like(history.ordinate),
+                       response_dof=list(history.response_dof),
+                       ordinate_dim=['acceleration'],
+                       ordinate_unit=['m/s**2'])
+    report, objects = _sine_report(dead, spec, levels)
+    shown = _shown(report, objects, 'frequency')
+    assert shown.status == cb.NOT_JUDGED
+    assert shown.rows[0][-1] == 'not judged: no line could be judged'
+    assert shown.rows[0][2:5] == [cb.DASH] * 3

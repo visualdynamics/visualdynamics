@@ -5498,8 +5498,9 @@ class Project(dict):
         name : str
             The report.
         check : str
-            'time_statistics', 'shock_validity', 'srs_points', 'pulse',
-            'distortion', 'sweep_rate', 'signature' or 'segments'.
+            'time_statistics', 'rms', 'chance', 'shock_validity',
+            'srs_points', 'pulse', 'distortion', 'frequency',
+            'sweep_rate', 'signature' or 'segments'.
         source, measured, specification, shapes : str, optional
             What the check reads, by object name or symbolic binding
             ('@basis:TimeHistory'); each field the check takes defaults

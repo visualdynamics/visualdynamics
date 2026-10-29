@@ -7,8 +7,10 @@ and density, which MIL-STD-810H (2019), Method 514.8, in the text
 under Table 514.8-II, asks for whenever the drive departs from a
 Gaussian), whether
 a shock record's velocity returns to rest, the points rule of a shock
-response spectrum, a classical pulse against its tolerance, a sine record's
-distortion, a sweep's rate against the modes it passes, two signatures
+response spectrum, a classical pulse against its tolerance, the rms a
+spectrum carries against its record's, a random channel's lines outside
+its band beside what chance puts there, a sine record's distortion and
+frequency, a sweep's rate against the modes it passes, two signatures
 compared mode by mode, and a replicated record judged segment by
 segment. Each is one function in `core`, which the reading's view, the
 script and this module all call; nothing here computes a check a second
@@ -26,9 +28,13 @@ Which checks a report makes:
 
 - **From what the report shows.** A check is made when the report
   already binds every object the check reads (`AUTOMATIC`): the time
-  statistics of a random test's record, the velocity check of a shock
-  record, the points rule of a shock response spectrum against its
-  requirement, the distortion of each tone of a sine record. The sweep
+  statistics of a random test's record (each channel's samples on the
+  rail counted against the level it clips at, `ChannelTable.clip_ranges`,
+  when the project holds a channel table), the rms check of its
+  spectrum against the record and its lines by chance against the
+  specification, the velocity check of a shock record, the points rule
+  of a shock response spectrum against its requirement, the distortion
+  and the frequency of each tone of a sine record. The sweep
   rate is made when the project also holds a shape set, whose modes it
   is checked against.
 - **From what the author states.** Some checks need a fact no object
@@ -136,10 +142,22 @@ CHECKS: dict[str, Check] = {check.key: check for check in (
           "A random record's mean, rms, skewness and kurtosis over the "
           'record and frame by frame, crest factor, and histogram against '
           'the Gaussian, each against its band.',
-          (('source', '@basis:TimeHistory'),), ('source',), True,
+          (('source', '@basis:TimeHistory'),
+           ('table', '@basis:ChannelTable')), ('source',), True,
           ('frame', 'duration', 'kurtosis_band', 'frame_band',
            'skewness_band', 'offset_share', 'crest_band', 'peak_runs',
-           'sigmas', 'tail_ratio')),
+           'sigmas', 'tail_ratio', 'margin', 'rail_samples')),
+    Check('rms', 'RMS check',
+          'The rms from the area under each autospectrum against the rms '
+          'of the time history it was computed from.',
+          (('source', '@basis:TimeHistory'), ('measured', '@basis:Psd')),
+          ('source', 'measured'), True, ('threshold_db',)),
+    Check('chance', 'Lines by chance',
+          "Each channel's lines (or groups of adjacent lines combined) "
+          'outside its band, beside how many chance alone puts there at '
+          "the measurement's degrees of freedom.",
+          (('source', '@basis:Specification'), ('measured', '@basis:Psd')),
+          ('source', 'measured'), True, ('combine', 'dof', 'scale_db')),
     Check('shock_validity', 'Shock validity',
           "Each acceleration channel integrated raw over each shock window: "
           'whether its velocity returns to rest.',
@@ -168,6 +186,14 @@ CHECKS: dict[str, Check] = {check.key: check for check in (
            ('measured', '@basis:SineLevelSet')),
           ('source', 'specification', 'measured'), True,
           ('tone', 'channels', 'excess', 'cycles')),
+    Check('frequency', 'Sine frequency',
+          "The tone's own frequency on each channel against the specified "
+          'frequency, at every line of each tone.',
+          (('source', '@basis:TimeHistory'),
+           ('specification', '@basis:SineSweepSpecification'),
+           ('measured', '@basis:SineLevelSet')),
+          ('source', 'specification', 'measured'), True,
+          ('tone', 'channels', 'tolerance', 'floor', 'cycles')),
     Check('sweep_rate', 'Sweep rate',
           "Each pass of the sweep through a mode's half-power band against "
           "the rule's rate for the mode's Q.",
@@ -328,6 +354,10 @@ def _applies(key: str, found: Mapping[str, Any], shown_types: set[type]
                                        SineSweepSpecification})
     if key == 'shock_validity':
         return bool(getattr(found['source'], 'shocks', None)) or shock
+    if key == 'chance':
+        # a count against chance is of a random test's lines
+        return not shock and not shown_types & {TransientSpecification,
+                                                SineSweepSpecification}
     return True
 
 
@@ -350,9 +380,11 @@ def items(report: Any, objects: Mapping[str, Any],
             continue
         keys.add(key)
         found = CHECKS[key]
-        bound = tuple((name, _resolved(block.get(name), objects,
+        # a field a block was saved without (one added to the check
+        # since) is bound as the check binds it by default
+        bound = tuple((name, _resolved(block.get(name) or default, objects,
                                        object_groups))
-                      for name, _default in found.fields)
+                      for name, default in found.fields)
         if not all(dict(bound)[name] for name in found.needs):
             continue
         settings = block.get('settings') or {}
@@ -377,7 +409,7 @@ def items(report: Any, objects: Mapping[str, Any],
                               for name, value in bound if value},
                         shown_types):
             continue
-        if key == 'distortion':
+        if key in ('distortion', 'frequency'):
             levels = objects[names['measured']]
             tones = (levels.tone_names if isinstance(levels, SineLevelSet)
                      else [])
@@ -436,8 +468,8 @@ def _kept(key: tuple, found: Mapping[str, Any]) -> Any:
     if held is None:
         return None
     refs, reading = held
-    if any(ref() is not obj for ref, obj in zip(refs, found.values(),
-                                                strict=True)):
+    if any((None if ref is None else ref()) is not obj
+           for ref, obj in zip(refs, found.values(), strict=True)):
         del _KEPT[key]
         return None
     return reading
@@ -445,7 +477,10 @@ def _kept(key: tuple, found: Mapping[str, Any]) -> Any:
 
 def _keep(key: tuple, found: Mapping[str, Any], reading: Any) -> None:
     try:
-        refs = tuple(weakref.ref(obj) for obj in found.values())
+        # an optional field bound to nothing (no channel table) is
+        # held as None
+        refs = tuple(None if obj is None else weakref.ref(obj)
+                     for obj in found.values())
     except TypeError:
         return          # an object that cannot be referred to weakly
     while len(_KEPT) >= KEPT:
@@ -548,10 +583,12 @@ def _read_time_statistics(found, settings):
     from ..plot.time_statistics import histogram
 
     history = found['source']
+    scales = _full_scales(found.get('table'), history)
     out = []
     for row in range(history.num_records):
         try:
-            stats = record_statistics(history, row, **settings)
+            stats = record_statistics(history, row, full_scale=scales[row],
+                                      **settings)
         except ValueError as refusal:
             out.append((row, None, _reason(refusal), None))
             continue
@@ -560,6 +597,21 @@ def _read_time_statistics(found, settings):
             continue
         out.append((row, stats, '', histogram(_spanned(history, row))))
     return out
+
+
+def _full_scales(table, history):
+    """Each channel's range in SI from the project's channel table (the
+    level it clips at, `ChannelTable.clip_ranges`, over its sensitivity,
+    as `core.overload.table_full_scales` reads it), None where the table
+    gives none or there is no table, so no sample is counted on a rail
+    the table does not state."""
+    from ..core.channel_table import ChannelTable
+    from ..core.overload import table_full_scales
+
+    if not isinstance(table, ChannelTable):
+        return [None] * history.num_records
+    scales = table_full_scales(table, history).full_scales
+    return [float(v) if np.isfinite(v) else None for v in scales]
 
 
 def _spanned(history, row):
@@ -592,6 +644,48 @@ def _read_pulse(found, settings):
         float(settings.pop('duration')), settings.pop('edge', None))
     channel = settings.pop('channel', None)
     return pulses.check_pulse(found['source'], pulse, channel, **settings)
+
+
+def _read_rms(found, settings):
+    from ..core.rms_check import check_record, refusal
+
+    spectrum, history = found['measured'], found['source']
+    out = []
+    for record in range(spectrum.num_records):
+        if not spectrum.is_autospectrum(record):
+            continue
+        label = str(spectrum.response_dof[record])
+        reason = refusal(spectrum, record)
+        if reason is not None:
+            out.append((record, label, Refusal(reason)))
+            continue
+        try:
+            out.append((record, label, check_record(spectrum, history,
+                                                    record, **settings)))
+        except ValueError as refused:
+            out.append((record, label, Refusal(_reason(refused))))
+    return out
+
+
+
+def _read_chance(found, settings):
+    from ..core.chance import compare_chance
+    from ..core.compliance import matched_records
+
+    specification, measured = found['source'], found['measured']
+    out = []
+    for label, j, i in matched_records(specification, measured):
+        out.append((label, compare_chance(specification, measured, j, i,
+                                          **settings)))
+    return out
+
+
+
+def _read_frequency(found, settings):
+    from ..core.sine_frequency import check_frequency
+
+    return check_frequency(found['source'], found['specification'],
+                           found['measured'], **settings)
 
 
 def _read_distortion(found, settings):
@@ -654,10 +748,13 @@ def _read_segments(found, settings):
 
 _READERS: dict[str, Callable[[Mapping[str, Any], dict[str, Any]], Any]] = {
     'time_statistics': _read_time_statistics,
+    'rms': _read_rms,
+    'chance': _read_chance,
     'shock_validity': _read_shock_validity,
     'srs_points': _read_srs_points,
     'pulse': _read_pulse,
     'distortion': _read_distortion,
+    'frequency': _read_frequency,
     'sweep_rate': _read_sweep_rate,
     'signature': _read_signature,
     'segments': _read_segments,
@@ -783,7 +880,7 @@ def _count(n: int, word: str, plural: str = '') -> str:
 #: the table's statistics: (key in `TimeStatistics.flags`, column)
 _STAT_COLUMNS = (('mean', 'Mean'), ('rms', 'RMS'), ('skewness', 'Skewness'),
                  ('kurtosis', 'Kurtosis'), ('crest', 'Crest factor'),
-                 ('frames', 'Frames out'))
+                 ('frames', 'Frames out'), ('rail', 'On the rail'))
 
 
 def _show_time_statistics(reading, found, us):
@@ -820,6 +917,9 @@ def _show_time_statistics(reading, found, us):
             'frames': (f'{stats.frames_outside} of '
                        f'{stats.frame_kurtosis.size}'
                        if stats.frame_kurtosis.size else DASH),
+            # the samples within the margin of the channel's range, when
+            # the channel table states one
+            'rail': DASH if stats.rail is None else str(stats.rail),
         }
         rows.append([label] + [cells[key] for key, _name in _STAT_COLUMNS]
                     + [stats.describe()])
@@ -859,6 +959,12 @@ def _show_time_statistics(reading, found, us):
                      f'{f_high:g} frame by frame, crest factor {c_low:g} to '
                      f'{c_high:g}; Gaussian is a skewness of 0 and a kurtosis '
                      f'of {NOMINAL:g}.')
+        ranged = [stats for _row, stats, _cause, _hist in reading
+                  if stats is not None and stats.full_scale is not None]
+        if ranged:
+            criterion += (f' On the rail: at most {ranged[0].rail_samples} '
+                          f'samples within {100.0 * ranged[0].margin:g} % of '
+                          "the channel's range, from the channel table.")
     # the drive's density and kurtosis against time are drawn for each
     # channel outside a band, and for the channel furthest from
     # Gaussian when none is, so the record's distribution is shown
@@ -1185,6 +1291,229 @@ def _show_distortion(reading, found, us):
                  [figure])
 
 
+# ---- the rms check -------------------------------------------------------------------
+
+
+def _show_rms(reading, found, us):
+    from ..plot.rms_check import heading
+
+    if not reading:
+        return _not_judged('the spectrum holds no autospectrum to check')
+    spectrum = found['measured']
+    headers = ['Channel', 'From the spectrum', 'From the time history',
+               'Gap', 'Verdict']
+    rows, marks, verdicts, flagged, unread = [], [], [], [], []
+    first = None
+    for record, label, check in reading:
+        if isinstance(check, Refusal):
+            rows.append([label, DASH, DASH, DASH,
+                         f'not judged: {check.reason}'])
+            marks.append([None] * 5)
+            verdicts.append(None)
+            unread.append((label, check.reason))
+            continue
+        first = first or check
+        dimension = _rms_dimension(spectrum, record)
+        gap = check.gap_db
+        if not np.isfinite(gap):
+            cause = _no_gap(check)
+            rows.append([label, _rms_amount(check.spectrum_rms, dimension, us),
+                         _rms_amount(check.time_rms, dimension, us), DASH,
+                         f'not judged: {cause}'])
+            marks.append([None] * 5)
+            verdicts.append(None)
+            unread.append((label, cause))
+            continue
+        # a gap that is the window's alone leaves the scaling right
+        inside = check.passed or check.explained
+        rows.append([label, _amount(check.spectrum_rms, dimension, us),
+                     _amount(check.time_rms, dimension, us),
+                     _signed(gap, 3, 'dB'),
+                     heading(check).removeprefix('rms check: ')])
+        bad = None if inside else 'over'
+        marks.append([None, None, None, bad, bad])
+        verdicts.append(inside)
+        if not inside:
+            flagged.append((label, check))
+    judged = sum(verdict is not None for verdict in verdicts)
+    if flagged:
+        words = (f'{len(flagged)} of {_count(judged, "channel")} flagged: '
+                 + '; '.join(f'{label}, {check.verdict}'
+                             for label, check in flagged) + '.')
+    elif judged:
+        words = (f'The spectrum carries the record\'s mean square on '
+                 f'{"all " if judged > 1 else ""}{_count(judged, "channel")}.')
+    else:
+        words = 'No channel could be checked.'
+    if unread:
+        words += (' Not judged: ' + '; '.join(
+            f'{label}, {cause}' for label, cause in unread) + '.')
+    criterion = ''
+    if first is not None:
+        criterion = ('The rms from the area under each autospectrum against '
+                     'the rms of the time history it came from, within '
+                     f'{first.threshold_db:g} dB either way; a gap that is '
+                     "the window's alone leaves the scaling right.")
+    return Shown(status_of(verdicts), words, criterion, headers, rows, marks)
+
+
+def _no_gap(check):
+    """Why an rms check has no gap to judge, naming the cause."""
+    if not (np.isfinite(check.spectrum_rms) and np.isfinite(check.time_rms)):
+        return ('the record or its spectrum holds a value that is not a '
+                'number')
+    return 'it reads zero, as a dead or disconnected channel does'
+
+
+def _rms_amount(value, dimension, us):
+    return _amount(value, dimension, us) if np.isfinite(value) else DASH
+
+
+def _rms_dimension(spectrum, record):
+    """The quantity whose rms a record of an autospectrum carries: its
+    density's numerator, as the time history holds it."""
+    from ..core.data import channel_quantities
+
+    return channel_quantities(str(spectrum.ordinate_dim[record]))[0]
+
+
+# ---- lines by chance -------------------------------------------------------------------
+
+
+def _show_chance(reading, found, us):
+    from ..core.chance import describe_chance, expected_text
+
+    if not reading:
+        return _not_judged('the specification and the measurement have no '
+                           'channel in common')
+    headers = ['Channel', 'Judged', 'DOF judged', 'Outside', 'By chance',
+               'Verdict']
+    rows, marks, verdicts, lines, unread, judged = [], [], [], [], [], []
+    for label, result in reading:
+        pair = next((pair for pair in ('abort', 'warning')
+                     if f'{pair}_lines' in result), None)
+        cause = (result.get('refused')
+                 or ('' if result.get('lines') else
+                     'no line of the measurement inside the specification '
+                     'is a finite density')
+                 or ('' if pair else 'the specification carries no band'))
+        if cause:
+            rows.append([label, DASH, DASH, DASH, DASH,
+                         f'not judged: {cause}'])
+            marks.append([None] * 6)
+            verdicts.append(None)
+            unread.append((label, cause))
+            continue
+        judged.append((label, result, pair))
+        unit = 'line' if result['combine'] == 1 else 'group'
+        count = result[f'{pair}_lines']
+        rows.append([label, _count(result['lines'], unit),
+                     f'{result["judged_dof"]:.4g}',
+                     (f'{count} ({result[f"{pair}_below"]} below, '
+                      f'{result[f"{pair}_above"]} above)'),
+                     expected_text(result[f'{pair}_expected']),
+                     f'outside the {pair} band' if count
+                     else f'inside the {pair} band'])
+        bad = 'over' if count else None
+        marks.append([None, None, None, bad, None, bad])
+        verdicts.append(not count)
+        lines.append(f'{label}: {describe_chance(result, pair)}'
+                     + (f'; {result["note"]}' if result.get('note') else ''))
+    words = '; '.join(lines) + '.' if lines else 'No channel could be judged.'
+    if unread:
+        words += (' Not judged: ' + '; '.join(
+            f'{label}, {cause}' for label, cause in unread) + '.')
+    criterion, figures = '', []
+    if judged:
+        first = judged[0][1]
+        combine = first['combine']
+        how = ('each line judged alone' if combine == 1 else
+               f'{combine} adjacent lines combined, their powers added and '
+               'judged against the band over the same stretch')
+        criterion = (f'Every {"line" if combine == 1 else "group"} inside '
+                     f'the {judged[0][2]} band, {how}; beside the count, '
+                     'the number chance alone puts outside at the '
+                     'measurement\'s degrees of freedom.')
+        figures.append(_chance_figure(judged))
+    return Shown(status_of(verdicts), words, criterion, headers, rows, marks,
+                 figures)
+
+
+def _chance_figure(judged):
+    """Each channel's miss from its target in dB, line by line (or group
+    by group), against the band it was judged by."""
+    curves = []
+    first = judged[0][1]['groups']
+    x = np.sqrt(np.asarray(first['low']) * np.asarray(first['high']))
+    for k, (label, result, _pair) in enumerate(judged[:MOST_CURVES]):
+        groups = result['groups']
+        centers = np.sqrt(np.asarray(groups['low']) * np.asarray(groups['high']))
+        curves.append((label, centers, groups['miss_db'], {'color': k}))
+    pair = judged[0][2]
+    for side in ('lower', 'upper'):
+        edge = np.asarray(first[f'{pair}_{side}_db'], dtype=float)
+        if np.isfinite(edge).any():
+            curves.append((f'{pair} band, {side} edge', x, edge, _LIMIT))
+    unit = 'line' if judged[0][1]['combine'] == 1 else 'group'
+    return _figure(
+        f'Each channel\'s miss from its target in dB, {unit} by {unit}, '
+        f'against the {pair} band.'
+        + _left_off(MOST_CURVES, len(judged), 'channels'),
+        x, 'frequency [Hz]', 'miss from target [dB]', curves, logx=True)
+
+
+# ---- sine frequency -------------------------------------------------------------------
+
+
+def _show_frequency(reading, found, us):
+    headers = ['Tone', 'Channel', 'Worst', 'At', 'Lines outside', 'Verdict']
+    rows, marks, verdicts = [], [], []
+    for r, dof in enumerate(reading.dofs):
+        judged = int(reading.judged[r].sum())
+        over = int(reading.over[r].sum())
+        worst = reading.worst(dof)
+        if worst is None:
+            rows.append([reading.tone, dof, DASH, DASH, DASH,
+                         'not judged: no line could be judged'])
+            marks.append([None] * 6)
+            verdicts.append(None)
+            continue
+        frequency, error, relative = worst
+        rows.append([reading.tone, dof,
+                     (f'{100.0 * relative:+.3g} % ({error:+.3g} Hz)'
+                      ).replace('-', '−'),
+                     f'{frequency:.4g} Hz', f'{over} of {judged}',
+                     'outside the band' if over else 'within the band'])
+        bad = 'over' if over else None
+        marks.append([None, None, bad, None, bad, bad])
+        verdicts.append(not over)
+    words = reading.describe() + '.'
+    if reading.notes:
+        words += ' ' + ' '.join(note.rstrip('.') + '.'
+                                for note in reading.notes)
+    criterion = (f'The tone\'s own frequency, read over {reading.cycles:g} '
+                 'cycles at each line, within '
+                 f'{reading.band_words()} of the specified frequency.')
+    band = 100.0 * reading.allowed / reading.specified
+    curves = []
+    for r, dof in enumerate(reading.dofs[:MOST_CURVES]):
+        values = np.where(reading.judged[r], 100.0 * reading.relative[r],
+                          np.nan)
+        curves.append((dof, None, values, {'color': r}))
+    curves.append(('band, lower edge', None, -band, _LIMIT))
+    curves.append(('band, upper edge', None, band, _LIMIT))
+    figure = _figure(
+        f'{reading.tone}: the frequency error along the sweep on each '
+        'channel, as a share of the specified frequency; a line that could '
+        'not be judged is a gap.'
+        + _left_off(MOST_CURVES, len(reading.dofs), 'channels'),
+        reading.frequency, 'frequency [Hz]', 'frequency error [%]', curves,
+        logx=True)
+    return Shown(status_of(verdicts), words, criterion, headers, rows, marks,
+                 [figure])
+
+
+
 # ---- sweep rate --------------------------------------------------------------------
 
 
@@ -1353,10 +1682,13 @@ def _show_segments(reading, found, us):
 
 _SHOWERS: dict[str, Callable[[Any, Mapping[str, Any], Any], Shown]] = {
     'time_statistics': _show_time_statistics,
+    'rms': _show_rms,
+    'chance': _show_chance,
     'shock_validity': _show_shock_validity,
     'srs_points': _show_srs_points,
     'pulse': _show_pulse,
     'distortion': _show_distortion,
+    'frequency': _show_frequency,
     'sweep_rate': _show_sweep_rate,
     'signature': _show_signature,
     'segments': _show_segments,
@@ -1377,7 +1709,8 @@ def show(item: Item, objects: Mapping[str, Any], us: Any) -> Shown:
 def title_of(item: Item) -> str:
     """What an item's block is headed: the check's title, and the tone
     for a distortion check of one tone."""
-    tone = item.settings.get('tone') if item.check.key == 'distortion' else None
+    tone = (item.settings.get('tone')
+            if item.check.key in ('distortion', 'frequency') else None)
     return f'{item.check.title}, {tone}' if tone else item.check.title
 
 

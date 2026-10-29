@@ -158,9 +158,10 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'check_blocks', 'Check blocks', 'Results',
         'A block for each check the report can make (time statistics, '
-        'shock validity, the SRS points rule, the pulse check, the sine '
-        'distortion and sweep rate, signature shifts, replication '
-        'segments): its verdict, a row per channel against its criterion, '
+        'the rms check, lines by chance, shock validity, the SRS points '
+        'rule, the pulse check, the sine distortion, frequency and sweep '
+        'rate, signature shifts, replication segments): its verdict, a '
+        'row per channel against its criterion, '
         'and its figures. A check that judged nothing says why.'),
     ReportFeature(
         'prediction', 'Responses against prediction', 'Results',

@@ -5713,7 +5713,11 @@ class Project(dict):
         entered and said to be none, and each finding's blank parts,
         such as '9. Deviations, Anomalies and Nonconformances: D-1:
         cause not yet written'. An empty list means every section of
-        the skeleton says something.
+        the skeleton says something. With the report feature
+        `flash_report` on, the lines are what the flash report's one
+        page still owes (`visualdynamics.report.flash.check`), such as
+        'Condition on release: not yet written', since the page draws
+        none of the skeleton's sections.
 
         Parameters
         ----------
@@ -5736,12 +5740,68 @@ class Project(dict):
         TypeError
             When `name` is not a report.
         """
-        from .report import findings
+        from .report import findings, flash
+        from .report.features import enabled
         from .report.skeleton import check
 
         report = self._report(name)
+        if flash.FEATURE in enabled(report):
+            return flash.check(report, self, self.object_groups)
         return [str(owed) for owed in findings.check(
             report, check(report, self, self.object_groups))]
+
+    def report_flash(self, name: str, *, condition: str | None = None,
+                     next_steps: str | None = None,
+                     report_date: str | None = None,
+                     opinions: Sequence[Any] | None = None,
+                     opinions_none: bool | None = None) -> None:
+        """Type the parts of a flash report only the author can write.
+
+        With the report feature `flash_report` on, the report is one
+        preliminary page drawn from the identity, the result table and
+        the findings register (`visualdynamics.report.flash`). What the
+        project does not hold is owed on the page until it is typed
+        here.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        condition : str, optional
+            The article's condition on release: the post-test functional
+            and inspection results as far as they go, and who received
+            it ('' clears it).
+        next_steps : str, optional
+            What is still to be done before the result is final.
+        report_date : str, optional
+            The date the test report will be issued, as the lab writes
+            it.
+        opinions : sequence, optional
+            The opinions given at the console, replacing those entered,
+            each (by, text) or a mapping of 'by' and 'text'. Each is
+            drawn marked as an opinion, with who gave it.
+        opinions_none : bool, optional
+            True to say no opinion was given; False takes it back.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            When the feature is off, for an opinion without its words or
+            without who gave it, and for opinions entered while None is
+            said of them. Nothing is changed.
+        TypeError
+            When `name` is not a report, or a value is of the wrong
+            type.
+        """
+        from .report.flash import enter
+
+        enter(self._report(name), condition=condition,
+              next_steps=next_steps, report_date=report_date,
+              opinions=opinions, opinions_none=opinions_none)
 
     def report_finding(self, name: str, number: str | None = None, *,
                        kind: str | None = None, run: str | None = None,
@@ -8600,7 +8660,7 @@ _JOURNALED_VERBS = (
     'report_identity', 'export_report_pdf', 'issue_report', 'amend_report',
     'set_run_identity', 'report_runs', 'report_chronology',
     'accept_chronology',
-    'report_finding', 'draft_finding_fact',
+    'report_finding', 'draft_finding_fact', 'report_flash',
     'report_requirement', 'draft_finding_from_requirement',
     'export', 'save', 'duplicate',
 )

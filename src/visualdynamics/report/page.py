@@ -3067,6 +3067,36 @@ td.mark-notjudged { font-style: italic; color: var(--faint); }
   text-transform: uppercase; color: var(--faint); }
 """
 
+#: the flash report's one page (feature `flash_report`), drawn as text
+#: by the renderer (`report.flash`), so style only. The page is nothing
+#: but the flash report's blocks, so the blocks, the identification
+#: table and the signature lines are set tight for a day's page to
+#: print on one sheet. PRELIMINARY is in capitals in a ruled box, so it
+#: reads in a monochrome copy; owed parts use the skeleton's owed style,
+#: which the feature brings with it.
+_FLASH_CSS = """
+body { font-size: 13px; line-height: 1.35; padding-bottom: 1rem; }
+h1 { font-size: 1.3rem; margin: 0 0 .5rem; }
+section { margin: .5rem 0; }
+p.flash-preliminary { white-space: normal; border: 2px solid var(--ink);
+  padding: .35rem .7rem; margin: 0; }
+p.flash-preliminary strong { letter-spacing: .12em; margin-right: .5rem; }
+div.identity { margin: 0; }
+table.identity th, table.identity td { padding: .05rem .5rem;
+  font-size: .8rem; line-height: 1.3; }
+.authorized { margin-top: .4rem; }
+.signature { margin: .1rem 0; }
+.signature .line { margin-top: .9rem; }
+.fullonly { margin-top: .2rem; }
+h2.flash { font-size: 1.05rem; margin: .2rem 0 .25rem;
+  padding-bottom: .1rem; border-bottom: 1px solid var(--line); }
+.flash-line, .flash-note, .flash-finding, .flash-typed, .flash-opinion,
+p.finding-none, .authorized p.label {
+  white-space: normal; margin: .15rem 0; }
+.flash-note { color: var(--faint); font-style: italic; }
+p.endmark { margin-top: .6rem; }
+"""
+
 #: page code by feature: (splices into `_JS`, functions added, CSS added)
 FEATURE_PAGE = {
     'skeleton_sections': ((), '', _SKELETON_CSS),
@@ -3079,6 +3109,7 @@ FEATURE_PAGE = {
                          _REQUIREMENT_CSS),
     'plot_conventions': (_STYLE_SPLICES, _STYLE_JS, _STYLE_CSS),
     'shared_decades': (_WINDOW_SPLICES, _WINDOW_JS, ''),
+    'flash_report': ((), '', _FLASH_CSS),
 }
 
 

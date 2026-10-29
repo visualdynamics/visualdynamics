@@ -27,22 +27,22 @@ from visualdynamics.report import page, plot_conventions, render_html
 LIVE = ('skeleton_sections', 'run_sections', 'test_requirement', 'findings',
         'check_blocks', 'prediction', 'cross_axis', 'control_uncertainty',
         'data_index', 'calibration_in_date', 'report_identity',
-        'record_captions', 'plot_conventions', 'shared_decades')
+        'flash_report', 'record_captions', 'plot_conventions',
+        'shared_decades')
 #: the built features the test report preset names (responses against
 #: prediction is built but in no preset)
 PRESET_LIVE = ('skeleton_sections', 'run_sections', 'test_requirement',
                'findings', 'check_blocks', 'data_index', 'calibration_in_date',
                'report_identity', 'record_captions', 'plot_conventions',
                'shared_decades')
-#: the first feature not yet built, read off the registry so the tests
-#: of a refusal do not change each time one is built; with the features
-#: it waits on enabled (`UNBUILT_NEEDS`), being unbuilt is all that
-#: stands in its way
-UNBUILT = next(key for key, feature in rf.FEATURES.items()
-               if not feature.available)
-UNBUILT_NEEDS = tuple(need for need in rf.FEATURES[UNBUILT].requires
-                      if need in rf.FEATURES)
-UNBUILT_TITLE = rf.FEATURES[UNBUILT].title
+#: a feature registered and not yet built, for the tests of a refusal.
+#: Every feature in the registry is built, so the `unbuilt` fixture
+#: registers this one for the test that asks for it; with the feature it
+#: waits on enabled (`UNBUILT_NEEDS`), being unbuilt is all that stands
+#: in its way
+UNBUILT = 'later_feature'
+UNBUILT_NEEDS = ('report_identity',)
+UNBUILT_TITLE = 'Later feature'
 #: the plot conventions and their option
 CONVENTIONS = ('plot_conventions', 'shared_decades')
 
@@ -59,6 +59,16 @@ CATALOGUE = {
 def _payload(html):
     data = html.split('<script id="data" type="application/json">')[1]
     return json.loads(data.split('</script>')[0].replace('<\\/', '</'))
+
+
+@pytest.fixture
+def unbuilt(monkeypatch):
+    """`UNBUILT` registered as a feature not yet built, which waits on
+    Identity and issue."""
+    monkeypatch.setitem(rf.FEATURES, UNBUILT, rf.ReportFeature(
+        UNBUILT, UNBUILT_TITLE, 'Issue control', 'A feature to come.',
+        requires=UNBUILT_NEEDS, available=False))
+    return UNBUILT
 
 
 def _cells(block):
@@ -146,16 +156,18 @@ def test_a_lone_string_is_one_key_not_its_letters():
         'plot_conventions',)
 
 
-def test_a_feature_not_yet_built_is_refused_and_says_so():
+def test_a_feature_not_yet_built_is_refused_and_says_so(unbuilt):
     report = Report()
     with pytest.raises(ValueError,
                        match=f'{re.escape(UNBUILT_TITLE)}.*not yet available'):
         rf.configure(report, enable=[UNBUILT])
     assert rf.reason(UNBUILT, UNBUILT_NEEDS) == 'not yet available'
     # and an unbuilt feature names what it will wait on
-    assert rf.reason('flash_report') == (
-        'not yet available; waits on Requirement and results, Identity and '
-        'issue, Findings register')
+    assert rf.reason(UNBUILT) == (
+        'not yet available; waits on Identity and issue')
+    # every feature the registry ships is built
+    assert all(feature.available for key, feature in rf.FEATURES.items()
+               if key != UNBUILT)
 
 
 def test_an_unmet_requirement_is_refused_and_named():
@@ -192,7 +204,7 @@ def test_a_capability_is_probed_by_its_module():
     assert rf._has_module('visualdynamics.no_such_package.module')() is False
 
 
-def test_a_refused_call_changes_nothing():
+def test_a_refused_call_changes_nothing(unbuilt):
     report = Report(features=['plot_conventions'])
     for bad in ({'enable': ['plot_conventions', UNBUILT]},
                 {'disable': ['plot_conventions'], 'enable': [UNBUILT]},
@@ -219,11 +231,10 @@ def test_the_presets_enable_what_they_can_and_say_what_they_skipped():
                if key not in LIVE]
     assert len(selection.notes) == len(skipped) == 0
     flash = rf.configure(report, preset='flash_report')
-    assert flash.enabled == ('test_requirement', 'report_identity')
-    assert report.features == ['test_requirement', 'report_identity']
-    assert len(flash.notes) == 2
-    assert ('Flash report: Findings register skipped, needs Skeleton '
-            'sections') in flash.notes
+    assert flash.enabled == ('skeleton_sections', 'test_requirement',
+                             'findings', 'report_identity', 'flash_report')
+    assert report.features == list(flash.enabled)
+    assert len(flash.notes) == 0, 'every feature it names is built'
     assert rf.configure(report, preset='default') == rf.FeatureSelection((), ())
 
 
@@ -244,7 +255,7 @@ def test_a_preset_replaces_and_the_set_is_read_back_as_a_preset():
     assert rf.preset_of(['plot_conventions']) is None
 
 
-def test_enabled_reads_only_what_can_act():
+def test_enabled_reads_only_what_can_act(unbuilt):
     """A key stored on the report that the registry does not know, an
     unbuilt one, or one whose requirement is off does nothing."""
     report = Report(features=['from_a_later_version', UNBUILT,
@@ -269,7 +280,8 @@ def test_the_models_features_are_keys_kept_once():
 # ---- the project verb -------------------------------------------------------
 
 
-def test_the_project_verb_is_journaled_and_refuses_in_the_core(run):
+def test_the_project_verb_is_journaled_and_refuses_in_the_core(run,
+                                                                  unbuilt):
     project, name = run
     try:
         selection = project.report_features(name, preset='test_report')
@@ -750,13 +762,15 @@ def test_the_preset_selector_applies_and_lists_what_it_skipped(editing):
     panel.boxes['shared_decades'].setChecked(False)
     assert panel.preset_box.currentText() == 'Custom', 'a set no preset names'
     panel.preset_box.setCurrentIndex(panel.preset_box.findData('flash_report'))
-    assert ('Findings register skipped, needs Skeleton sections'
-            in panel.notes.text())
+    assert report.features == list(rf.configure(
+        Report(), preset='flash_report').enabled)
+    assert panel.notes.text() == '', 'every feature it names is built'
     panel.preset_box.setCurrentIndex(panel.preset_box.findData('default'))
     assert report.features == []
 
 
-def test_a_refusal_shows_on_the_panel_and_changes_nothing(editing):
+def test_a_refusal_shows_on_the_panel_and_changes_nothing(editing,
+                                                            unbuilt):
     _window, editor, report, _name = editing
     edits = []
     editor.edited.connect(lambda: edits.append(1))

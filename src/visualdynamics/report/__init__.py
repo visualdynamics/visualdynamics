@@ -198,6 +198,16 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     from .features import enabled as enabled_features
 
     active = enabled_features(report)
+    if 'flash_report' in active:
+        # the flash report is the page: one preliminary page drawn from
+        # the identity, the result table and the register, in place of
+        # the report's own blocks (`report/flash.py`)
+        from .flash import page_blocks
+
+        payload['blocks'] = page_blocks(report, objects, object_groups)
+        if labels is not None:
+            labels[:] = []
+        return payload
     conventions = 'plot_conventions' in active
     # record captions: every measured spectrum's figure carries the
     # caption block its records carry, as the per-block check box gives

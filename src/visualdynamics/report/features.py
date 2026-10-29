@@ -46,7 +46,9 @@ from typing import Any
 # prints under the skeleton's Requirement and Results, and P30 (the
 # control channels' uncertainty, drawn by the same module) under its
 # Requirement; P26 (cross-axis and limit channels) adds rows to P17's
-# result table.
+# result table. P29 (the flash report, `report/flash.py`) draws one
+# preliminary page from P19's identity, P17's result rows and P21's
+# register in place of the report.
 
 #: the groups the selection tool lays the features out in, in order
 GROUPS = ('Structure', 'Results', 'Records', 'Issue control', 'Figures')
@@ -119,12 +121,9 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 
 
 #: every report feature, in the order the selection tool shows them
-#: within their groups. `skeleton_sections`, `run_sections`,
-#: `test_requirement`, `findings`, `check_blocks`, `prediction`,
-#: `cross_axis`, `control_uncertainty`, `data_index`,
-#: `calibration_in_date`, `report_identity`, `record_captions`,
-#: `plot_conventions` and its option `shared_decades` are built; the
-#: rest are the road map.
+#: within their groups. Every feature registered here is built; a
+#: feature registered before it is built carries `available=False`,
+#: and the selection tool shows it grayed until it is.
 FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'skeleton_sections', 'Skeleton sections', 'Structure',
@@ -210,11 +209,13 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         'silent reissue.'),
     ReportFeature(
         'flash_report', 'Flash report', 'Issue control',
-        'A one-page preliminary report from the day\'s analysis: '
-        'identity, headline results, findings by number, and owed lines '
-        'for the condition on release.',
-        requires=('test_requirement', 'report_identity', 'findings'),
-        available=False),
+        "The report drawn as one preliminary page from the day's "
+        'analysis: the identity marked Preliminary, the headline read '
+        'off the result table for each run so far, the findings by '
+        'number with their owners, and owed lines for what only the '
+        'author can write: the condition on release, the opinions, what '
+        'happens next and the report date.',
+        requires=('test_requirement', 'report_identity', 'findings')),
     ReportFeature(
         'record_captions', 'Record captions', 'Figures',
         "A caption block on each spectrum, SRS and sine figure, read off "
@@ -260,8 +261,8 @@ PRESETS: dict[str, Preset] = {preset.key: preset for preset in (
             'check_blocks', 'calibration_in_date')),
     Preset('flash_report', 'Flash report',
            'The one preliminary page a customer leaves the test with.',
-           ('report_identity', 'test_requirement', 'findings',
-            'flash_report')),
+           ('report_identity', 'test_requirement', 'skeleton_sections',
+            'findings', 'flash_report')),
 )}
 
 

@@ -309,7 +309,9 @@ def issue_ready(report: Any, objects: Mapping[str, Any] | None = None,
     is an amendment); a field the identification needs not entered;
     and, with skeleton sections on and `objects` given, a section still
     owed (section 9 read off the findings register while that feature
-    is on, as `Project.report_check` reads it).
+    is on, as `Project.report_check` reads it). With the flash report
+    on, what that page still owes (`report.flash.check`) is read in
+    place of the skeleton's sections, which it does not draw.
 
     Raises
     ------
@@ -331,9 +333,21 @@ def issue_ready(report: Any, objects: Mapping[str, Any] | None = None,
         raise ValueError(f'{_name(held)} cannot be issued: '
                          f'{", ".join(gaps)} {"is" if len(gaps) == 1 else "are"}'
                          f' {NOT_ENTERED}')
+    from .flash import FEATURE as FLASH
     from .skeleton import FEATURE as SKELETON
 
-    if objects is not None and SKELETON in enabled(report):
+    if objects is not None and FLASH in enabled(report):
+        # a flash report is its one page: what it owes is the page's,
+        # not the skeleton's sections, which it does not draw
+        from .flash import check as flash_check
+
+        owed = flash_check(report, objects, object_groups)
+        if owed:
+            raise ValueError(f'{_name(held)} cannot be issued while the flash '
+                             f'report owes {len(owed)} '
+                             f'part{"s" * (len(owed) != 1)}: '
+                             + '; '.join(owed))
+    elif objects is not None and SKELETON in enabled(report):
         from .findings import check as register_check
         from .skeleton import check
 
@@ -495,14 +509,22 @@ def _text(given: Any) -> str:
 
 def status_words(report: Any) -> str:
     """The status as the page says it: 'Draft', 'Draft amendment',
-    'Issued' or 'Amendment 1'."""
+    'Issued' or 'Amendment 1'. A flash report (the report feature
+    `flash_report`) is preliminary whatever its status, and says so
+    first: 'Preliminary (draft)', 'Preliminary (issued)'."""
+    from .features import enabled
+
     held = _identity(report)
     status = held.get('status', 'draft')
     if status == 'issued':
-        return 'Issued'
-    if status == 'amended':
-        return f'Amendment {amendment(report)}'
-    return 'Draft amendment' if held.get('amends') else 'Draft'
+        words = 'Issued'
+    elif status == 'amended':
+        words = f'Amendment {amendment(report)}'
+    else:
+        words = 'Draft amendment' if held.get('amends') else 'Draft'
+    if 'flash_report' in enabled(report):
+        return f'Preliminary ({words.lower()})'
+    return words
 
 
 def block_html(report: Any) -> str:

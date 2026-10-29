@@ -45,9 +45,9 @@ The drop-down at the top of the panel sets a starting point.
 |---|---|---|
 | Visual Dynamics default | none | quick looks, and every existing report |
 | Test report | skeleton sections, requirement and results, findings, identity and issue, data index, runs and chronology, record captions, plot conventions, shared decades, check blocks, calibration in date | a report a quality signer and a customer will read |
-| Flash report | identity and issue, requirement and results, findings, flash report | the one preliminary page a customer leaves the test with |
+| Flash report | identity and issue, requirement and results, skeleton sections, findings, flash report | the one preliminary page a customer leaves the test with |
 
-A preset names features that are not built yet. Choosing it turns on
+A preset may name a feature that is not built yet. Choosing it turns on
 the ones that are available and lists, under the panel, each one it
 skipped and why. A set that matches no preset shows as *Custom*.
 
@@ -952,6 +952,83 @@ already issued. A report template carries the laboratory's name and
 address and the reproduction statement, never a number, a status or an
 issue record.
 
+## Flash report
+
+**Flash report** (group Issue control, needs Requirement and results,
+Identity and issue and the Findings register) draws the report as the
+one preliminary page a customer leaves the test with, the day the test
+ends. The page takes the place of the report's own blocks while the
+feature is on, and is built from what the project already holds:
+
+| Part | Read from |
+|---|---|
+| PRELIMINARY, with "Results are subject to data review; the test report supersedes this page." | fixed |
+| The identification, its status *Preliminary (draft)*, then *Preliminary (issued)* once issued, with the people authorizing it and a blank line for each signature and date | Identity and issue |
+| The headline: a line per run analyzed so far | the result table of each requirement bound to a run |
+| As run against the plan: each deviation by number, its fact and its approval, or "No deviations." | the findings register |
+| What is open: each anomaly and nonconformance by number, its status, its fact and its disposition, which names who owns it; then the condition on release | the findings register; the condition is typed |
+| Opinions recorded as opinions: each marked *Opinion, by* whoever gave it | typed |
+| What happens next, and the date the test report is due | typed |
+
+Every printed page says *Preliminary* beside the report's number, and
+the page closes with "End of report.". It prints on one sheet for a
+day's usual content; a long register or many runs continue on a second
+page, numbered page n of N. It is exported and issued through Identity
+and issue's PDF, under its own number.
+
+**The headline is results, not a verdict.** Each line is read off a
+requirement's result table: how many criteria were met against which
+document, the scale the run was compared at when it was not full level,
+and the criteria not met and not judged, by name, as the pass/fail box
+names them. A requirement that could not be read says nothing was
+judged, and why. With Runs and chronology on, each line is led by its
+run's axis, run and level, and the lines follow the order the runs were
+run. The page says under them that they are the results as read on the
+day, before the data review, and not a statement of conformity; no
+line says pass or fail.
+
+```text
+Run 11, Y axis, 0 dB (Y run 11): 15 of 16 criteria met against Test
+plan TP-12, revision C; not met: Channel 2Y+, −6/+6 dB over the whole
+band.
+```
+
+**What the project does not hold is owed.** The headline with no
+requirement bound to a run, a kind of finding neither entered nor set
+to None, a finding's fact or its approval or disposition, the condition
+on release, the opinions (until entered or set to None), what happens
+next and the report date are each drawn as NOT YET WRITTEN with what
+belongs there. The export lists them, and the page is not issued while
+any is owed. The skeleton is on because the register lives in its
+deviations section, but its sections are not drawn and are not asked
+for.
+
+From a script:
+
+```python
+project.report_features('Flash', preset='flash_report')
+project.report_identity('Flash', number='FR-0037-1', revision='0', ...)
+project.report_section('Flash', 'deviations', none=True)
+project.report_flash(
+    'Flash',
+    condition='No damage seen at the inspection; released to the '
+              'article engineer.',
+    opinions=[('analyst', 'The Z bracket mode near 410 Hz looks like '
+                          'the bracket, not the fixture.')],
+    next_steps="Full data review; the analyst's comparison with the "
+               'predictions.',
+    report_date='within 30 days')
+project.report_check('Flash')                                   # []
+project.issue_report('Flash', 'FR-0037-1.pdf')
+```
+
+`report_flash` refuses, changing nothing, an opinion without its words
+or without who gave it, opinions entered while they are set to None
+(`opinions_none=True`), and a value of the wrong type. What it holds is
+kept with the report's identity, so it is saved in the project file
+and never carried by a report template. What stays the author's: the
+opinions, the condition on release, and the decision to send the page.
+
 ## Plot conventions
 
 **Plot conventions** (group Figures) puts a report's figures under
@@ -992,12 +1069,9 @@ histories among them.
 
 ## What is planned
 
-The other features are registered so the panel shows what is coming,
-and are grayed out until each is built:
-
-| Feature | Group | What it will add |
-|---|---|---|
-| Flash report | Issue control | a one-page preliminary report from the day's analysis |
+A feature can be registered before it is built, so the panel shows what
+is coming; it is grayed out, marked *not yet available*, until it is.
+Every feature listed in this guide is built.
 
 What stays the engineer's to write (the cause and effect of a finding,
 its approval, the discussion and the conclusion, the signatures) is

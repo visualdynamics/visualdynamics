@@ -323,4 +323,5 @@ def test_the_file_menu_offers_every_report(window):
                        and a.text().replace('&', '') == 'Generate Report')
     labels = [a.text().replace('&', '') for a in report_menu.actions()]
     assert labels == ['Modal Test', 'Random Vibration', 'Transient', 'Shock',
-                      'Sine Sweep', 'System ID', 'Empty']
+                      'Sine Sweep', 'System ID', 'MIMO Random Vibration',
+                      'Empty']

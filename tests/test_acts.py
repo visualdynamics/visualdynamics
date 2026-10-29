@@ -127,8 +127,9 @@ def test_the_project_row_offers_its_report(window, pump, monkeypatch):
     popped = []
     monkeypatch.setattr(window, '_pop_menu', lambda menu: popped.append(menu))
     window.generate_report_act()
-    # seven: the combined random-and-sine template retired 2026-10-05
-    assert popped and len(popped[0].actions()) == 7, \
+    # eight: the combined random-and-sine template retired 2026-10-05,
+    # the MIMO random template added
+    assert popped and len(popped[0].actions()) == 8, \
         'untyped: the choice of templates, one per built-in and Empty'
     window.set_project_type('Modal Test')
     pump()

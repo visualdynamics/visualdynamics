@@ -2096,6 +2096,8 @@ class MainWindow(QMainWindow):
                               lambda: self.generate_report('sine'))
         report_menu.addAction('S&ystem ID',
                               lambda: self.generate_report('sysid'))
+        report_menu.addAction('MIM&O Random Vibration',
+                              lambda: self.generate_report('mimo'))
         report_menu.addAction('&Empty',
                               lambda: self.generate_report('empty'))
         # the one-call reports over a batch of controller runs, the
@@ -5190,6 +5192,7 @@ class MainWindow(QMainWindow):
                                     ('&Shock', 'shock'),
                                     ('S&ine Sweep', 'sine'),
                                     ('S&ystem ID', 'sysid'),
+                                    ('MIM&O Random Vibration', 'mimo'),
                                     ('&Empty', 'empty')):
                 menu.addAction(f'Generate {label} Report',
                                lambda _checked=False, t=template:
@@ -19410,9 +19413,9 @@ class MainWindow(QMainWindow):
         edit, and return its name.
 
         `template` is a built-in template's name ('modal', 'random',
-        'transient', 'shock', 'sine', 'sysid' or 'empty') or the path of
-        a saved template. Templates refer to objects by role, such as
-        '@basis:Frf', resolved against the object groups when the report
+        'transient', 'shock', 'sine', 'sysid', 'mimo' or 'empty') or the
+        path of a saved template. Templates refer to objects by role, such
+        as '@basis:Frf', resolved against the object groups when the report
         is drawn, so the report depends on the project's structure and
         not on what the objects are named.
         """

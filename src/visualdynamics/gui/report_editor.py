@@ -761,6 +761,7 @@ class ReportEditor(QWidget):
         words and each criterion's result, as the page draws them. The
         requirement is set from a script (`Project.report_requirement`);
         Remove takes the block."""
+        from ..core.requirement import TestRequirement, uncertainty_budget
         from ..report.requirement import read, requirement_lines
 
         form.addRow(QLabel('<b>Test requirement</b> \u2014 requirement and '
@@ -781,6 +782,11 @@ class ReportEditor(QWidget):
             lines += [f'{row.name}, {row.required}: {row.state} '
                       f'({row.measured})' for row in found.rows]
             lines.append(f'Result: {found.state}.')
+            held = TestRequirement.from_record(block['requirement'])
+            lines += [f'Uncertainty, {each.channel}: {each.state}'
+                      + (f' ({each.words})' if each.words else '')
+                      for each in uncertainty_budget(held, found.channels)
+                      if held.uncertainty]
         told = QLabel('<br>'.join(html_escape.escape(line) for line in lines))
         told.setWordWrap(True)
         told.setTextInteractionFlags(

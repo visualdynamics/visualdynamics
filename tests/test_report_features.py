@@ -25,9 +25,9 @@ from visualdynamics.report import features as rf
 from visualdynamics.report import page, plot_conventions, render_html
 
 LIVE = ('skeleton_sections', 'run_sections', 'test_requirement', 'findings',
-        'check_blocks', 'prediction', 'data_index', 'calibration_in_date',
-        'report_identity', 'record_captions', 'plot_conventions',
-        'shared_decades')
+        'check_blocks', 'prediction', 'control_uncertainty', 'data_index',
+        'calibration_in_date', 'report_identity', 'record_captions',
+        'plot_conventions', 'shared_decades')
 #: the built features the test report preset names (responses against
 #: prediction is built but in no preset)
 PRESET_LIVE = ('skeleton_sections', 'run_sections', 'test_requirement',

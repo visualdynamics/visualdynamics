@@ -6009,6 +6009,7 @@ class Project(dict):
                            cross_axis: Sequence[Any] = (),
                            rule: str = 'any_line', combine: int = 1,
                            sources: Mapping[str, Any] | None = None,
+                           uncertainty: Mapping[str, Any] | None = None,
                            duration_run: float | None = None,
                            caption: str = '') -> int:
         """Bind a test requirement to a run in the report `name`, and
@@ -6071,6 +6072,12 @@ class Project(dict):
         sources : mapping, optional
             Where each number came from, by field: (origin, owner), the
             origin 'laboratory', 'customer' or 'derived'.
+        uncertainty : mapping, optional
+            Each control channel's measurement uncertainty, by response
+            DOF: a list of contributions, each (name, percent, coverage,
+            source), an expanded uncertainty in percent on the
+            acceleration with its coverage factor (2 when left out),
+            drawn against one third of the tolerance.
         duration_run : float, optional
             How long the run was at level, seconds: the controller's
             counter, which the duration row is judged on.
@@ -6121,7 +6128,7 @@ class Project(dict):
                                 else tuple(duration_tolerance)),
             min_dof=min_dof, max_line_spacing=max_line_spacing,
             cross_axis=tuple(cross_axis), rule=rule, combine=combine,
-            sources=dict(sources or {}))
+            sources=dict(sources or {}), uncertainty=dict(uncertainty or {}))
         evaluate(requirement, self[spec_held], self[run_held],
                  table=channel_table(self), duration_run=duration_run)
         return add(report, requirement, source=specification_name,

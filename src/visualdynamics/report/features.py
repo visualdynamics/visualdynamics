@@ -43,7 +43,9 @@ from typing import Any
 # P21 (the findings register, `report/findings.py`) fills the
 # skeleton's deviations section.
 # P17 (the requirement and its result table, `report/requirement.py`)
-# prints under the skeleton's Requirement and Results.
+# prints under the skeleton's Requirement and Results, and P30 (the
+# control channels' uncertainty, drawn by the same module) under its
+# Requirement.
 
 #: the groups the selection tool lays the features out in, in order
 GROUPS = ('Structure', 'Results', 'Records', 'Issue control', 'Figures')
@@ -118,9 +120,9 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 #: every report feature, in the order the selection tool shows them
 #: within their groups. `skeleton_sections`, `run_sections`,
 #: `test_requirement`, `findings`, `check_blocks`, `prediction`,
-#: `data_index`, `calibration_in_date`, `report_identity`,
-#: `record_captions`, `plot_conventions` and its option `shared_decades`
-#: are built; the rest are the road map.
+#: `control_uncertainty`, `data_index`, `calibration_in_date`,
+#: `report_identity`, `record_captions`, `plot_conventions` and its
+#: option `shared_decades` are built; the rest are the road map.
 FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'skeleton_sections', 'Skeleton sections', 'Structure',
@@ -176,8 +178,10 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'control_uncertainty', 'Control-channel uncertainty', 'Results',
         "Each control channel's measurement uncertainty, from its "
-        'contributions, against one third of the tolerance.',
-        requires=('test_requirement',), available=False),
+        'contributions, against one third of the tolerance: a table under '
+        "the requirement's words, a channel with nothing entered not "
+        'judged.',
+        requires=('test_requirement',)),
     ReportFeature(
         'data_index', 'Data index', 'Records',
         'Every file the report rests on, with what it holds, its format, '

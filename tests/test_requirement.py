@@ -848,3 +848,160 @@ def test_a_band_cut_from_lines_keeps_the_lines_inside_with_their_widths():
     bands.interpolation = 'bin'
     cut = rq.within(bands, 0, 40.0, 63.0)
     assert list(cut.bandwidth) == pytest.approx(list(centers[1:4] * 0.23))
+
+
+# ---- the measurement's uncertainty against a third of the tolerance --------
+
+#: a budget of the size certificates and data sheets give, each at k = 2:
+#: calibration, conditioner and converter, transverse sensitivity times a
+#: cross-axis share of a half, and the mount and chain's response
+BUDGET = [('calibration', 2.0, 2, 'certificate C-1'),
+          ('conditioner and converter', 0.5), ('transverse', 1.5),
+          ('mount and chain', 1.0)]
+
+
+def test_a_budget_is_the_root_sum_square_in_percent_asd_and_db():
+    held = single(channels=('1Z+',), composite_bands=STEPPED,
+                  grms_percent=10, uncertainty={'1Z+': BUDGET})
+    budget, = rq.uncertainty_budget(held)
+    assert budget.acceleration_percent == pytest.approx(math.sqrt(7.5))
+    assert budget.db == pytest.approx(-20 * math.log10(1 - math.sqrt(7.5)
+                                                       / 100))
+    assert budget.db == pytest.approx(0.2412, abs=1e-4)
+    assert budget.asd_percent == pytest.approx(
+        100 * (10 ** (budget.db / 10) - 1))
+    assert (budget.band_db, budget.band_limit_db) == pytest.approx((3, 1))
+    assert budget.grms_limit_percent == pytest.approx(10 / 3)
+    assert (budget.state, budget.words) == (rq.MET, '')
+
+
+def test_each_contribution_is_taken_at_its_own_coverage_factor():
+    held = single(channels=('1Z+',),
+                  uncertainty={'1Z+': [('calibration', 1.0, 1),
+                                       ('chain', 2.0, 2)]})
+    budget, = rq.uncertainty_budget(held)
+    assert budget.acceleration_percent == pytest.approx(2 * math.sqrt(2))
+    assert rq.combined_percent([rq.Contribution('a', 3.0, 3)]) == \
+        pytest.approx(2.0)
+
+
+def test_a_budget_over_a_third_of_the_band_or_the_rms_is_not_met():
+    tight = single(channels=('1Z+',), composite_bands=[(None, None, -0.5, 6)],
+                   uncertainty={'1Z+': BUDGET})
+    budget, = rq.uncertainty_budget(tight)
+    assert budget.state == rq.NOT_MET
+    assert budget.band_db == 0.5
+    assert budget.words == ('0.24 dB over one third of the 0.5 dB band edge, '
+                            '0.17 dB')
+    rms = single(channels=('1Z+',), grms_percent=6,
+                 uncertainty={'1Z+': BUDGET})
+    budget, = rq.uncertainty_budget(rms)
+    assert budget.state == rq.NOT_MET
+    assert budget.words == ('2.7 % over one third of the 6 % rms tolerance, '
+                            '2 %')
+
+
+def test_a_budget_on_its_third_exactly_is_met():
+    # one contribution worth exactly 1 dB, a third of plus or minus 3 dB,
+    # and exactly a third of the rms tolerance
+    percent = 100 * (1 - 10 ** (-1 / 20))
+    held = single(channels=('1Z+',), composite_bands=[(None, None, -3, 3)],
+                  grms_percent=3 * percent,
+                  uncertainty={'1Z+': [('chain', percent)]})
+    budget, = rq.uncertainty_budget(held)
+    assert budget.db == pytest.approx(1.0)
+    assert budget.state == rq.MET
+
+
+def test_the_tightest_edge_of_every_band_sets_the_third():
+    held = average(composite_bands=[(None, 500, -1.5, 3), (500, None, -6, 6)],
+                   individual_bands=[(None, None, 'down', 9)],
+                   uncertainty={'1Z+': BUDGET})
+    budget = rq.uncertainty_budget(held)[0]
+    assert budget.band_db == 1.5 and budget.band_limit_db == 0.5
+    touching = single(channels=('1Z+',), composite_bands=[(None, None, 0, 3)],
+                      uncertainty={'1Z+': BUDGET})
+    budget, = rq.uncertainty_budget(touching)
+    assert (budget.band_limit_db, budget.state) == (0.0, rq.NOT_MET), \
+        'a band edge on the reference leaves the measurement nothing'
+
+
+def test_a_channel_with_nothing_entered_is_not_judged_never_met():
+    held = average(uncertainty={'1Z+': BUDGET})
+    budgets = rq.uncertainty_budget(held)
+    assert [b.channel for b in budgets] == ['1Z+', '2Z+', '3Z+', '4Z+']
+    assert [b.state for b in budgets] == [rq.MET] + [rq.NOT_JUDGED] * 3
+    empty = budgets[1]
+    assert empty.words == 'not judged: no contributions are entered'
+    assert math.isnan(empty.acceleration_percent) and math.isnan(empty.db)
+    assert math.isnan(empty.asd_percent)
+    assert rq.uncertainty_budget(single()) == ()
+    assert [b.state for b in rq.uncertainty_budget(single(), ['1Z+'])] == [
+        rq.NOT_JUDGED]
+    nothing = single(uncertainty={'2Z+': []})
+    assert [b.state for b in rq.uncertainty_budget(nothing)] == [
+        rq.NOT_JUDGED], 'an empty list is nothing entered'
+
+
+def test_the_channels_are_those_named_else_those_with_contributions():
+    held = single(uncertainty={'2Z+': BUDGET})
+    assert [b.channel for b in rq.uncertainty_budget(held)] == ['2Z+']
+    assert [b.channel for b in rq.uncertainty_budget(held, ['1Z+'])] == [
+        '1Z+']
+
+
+def test_an_uncertainty_of_the_whole_signal_is_infinite_in_db():
+    assert rq.uncertainty_db(100.0) == math.inf
+    assert rq.uncertainty_db(0.0) == 0.0
+    assert math.isnan(rq.combined_percent([]))
+    held = single(channels=('1Z+',),
+                  uncertainty={'1Z+': [('a', 90.0, 1), ('b', 90.0, 1)]})
+    budget, = rq.uncertainty_budget(held)
+    assert budget.db == math.inf and budget.state == rq.NOT_MET
+    assert budget.words.startswith('infinite dB over one third')
+
+
+@pytest.mark.parametrize(('entered', 'error', 'said'), [
+    ({'1Z+': [('calibration', 0.0)]}, ValueError, 'above 0 and under 100'),
+    ({'1Z+': [('calibration', float('nan'))]}, ValueError, 'not NaN'),
+    ({'1Z+': [('calibration', 100.0)]}, ValueError, 'above 0 and under 100'),
+    ({'1Z+': [('calibration', -1.0)]}, ValueError, 'above 0 and under 100'),
+    ({'1Z+': [('calibration', 2.0, 0)]}, ValueError, 'coverage factor'),
+    ({'1Z+': [('calibration', 2.0, math.inf)]}, ValueError,
+     'coverage factor'),
+    ({'1Z+': [(' ', 2.0)]}, ValueError, 'is named'),
+    ({'1Z+': [('calibration', 2.0), ('calibration', 1.0)]}, ValueError,
+     "'calibration' twice"),
+    ({'5Z+': [('calibration', 2.0)]}, ValueError,
+     'not a control channel of the requirement'),
+    ({'1Z+': [('calibration',)]}, ValueError, 'each uncertainty contribution'),
+    ({'1Z+': ['calibration']}, ValueError, 'each uncertainty contribution'),
+    ({'1Z+': [('calibration', 2.0, 2, 'C-1', 'extra')]}, ValueError,
+     'each uncertainty contribution'),
+    ({'1Z+': 'calibration 2 %'}, TypeError, 'list of contributions'),
+    ([('calibration', 2.0)], TypeError, 'mapping of control channel'),
+    ({'1Z+': [('calibration', 2.0, 2, 7)]}, TypeError, 'source is text'),
+    ({'1Z+': [('calibration', 'two')]}, ValueError, 'a number'),
+])
+def test_an_uncertainty_contribution_the_plan_cannot_mean_is_refused(
+        entered, error, said):
+    with pytest.raises(error, match=said):
+        single(channels=('1Z+',), uncertainty=entered)
+
+
+def test_an_uncertainty_is_stored_said_and_read_back():
+    held = single(channels=('1Z+',), uncertainty={'1Z+': BUDGET},
+                  sources={'uncertainty': ('laboratory', 'Metrology')})
+    record = json.loads(json.dumps(held.as_record()))
+    assert record['uncertainty']['1Z+'][0] == ['calibration', 2.0, 2.0,
+                                               'certificate C-1']
+    assert rq.TestRequirement.from_record(record) == held
+    assert held.describe()[-1] == (
+        'Measurement uncertainty: entered for 1Z+, held against one third '
+        'of the tolerance, from the laboratory (Metrology).')
+    assert 'uncertainty' not in ' '.join(single().describe()).lower()
+    assert held.uncertainty['1Z+'][0].text == (
+        'calibration 2 % (k = 2, certificate C-1)')
+    assert held.uncertainty['1Z+'][1].text == (
+        'conditioner and converter 0.5 % (k = 2)')
+    assert held.uncertainty['1Z+'][0].standard == 1.0

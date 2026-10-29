@@ -658,6 +658,43 @@ or with weights that do not fit its channels, a single strategy with
 more than one candidate channel, and a duration without its tolerance.
 The statement of conformity in the conclusion stays the author's.
 
+### Control-channel uncertainty
+
+**Control-channel uncertainty** (group Results, needs Requirement and
+results) states each control channel's measurement uncertainty against
+the requirement's tolerance. Some test documents allow the
+measurement's own uncertainty at most one third of the tolerance. Each
+control channel's contributions are
+typed with the requirement, each an expanded uncertainty in percent on
+the acceleration with its coverage factor (2 when left out) and where
+the number came from:
+
+```python
+budget = [('calibration', 2.0, 2, 'certificate C-1'),
+          ('conditioner and converter', 0.5), ('transverse', 1.5),
+          ('mount and chain', 1.0)]
+project.report_requirement(
+    'Report', 'Specification', 'Time History PSDs', 'Test plan TP-12',
+    [(None, 500, -3, 3), (500, None, -6, 6)], grms_percent=10,
+    channels=['101Z+'], uncertainty={'101Z+': budget})
+```
+
+Each contribution is divided by its coverage factor, the results are
+combined as the root of the sum of their squares, and the total is
+expanded at k = 2. With the feature on, the table under the
+requirement's words states it
+in percent on the acceleration (2.7 percent here), in percent on the
+ASD (5.7 percent) and in dB (0.24 dB, taken on the side it is larger),
+against one third of the tightest band edge (1 dB of plus or minus
+3 dB) and one third of the overall rms tolerance (3.3 percent of 10),
+and reads met only within both. A control channel with nothing entered
+reads not judged, and with nothing entered for any the table is one
+line saying so. The uncertainty is not a criterion of the run, so it
+does not change the result table or the pass/fail box. Refused: a
+contribution that is not a percentage above 0 and under 100, a coverage
+factor that is not above 0, a contribution named twice for a channel,
+and contributions for a channel the requirement does not name.
+
 ## Responses against prediction
 
 **Responses against prediction** (group Results) reads each response
@@ -868,7 +905,6 @@ and are grayed out until each is built:
 | Feature | Group | What it will add |
 |---|---|---|
 | Cross-axis and limit channels | Results | cross-axis against its limit, and where limit channels held the control down |
-| Control-channel uncertainty | Results | each control channel's uncertainty against one third of the tolerance |
 | Flash report | Issue control | a one-page preliminary report from the day's analysis |
 
 What stays the engineer's to write (the cause and effect of a finding,

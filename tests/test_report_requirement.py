@@ -239,6 +239,12 @@ def test_on_the_edit_page_its_blocks_select_the_requirement(bound):
     drawn = _payload(_render(project, name, edit=True))['blocks']
     mine = [block for block in drawn if block.get('index') == index]
     assert [block['kind'] for block in mine] == ['text', 'table', 'text']
+    project.report_features(name, enable=['control_uncertainty'])
+    drawn = _payload(_render(project, name, edit=True))['blocks']
+    mine = [block for block in drawn if block.get('index') == index]
+    assert [block['kind'] for block in mine] == ['text', 'text', 'table',
+                                                 'text'], \
+        'the words, the uncertainty, the results and their note'
 
 
 def test_the_block_goes_after_the_box_and_keeps_through_a_template(
@@ -462,3 +468,112 @@ def test_the_box_lists_what_was_not_judged_and_what_was_refused():
         'unjudged': ['the measurement has no autospectrum at 9Z+'],
         'rule': ''}
     assert rr.verdict(None, report.blocks[0], report, objects) is None
+
+
+# ---- the control channels' uncertainty ----------------------------------------
+
+
+def test_the_uncertainty_table_falls_under_the_requirement_s_words():
+    from test_requirement import BUDGET
+
+    report = Report()
+    rr.add(report, single(channels=('1Z+',), grms_percent=10,
+                          uncertainty={'1Z+': BUDGET}),
+           source='Ref', measured='Run')
+    objects = {'Ref': reference(), 'Run': run(1.0)}
+    assert len(rr.build(report.blocks[0], objects).words) == 1, \
+        'the feature off, the words alone'
+    made = rr.build(report.blocks[0], objects, uncertainty_on=True)
+    words, table, note = made.words
+    assert 'Measurement uncertainty: entered for 1Z+' in words['text']
+    assert table['caption'] == rr.UNCERTAINTY
+    assert table['headers'] == ['Channel', 'Contributions',
+                                'Combined, acceleration', 'On the ASD',
+                                'In dB', 'One third of the tolerance',
+                                'Result']
+    assert table['rows'] == [[
+        '1Z+', ('calibration 2 % (k = 2, certificate C-1); conditioner and '
+        'converter 0.5 % (k = 2); transverse 1.5 % (k = 2); mount and chain '
+        '1 % (k = 2)'), '2.7 %', '5.7 %', '0.24 dB',
+        '2 dB (±6 dB band); 3.3 % (±10 % rms)', 'met']]
+    assert 'marks' not in table
+    assert note['text'].startswith('- Each contribution is divided by its '
+                                   'coverage factor')
+    assert 'expanded at k = 2' in note['text']
+
+
+def test_an_uncertainty_over_its_third_or_not_entered_is_marked():
+    from test_requirement import BUDGET
+
+    report = Report()
+    rr.add(report, single(composite_bands=[(None, None, -0.5, 0.5)],
+                          uncertainty={'1Z+': BUDGET, '7Z+': BUDGET}),
+           source='Ref', measured='Run')
+    objects = {'Ref': reference(), 'Run': run(1.0)}
+    _words, table, note = rr.build(report.blocks[0], objects,
+                                   uncertainty_on=True).words
+    (row,) = table['rows']
+    assert row[0] == '1Z+' and row[-1].startswith('not met: 0.24 dB over')
+    assert row[5] == '0.17 dB (±0.5 dB band)', 'no rms tolerance, no third'
+    assert table['marks'] == [[''] * 6 + ['notmet']]
+    assert note['text'].split('\n')[1] == (
+        '- Contributions are entered for 7Z+, which is not a control '
+        'channel of the run.')
+    two = Report()
+    rr.add(two, single(uncertainty={'8Z+': BUDGET, '9Z+': BUDGET}),
+           source='Ref', measured='Run')
+    _words, table, note = rr.build(two.blocks[0], objects,
+                                   uncertainty_on=True).words
+    assert table['rows'][0][1:5] == ['—'] * 4
+    assert len(table['rows'][0]) == len(table['headers'])
+    assert table['rows'][0][-1] == 'not judged: no contributions are entered'
+    assert table['marks'] == [[''] * 6 + ['notjudged']]
+    assert 'for 8Z+, 9Z+, which are not' in note['text']
+
+
+def test_with_nothing_entered_the_uncertainty_says_not_judged():
+    report = Report()
+    rr.add(report, single(), source='Ref', measured='Run')
+    made = rr.build(report.blocks[0], {'Ref': reference(), 'Run': run(1.0)},
+                    uncertainty_on=True)
+    assert made.words[1] == {'kind': 'text', 'text': (
+        f'**{rr.UNCERTAINTY}:** not judged; no contributions are entered '
+        'for the control channels.')}
+    refused = Report()
+    rr.add(refused, single(channels=('9Z+',)), source='Ref', measured='Run')
+    made = rr.build(refused.blocks[0], {'Ref': reference(), 'Run': run(1.0)},
+                    uncertainty_on=True)
+    assert len(made.words) == 2, 'a run not read still says its uncertainty'
+    assert len(rr.build(refused.blocks[0], {'Ref': reference(),
+                                            'Run': run(1.0)}).words) == 1
+    assert made.results[0]['text'].startswith(f'**{rr.CAPTION}:** nothing')
+
+
+def test_the_verb_takes_the_uncertainty_and_the_skeleton_places_it(bound):
+    from test_requirement import BUDGET
+
+    project, name, index = bound
+    report = project[name]
+    del report.blocks[index]
+    project.report_features(name, enable=['test_requirement',
+                                          'skeleton_sections',
+                                          'control_uncertainty'])
+    found = rq.evaluate(rq.TestRequirement('TP', STEPPED, strategy='average',
+                                           individual_bands=[(None, None,
+                                                              -6, 6)]),
+                        project['Specification'],
+                        project['Time History PSDs'])
+    at = project.report_requirement(
+        name, 'Specification', 'Time History PSDs', 'TP', STEPPED,
+        strategy='average', individual_bands=[(None, None, -6, 6)],
+        uncertainty={found.channels[0]: BUDGET})
+    drawn = _payload(_render(project, name))['blocks']
+    heads = [k for k, block in enumerate(drawn)
+             if 'class="skeleton"' in block.get('html', '')]
+    requirement = next(k for k in heads if '3. Requirement' in drawn[k]['html'])
+    table = drawn[requirement + 2]
+    assert table['caption'] == rr.UNCERTAINTY
+    assert table['label'] == 'Table 1'
+    assert [row[0] for row in table['rows']] == list(found.channels)
+    assert table['rows'][0][-1] == 'met'
+    del report.blocks[at]

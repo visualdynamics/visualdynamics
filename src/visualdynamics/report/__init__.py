@@ -244,7 +244,9 @@ def _report_payload(report, objects, unit_system=None, edit=False,
                 continue
             from .requirement import build as build_requirement
 
-            made = build_requirement(block, objects, object_groups)
+            made = build_requirement(
+                block, objects, object_groups,
+                uncertainty_on='control_uncertainty' in active)
             if made is None:
                 continue
             if edit:

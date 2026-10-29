@@ -43,6 +43,21 @@ each worded met, not met or not judged.
   until a report makes it the rows say they were not judged
   (`cross_axis_rows`).
 
+**The measurement's own uncertainty** is held with the requirement too,
+since the tolerance it is read against is the requirement's: each
+control channel's contributions (the accelerometer's calibration from
+its certificate, the conditioner and converter, transverse sensitivity
+times the cross-axis share, the mount and the chain's response), each
+an expanded uncertainty in percent on the acceleration with its
+coverage factor. `uncertainty_budget` divides each by its own coverage
+factor, combines them as the root of the sum of their squares, expands
+the result at `COVERAGE`, and states it in percent on the acceleration,
+in percent on the ASD and in dB, against one third of the tolerance
+(the tightest band edge in dB, and the overall rms tolerance in
+percent), the share some test documents allow the measurement. It is
+not a criterion of the run, and a channel with nothing entered reads
+not judged, never met.
+
 A row that judged nothing says so and why, and is never met: a band the
 data do not reach, a channel with no finite line, a measurement that
 does not carry its degrees of freedom. A row with some lines not judged
@@ -79,7 +94,7 @@ ORIGINS = ('laboratory', 'customer', 'derived')
 
 #: the numbers a source can be stated for, by the requirement's field
 NUMBERS = ('composite_bands', 'individual_bands', 'grms_percent', 'duration',
-           'min_dof', 'max_line_spacing', 'cross_axis', 'rule')
+           'min_dof', 'max_line_spacing', 'cross_axis', 'rule', 'uncertainty')
 
 #: a row's result, in the words the table prints
 MET = 'met'
@@ -92,6 +107,14 @@ CUSTOMER = ('supplied by the customer; the laboratory has not verified its '
 
 #: the most excursions a row names; the rest are counted
 MOST_EXCURSIONS = 3
+
+#: the coverage factor a channel's combined uncertainty is expanded
+#: with: about 95 percent for a normal distribution, and the factor
+#: calibration certificates commonly state
+COVERAGE = 2.0
+
+#: the share of the tolerance the measurement's uncertainty may take
+SHARE = 1.0 / 3.0
 
 #: how far apart two cells may be and still touch, as a fraction of the
 #: frequency (the edges of neighboring bins are worked out separately)
@@ -256,6 +279,102 @@ class Source:
         return said
 
 
+@dataclass(frozen=True)
+class Contribution:
+    """One contribution to a control channel's measurement uncertainty:
+    its `name`, its expanded uncertainty `percent` on the acceleration
+    at coverage factor `coverage`, and where the number came from
+    (`source`: a calibration certificate, a data sheet).
+
+    A contribution is a percentage above 0 and under 100: a chain with
+    no uncertainty, or one as large as the signal, is not a budget.
+    """
+
+    name: str
+    percent: float
+    coverage: float = COVERAGE
+    source: str = ''
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError('an uncertainty contribution is named, not '
+                             f'{self.name!r}')
+        if not isinstance(self.source, str):
+            raise TypeError("an uncertainty contribution's source is text, "
+                            f'not {self.source!r}')
+        what = f'the uncertainty contribution {self.name.strip()!r}'
+        percent = _number(self.percent, f'{what} in percent')
+        if not 0.0 < percent < 100.0:
+            raise ValueError(f'{what} is a percentage above 0 and under 100, '
+                             f'not {self.percent!r}')
+        coverage = _number(self.coverage, f"{what}'s coverage factor")
+        if not 0.0 < coverage < math.inf:
+            raise ValueError(f"{what}'s coverage factor is a number above 0, "
+                             f'not {self.coverage!r}')
+        object.__setattr__(self, 'name', self.name.strip())
+        object.__setattr__(self, 'percent', percent)
+        object.__setattr__(self, 'coverage', coverage)
+
+    @property
+    def standard(self) -> float:
+        """The standard uncertainty, percent: `percent` over `coverage`."""
+        return self.percent / self.coverage
+
+    @property
+    def text(self) -> str:
+        """'calibration 2 % (k = 2, certificate C-1)'."""
+        said = f'k = {self.coverage:g}'
+        if self.source:
+            said += f', {self.source}'
+        return f'{self.name} {self.percent:g} % ({said})'
+
+    def as_record(self) -> list[Any]:
+        return [self.name, self.percent, self.coverage, self.source]
+
+
+def _contributions(value: Any, channels: tuple[str, ...]
+                   ) -> dict[str, tuple[Contribution, ...]]:
+    """The uncertainty contributions by control channel, refused when a
+    channel is not one the requirement names or a contribution is named
+    twice for one channel."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError('the uncertainty is a mapping of control channel to '
+                        'its contributions, each (name, percent, coverage, '
+                        'source)')
+    out: dict[str, tuple[Contribution, ...]] = {}
+    for channel, entered in value.items():
+        channel = str(channel)
+        if channels and channel not in channels:
+            raise ValueError(f'uncertainty is entered for {channel}, which is '
+                             'not a control channel of the requirement '
+                             f'({", ".join(channels)})')
+        if isinstance(entered, (str, Contribution)) or not isinstance(
+                entered, Sequence):
+            raise TypeError(f'the uncertainty of {channel} is a list of '
+                            'contributions, each (name, percent, coverage, '
+                            'source)')
+        held = []
+        for item in entered:
+            if not isinstance(item, Contribution):
+                if isinstance(item, str) or not isinstance(item, Sequence) \
+                        or not 2 <= len(item) <= 4:
+                    raise ValueError(f'each uncertainty contribution of '
+                                     f'{channel} is (name, percent, coverage, '
+                                     f'source), not {item!r}')
+                item = Contribution(*item)
+            held.append(item)
+        names = [item.name for item in held]
+        twice = sorted({name for name in names if names.count(name) > 1})
+        if twice:
+            raise ValueError(f'the uncertainty of {channel} names '
+                             f'{", ".join(map(repr, twice))} twice; each '
+                             'contribution counts once')
+        out[channel] = tuple(held)
+    return out
+
+
 def _json_db(value: float) -> float | str:
     # JSON holds no infinity: an open edge is stored as its word
     if math.isinf(value):
@@ -362,6 +481,11 @@ class TestRequirement:
         more); 1 under 'any_line'.
     sources : mapping of str to Source or (origin, owner)
         Where each number came from, by field (`NUMBERS`).
+    uncertainty : mapping of str to sequence of Contribution or tuple
+        Each control channel's uncertainty contributions, by response
+        DOF, each (name, percent, coverage, source): an expanded
+        uncertainty in percent on the acceleration and its coverage
+        factor (`uncertainty_budget`).
 
     Raises
     ------
@@ -372,8 +496,11 @@ class TestRequirement:
         channels a strategy cannot have, weights under a strategy that
         takes none, a tolerance that is not a positive number, a
         duration without its tolerance, a rule not in `RULES`, a
-        combination the rule does not take, and a source for a number
-        the requirement does not hold.
+        combination the rule does not take, a source for a number the
+        requirement does not hold, and an uncertainty contribution that
+        is not a percentage above 0 and under 100, is named twice for a
+        channel, or is entered for a channel the requirement does not
+        name.
     """
 
     document: str
@@ -393,6 +520,8 @@ class TestRequirement:
     rule: str = 'any_line'
     combine: int = 1
     sources: Mapping[str, Source] = field(default_factory=dict)
+    uncertainty: Mapping[str, tuple[Contribution, ...]] = field(
+        default_factory=dict)
 
     def __post_init__(self) -> None:
         put = object.__setattr__
@@ -509,6 +638,7 @@ class TestRequirement:
                                          f'owner), not {source!r}') from None
             sources[name] = source
         put(self, 'sources', sources)
+        put(self, 'uncertainty', _contributions(self.uncertainty, channels))
 
     @property
     def document_text(self) -> str:
@@ -544,7 +674,9 @@ class TestRequirement:
             'cross_axis': [c.as_record() for c in self.cross_axis],
             'rule': self.rule, 'combine': self.combine,
             'sources': {name: [s.origin, s.owner]
-                        for name, s in self.sources.items()}}
+                        for name, s in self.sources.items()},
+            'uncertainty': {channel: [c.as_record() for c in held]
+                            for channel, held in self.uncertainty.items()}}
 
     @classmethod
     def from_record(cls, record: Mapping[str, Any]) -> TestRequirement:
@@ -610,6 +742,11 @@ class TestRequirement:
                          + '; '.join(c.text for c in self.cross_axis)
                          + self._from('cross_axis') + '.')
         lines.append(f'Decision rule: {self.rule_text}{self._from("rule")}.')
+        if self.uncertainty:
+            lines.append('Measurement uncertainty: entered for '
+                         + ', '.join(self.uncertainty)
+                         + ', held against one third of the tolerance'
+                         + self._from('uncertainty') + '.')
         return lines
 
     def _from(self, name: str) -> str:
@@ -1244,3 +1381,117 @@ def _spacing_row(requirement: TestRequirement, measured: Psd) -> Criterion:
              else NOT_MET)
     return Criterion('line_spacing', 'Line spacing', required,
                      f'{spacing:.4g} Hz', state)
+
+
+@dataclass(frozen=True)
+class Budget:
+    """One control channel's measurement uncertainty against one third
+    of the tolerance (`uncertainty_budget`)."""
+
+    #: the control channel, by response DOF
+    channel: str
+    #: what was entered for it
+    contributions: tuple[Contribution, ...]
+    #: the combined uncertainty expanded at `COVERAGE`, in percent on the
+    #: acceleration, on the ASD, and in dB; NaN with nothing entered
+    acceleration_percent: float
+    asd_percent: float
+    db: float
+    #: one third of the tightest band edge, dB, and that edge
+    band_limit_db: float
+    band_db: float
+    #: one third of the overall rms tolerance, percent, None without one
+    grms_limit_percent: float | None
+    #: `MET`, `NOT_MET` or `NOT_JUDGED`
+    state: str
+    #: why, when not judged; what exceeds its third, when not met
+    words: str
+
+
+def combined_percent(contributions: Sequence[Contribution]) -> float:
+    """The contributions' combined uncertainty, expanded at `COVERAGE`,
+    in percent on the acceleration: each divided by its own coverage
+    factor, combined as the root of the sum of their squares, times
+    `COVERAGE`. NaN for none."""
+    if not contributions:
+        return math.nan
+    return COVERAGE * math.sqrt(sum(c.standard ** 2 for c in contributions))
+
+
+def uncertainty_db(percent: float) -> float:
+    """An uncertainty in percent on the acceleration in dB on the ASD,
+    taken on the side it is larger, below: `−20 log10(1 − percent/100)`.
+    Infinite at 100 percent or more."""
+    if not percent < 100.0:
+        return math.inf
+    return -20.0 * math.log10(1.0 - percent / 100.0)
+
+
+def uncertainty_budget(requirement: TestRequirement,
+                       channels: Sequence[str] | None = None
+                       ) -> tuple[Budget, ...]:
+    """Each control channel's uncertainty against one third of the
+    requirement's tolerance.
+
+    The combined uncertainty is `combined_percent` of the channel's
+    contributions, on the acceleration; on the ASD it is the same
+    decibels (`uncertainty_db`) as a power ratio less one. It is held
+    against one third of the tightest band edge of the requirement, in
+    dB (composite and individual bands alike, since every control
+    channel feeds the composite), and, with an overall rms tolerance,
+    against one third of it in percent on the acceleration. Met when it
+    is within both; a channel with nothing entered is not judged.
+
+    Parameters
+    ----------
+    requirement : TestRequirement
+        The requirement, with its contributions.
+    channels : sequence of str, optional
+        The control channels, by response DOF: those `evaluate` found
+        for the run. Left out, those the requirement names, else those
+        it holds contributions for.
+
+    Returns
+    -------
+    tuple of Budget
+        One per channel, in order.
+    """
+    if channels is None:
+        channels = requirement.channels or tuple(requirement.uncertainty)
+    edges = [abs(edge) for band in (*requirement.composite_bands,
+                                    *requirement.individual_bands)
+             for edge in (band.below_db, band.above_db)
+             if math.isfinite(edge)]
+    # a band has a finite edge on one side at least (`Band`)
+    band_db = min(edges)
+    band_limit = SHARE * band_db
+    grms_limit = (None if requirement.grms_percent is None
+                  else SHARE * requirement.grms_percent)
+    out = []
+    for channel in channels:
+        channel = str(channel)
+        held = requirement.uncertainty.get(channel, ())
+        percent = combined_percent(held)
+        db = uncertainty_db(percent) if held else math.nan
+        asd = 100.0 * (10.0 ** (db / 10.0) - 1.0) if held else math.nan
+        missed = []
+        if not held:
+            state, words = NOT_JUDGED, 'not judged: no contributions are entered'
+        else:
+            if not db <= band_limit * (1.0 + 1e-12):
+                missed.append(f'{_db(db)} dB over one third of the '
+                              f'{band_db:g} dB band edge, {band_limit:.2g} dB')
+            if grms_limit is not None and \
+                    not percent <= grms_limit * (1.0 + 1e-12):
+                missed.append(f'{percent:.2g} % over one third of the '
+                              f'{requirement.grms_percent:g} % rms '
+                              f'tolerance, {grms_limit:.2g} %')
+            state = NOT_MET if missed else MET
+            words = '; '.join(missed)
+        out.append(Budget(channel, held, percent, asd, db, band_limit,
+                          band_db, grms_limit, state, words))
+    return tuple(out)
+
+
+def _db(value: float) -> str:
+    return 'infinite' if math.isinf(value) else f'{value:.2g}'

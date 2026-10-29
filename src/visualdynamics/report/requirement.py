@@ -13,6 +13,13 @@ With the feature on it draws two things:
   number the customer supplied. With skeleton sections on, it falls
   under the Requirement section, where the author still owes the plan,
   the failure definition and the completion criteria.
+- beneath it, with the feature `control_uncertainty` on as well, the
+  control channels' measurement uncertainty against one third of the
+  tolerance (`uncertainty`): a row per control channel with
+  its contributions, the combined uncertainty in percent on the
+  acceleration, on the ASD and in dB, the third it is held against, and
+  met, not met or not judged; one line saying it was not judged when
+  nothing is entered.
 - the result table: a row per criterion with what was required, what
   was measured (each miss with its band, its worst size in dB and its
   line count) and the result, worded met, not met or not judged, and a
@@ -52,6 +59,9 @@ FEATURE = 'test_requirement'
 
 #: the table's caption when the block gives none
 CAPTION = 'Results against the requirement'
+
+#: the uncertainty table's caption
+UNCERTAINTY = 'Control-channel uncertainty against one third of the tolerance'
 
 #: what a box with no requirement bound is labeled
 SCREENING = 'Screening (Visual Dynamics default rule)'
@@ -290,12 +300,14 @@ def prepare(report: Any, objects: Mapping[str, Any],
 
 
 def build(block: Mapping[str, Any], objects: Mapping[str, Any],
-          object_groups: Sequence[Mapping[str, Any]] | None = None
-          ) -> Made | None:
+          object_groups: Sequence[Mapping[str, Any]] | None = None, *,
+          uncertainty_on: bool = False) -> Made | None:
     """The page blocks of one requirement block, or None while a binding
     does not resolve. A requirement that cannot be read against its run
     at all draws its words and, for the results, one paragraph saying
-    why, since a reading that judged nothing says so."""
+    why, since a reading that judged nothing says so. `uncertainty_on`
+    (the feature `control_uncertainty`) adds the control channels'
+    uncertainty under the words."""
     from ..core.requirement import TestRequirement
 
     try:
@@ -308,10 +320,14 @@ def build(block: Mapping[str, Any], objects: Mapping[str, Any],
     try:
         found = read(block, objects, object_groups)
     except (TypeError, ValueError) as refusal:
+        if uncertainty_on:
+            words += uncertainty(requirement)
         return Made(words, [{'kind': 'text', 'text':
                              f'**{CAPTION}:** nothing judged; {refusal}.'}])
     if found is None:
         return None
+    if uncertainty_on:
+        words += uncertainty(requirement, found.channels)
     name = str(block.get('measured') or '')
     return Made(words, [table(found, name, str(block.get('caption') or '')),
                         {'kind': 'text', 'text': _note(found)}])
@@ -340,6 +356,59 @@ def requirement_lines(block: Mapping[str, Any]) -> list[str]:
     from ..core.requirement import TestRequirement
 
     return TestRequirement.from_record(block['requirement']).describe()
+
+
+def uncertainty(requirement: Any, channels: Sequence[str] | None = None
+                ) -> list[dict[str, Any]]:
+    """The control channels' measurement uncertainty against one third
+    of the tolerance (`core.requirement.uncertainty_budget`): a table
+    with a row per control channel and a note, or, with nothing entered
+    for any, one line saying it was not judged."""
+    from ..core.requirement import COVERAGE, uncertainty_budget
+
+    if not requirement.uncertainty:
+        return [{'kind': 'text', 'text':
+                 f'**{UNCERTAINTY}:** not judged; no contributions are '
+                 'entered for the control channels.'}]
+    budgets = uncertainty_budget(requirement, channels)
+    rows, marks = [], []
+    for budget in budgets:
+        if budget.contributions:
+            numbers = [f'{budget.acceleration_percent:.2g} %',
+                       f'{budget.asd_percent:.2g} %', f'{budget.db:.2g} dB']
+        else:
+            numbers = ['—'] * 3
+        third = f'{budget.band_limit_db:.2g} dB (±{budget.band_db:g} dB band)'
+        if budget.grms_limit_percent is not None:
+            third += (f'; {budget.grms_limit_percent:.2g} % '
+                      f'(±{requirement.grms_percent:g} % rms)')
+        # a reading not judged says so in its own words
+        result = (budget.words if budget.state == 'not judged' else
+                  budget.state + (f': {budget.words}' if budget.words else ''))
+        rows.append([budget.channel,
+                     '; '.join(c.text for c in budget.contributions) or '—',
+                     *numbers, third, result])
+        marks.append([''] * 6 + [MARKS.get(budget.state, '')])
+    built: dict[str, Any] = {
+        'kind': 'table', 'caption': UNCERTAINTY,
+        'headers': ['Channel', 'Contributions', 'Combined, acceleration',
+                    'On the ASD', 'In dB', 'One third of the tolerance',
+                    'Result'],
+        'rows': rows}
+    if any(any(mark) for mark in marks):
+        built['marks'] = marks
+    lines = [(f'- Each contribution is divided by its coverage factor, the '
+             f'results combined as the root of the sum of their squares, '
+             f'and the total expanded at k = {COVERAGE:g}; in dB it is '
+             'taken on the side it is larger.')]
+    found = {budget.channel for budget in budgets}
+    others = [channel for channel in requirement.uncertainty
+              if channel not in found]
+    if others:
+        lines.append(f'- Contributions are entered for {", ".join(others)}, '
+                     f'which {"is" if len(others) == 1 else "are"} not a '
+                     'control channel of the run.')
+    return [built, {'kind': 'text', 'text': '\n'.join(lines)}]
 
 
 def _words(requirement: Any) -> str:

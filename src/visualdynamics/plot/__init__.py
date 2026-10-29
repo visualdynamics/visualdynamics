@@ -774,7 +774,10 @@ def cmif_curves(data: Any, records: Sequence[int] | None = None,
     treatment of an incomplete matrix), and a singular value
     decomposition is taken at every frequency line. The largest singular
     value peaks at every mode. A second singular value peaking at the
-    same frequency indicates a repeated root.
+    same frequency indicates a repeated root. A line holding an entry
+    that is not a finite number has no decomposition, and its singular
+    values are NaN, as the conditioning reading leaves such a line
+    unjudged.
     """
     from ..core.matrix_checks import frf_matrix
 
@@ -785,7 +788,12 @@ def cmif_curves(data: Any, records: Sequence[int] | None = None,
     # missing pair stays zero here, where the reading refuses it
     _rows, _columns, matrix, _filled = frf_matrix(
         data, wanted, data.display_ordinate(us, wanted))
-    singular = np.linalg.svd(matrix, compute_uv=False)
+    # a record with one sample that is not a number makes every line of
+    # its FRF one, and the decomposition of such a line does not converge
+    finite = np.isfinite(matrix).all(axis=(-2, -1))
+    singular = np.full(matrix.shape[:1] + (min(matrix.shape[1:]),), np.nan)
+    if finite.any():
+        singular[finite] = np.linalg.svd(matrix[finite], compute_uv=False)
     return singular.T, data.display_abscissa(us)
 
 

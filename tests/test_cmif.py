@@ -80,6 +80,50 @@ def test_a_single_cmif_keys_its_curves(survey):
     assert names == [f'CMIF {k + 1}' for k in range(drawn)]
 
 
+def test_a_line_of_the_frf_not_a_number_has_no_singular_values():
+    """The singular values at every line: a line holding an
+    entry that is not a number is left out as NaN, and the lines around
+    it are decomposed as before, the largest first."""
+    from visualdynamics.core.data import Frf
+
+    f = np.array([10.0, 20.0, 30.0])
+    plant = np.array([[2.0, 0.0], [0.0, 1.0]], dtype=complex)
+    rows = [np.full(3, plant[i, j]) for i in range(2) for j in range(2)]
+    rows[1] = rows[1].copy()
+    rows[1][1] = np.nan
+    frf = Frf(f, np.array(rows), response_dof=['1Z+', '1Z+', '2Z+', '2Z+'],
+              reference_dof=['1X+', '2X+', '1X+', '2X+'],
+              ordinate_dim='acceleration/voltage')
+    singular, _x = cmif_curves(frf, unit_system=visualdynamics.SI)
+    assert np.isnan(singular[:, 1]).all()
+    np.testing.assert_allclose(singular[:, [0, 2]], [[2.0, 2.0], [1.0, 1.0]])
+
+
+def test_a_line_not_a_number_leaves_the_modal_report_its_cmif(project):
+    """One FRF entry that is not a number, as one such sample in a
+    record makes: the modal report renders, its measured CMIF has a gap
+    at that line and only there, and the resynthesis is whole."""
+    import json
+
+    from visualdynamics.core.report import modal_template
+    from visualdynamics.report import render_html
+
+    project['FRF'].ordinate[0, 50] = np.nan
+    payload = json.loads(render_html(modal_template(project), project).split(
+        'type="application/json">')[1].split('</script>')[0])
+    cmif = next(block for block in payload['blocks']
+                if block.get('caption', '').startswith(
+                    'Complex Mode Indicator Function'))
+    measured = [c for c in cmif['curves'] if not c.get('dash')]
+    synthesized = [c for c in cmif['curves'] if c.get('dash')]
+    assert measured and synthesized
+    for curve in measured:
+        gaps = [k for k, value in enumerate(curve['y']) if value is None]
+        assert gaps == [50]
+    assert all(value is not None
+               for curve in synthesized for value in curve['y'])
+
+
 # ---- the toggle on the plot bar ---------------------------------------------
 
 @pytest.fixture

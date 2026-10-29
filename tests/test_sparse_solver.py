@@ -598,3 +598,97 @@ def test_a_thread_count_the_user_set_is_left_alone(monkeypatch):
     assert seen == [before] and after == before
     with fem.blas_threads() as threads:
         assert threads is None
+
+
+def _lanczos_runs(monkeypatch):
+    """The mode count each block Lanczos run is asked for."""
+    asked = []
+    lanczos = fem.block_lanczos_modes
+
+    def spy(factor, mass, sigma, count, *args, **kwargs):
+        asked.append(count)
+        return lanczos(factor, mass, sigma, count, *args, **kwargs)
+
+    monkeypatch.setattr(fem, 'block_lanczos_modes', spy)
+    return asked
+
+
+def test_the_modes_below_a_frequency_are_counted_from_one_factorization():
+    """The signs of K - lambda M's pivots count the modes below lambda,
+    rigid modes included: the dense solver's count at a frequency
+    between two modes, from between the six rigid ones (all at 0 Hz)
+    and the first elastic one to the top of the set."""
+    from visualdynamics.core.sparse_solve import count_below
+    from visualdynamics.demo import plate
+
+    model = plate.build()
+    dense = model.eigensolution(solver='dense', num_modes=80)
+    # the reduced system the solver counts in: the rotations nothing
+    # holds are out of it, and its eigenvalues are the model's
+    stiffness, mass, *_rest = model.scaled_system()
+    eigenvalue = (2.0 * np.pi * dense.frequency) ** 2
+    for below in (6, 7, 24, 61, 79):
+        shift = 0.5 * (eigenvalue[below - 1] + eigenvalue[below])
+        assert count_below(stiffness, mass, shift) == below
+
+
+def test_a_search_up_to_a_frequency_is_one_lanczos_run(monkeypatch):
+    """Counted first, the modes up to a frequency are asked for in one
+    run, two over the count, and they are the modes the dense solver
+    keeps; doubling from 24 took four runs for these 60."""
+    from visualdynamics.demo import plate
+
+    asked = _lanczos_runs(monkeypatch)
+    model = plate.build()
+    dense = model.eigensolution(solver='dense', num_modes=61)
+    top = 0.5 * float(dense.frequency[59] + dense.frequency[60])
+    _dense, sparse = _compare(model, maximum_frequency=top)
+    assert len(sparse.frequency) == 60
+    assert asked == [60 + 2 + fem.LANCZOS_GUARD]
+
+
+def test_a_count_with_the_frequency_is_one_run_too(monkeypatch):
+    """With num_modes as well, the lowest that many are the answer, so
+    the search does not widen past them toward the frequency."""
+    from visualdynamics.demo import plate
+
+    asked = _lanczos_runs(monkeypatch)
+    shapes = plate.build().eigensolution(solver='sparse', num_modes=20,
+                                         maximum_frequency=1e9)
+    assert len(shapes.frequency) == 20
+    assert asked == [20 + fem.LANCZOS_GUARD]
+
+
+def test_a_miscount_still_reaches_the_frequency_by_prediction(monkeypatch):
+    """Where the count cannot be had, the search starts at 24 and asks
+    next for what the modes found predict, not twice as many."""
+    from visualdynamics.core import sparse_solve
+    from visualdynamics.demo import plate
+
+    def refuse(*_args):
+        raise RuntimeError('pivoted off the diagonal')
+
+    monkeypatch.setattr(sparse_solve, 'count_below', refuse)
+    asked = _lanczos_runs(monkeypatch)
+    model = plate.build()
+    top = float(model.eigensolution(solver='dense', num_modes=60).frequency[-1])
+    _compare(model, maximum_frequency=top * 0.99)
+    assert asked[0] == 24 + fem.LANCZOS_GUARD and len(asked) >= 2
+    assert asked[1] != 2 * 24 + fem.LANCZOS_GUARD, 'predicted, not doubled'
+
+
+def test_the_count_is_predicted_from_how_the_modes_grow():
+    """Weyl's law: the count grows as a power of the eigenvalue, the
+    power the dimension's. A bar's (count ~ lambda^1/2) and a solid's
+    (count ~ lambda^3/2) are read off their lowest modes exactly,
+    rounded up, since a count short costs another run; fewer than eight
+    elastic modes are too few to fit."""
+    from visualdynamics.core.fem import predicted_count
+
+    k = np.arange(1, 41, dtype=float)
+    bar = np.concatenate([np.zeros(6), (k + 6) ** 2])
+    assert predicted_count(bar, 89.5 ** 2) == 90
+    solid = np.concatenate([np.zeros(6), (k + 6) ** (2.0 / 3.0)])
+    assert predicted_count(solid, 199.5 ** (2.0 / 3.0)) == 200
+    assert predicted_count(np.concatenate([np.zeros(6), k[:7]]), 1e6) is None
+    assert predicted_count(bar, 1.0) == len(bar) + 1, 'never fewer than found'

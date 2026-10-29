@@ -49,6 +49,58 @@ def probe_backward_error(matrix: Any, solve: Any) -> float:
     return float(np.linalg.norm(matrix @ answer - probe) / np.linalg.norm(probe))
 
 
+def count_below(stiffness: Any, mass: Any, shift: float) -> int:
+    """How many eigenvalues of K phi = lambda M phi lie below `shift`,
+    read off the signs of one factorization of K - shift M.
+
+    By Sylvester's law of inertia, a symmetric matrix factored as
+    L D Lᵀ has as many negative entries in D as it has negative
+    eigenvalues, and the negative eigenvalues of K - shift M are the
+    modes below the shift (M positive definite). SuperLU in symmetric
+    mode with no pivoting off the diagonal is that factorization, its
+    U's diagonal being D, which is why the threshold is zero here and
+    not the factor the solves use. A pivot within round-off of zero,
+    from a shift on top of an eigenvalue, has a sign that is round-off,
+    so a caller allows the count one either way.
+
+    Parameters
+    ----------
+    stiffness, mass : scipy.sparse matrix
+        K and M, symmetric, M positive definite.
+    shift : float
+        The eigenvalue to count below, (rad/s)².
+
+    Returns
+    -------
+    int
+        The count, rigid-body modes included when the shift is above
+        zero.
+
+    Raises
+    ------
+    RuntimeError
+        If the factorization fails or had to pivot off the diagonal,
+        so its signs are not the inertia.
+
+    References
+    ----------
+    A standard method, used here to size the search up to a frequency:
+
+    1. J. J. Sylvester, *A demonstration of the theorem that every
+       homogeneous quadratic polynomial is reducible by real orthogonal
+       substitutions to the form of a sum of positive and negative
+       squares*, Philosophical Magazine, 1852.
+    """
+    from scipy.sparse.linalg import splu
+
+    factor = splu(sp.csc_matrix(stiffness - float(shift) * mass),
+                  permc_spec='MMD_AT_PLUS_A',
+                  options={'SymmetricMode': True, 'DiagPivotThresh': 0.0})
+    if not np.array_equal(factor.perm_r, factor.perm_c):
+        raise RuntimeError('the factorization pivoted off the diagonal')
+    return int(np.count_nonzero(factor.U.diagonal() < 0.0))
+
+
 class SuperLUFactor:
     """SuperLU's factorization of a symmetric matrix, through scipy."""
 

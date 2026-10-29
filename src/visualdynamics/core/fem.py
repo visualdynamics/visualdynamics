@@ -287,6 +287,11 @@ LANCZOS_CHECK_GROWTH = 0.05
 #: OpenBLAS pool and is left alone.
 BLAS_CPUS_PER_THREAD = 4
 BLAS_MOST_THREADS = 8
+#: a search up to a frequency that falls short asks next for the modes
+#: `predicted_count` expects below it, times this. A count short of the
+#: frequency costs another whole Lanczos run, a count past it only the
+#: extra modes, so the margin errs high.
+SEARCH_MARGIN = 1.15
 
 
 #: how many elements of one family are rotated and scattered at once:
@@ -1358,6 +1363,51 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
             raise NotConverged(
                 f'{dimension} Lanczos vectors left a residual of {worst:.1e}')
     return sigma + 1.0 / theta, basis[:, :dimension] @ ritz, residuals
+
+
+def predicted_count(eigenvalues: Any, limit: float) -> int | None:
+    """How many modes have an eigenvalue below `limit`, read off how the
+    count of the lowest modes grows with their eigenvalue.
+
+    The count of modes below an eigenvalue grows as a power of it, the
+    power set by the structure's dimension (Weyl's law: one half for a
+    bar, one for a plate, three halves for a solid, and in between for
+    a model that mixes them), so a line through log count against log
+    eigenvalue, fitted to the upper half of the elastic modes found,
+    reaches the limit's count. None when fewer than eight elastic modes
+    were found to fit, and the caller doubles instead.
+
+    Parameters
+    ----------
+    eigenvalues : array_like
+        The lowest modes' eigenvalues, (rad/s)², rigid modes included.
+    limit : float
+        The eigenvalue the count is wanted below.
+
+    Returns
+    -------
+    int or None
+        The expected count, rigid modes included, at least one more than
+        were found.
+
+    References
+    ----------
+    A standard result, used here to size the next search:
+
+    1. H. Weyl, *Das asymptotische Verteilungsgesetz der Eigenwerte
+       linearer partieller Differentialgleichungen*, Mathematische
+       Annalen, 1912.
+    """
+    values = np.sort(np.asarray(eigenvalues, dtype=float))
+    elastic = np.flatnonzero(values > 0.0)
+    if len(elastic) < 8:
+        return None
+    upper = elastic[len(elastic) // 2:]
+    power, offset = np.polyfit(np.log(values[upper]), np.log(upper + 1.0), 1)
+    if not (np.isfinite(power) and power > 0.0):
+        return None
+    expected = math.exp(offset + power * math.log(float(limit)))
+    return max(len(values) + 1, math.ceil(expected))
 
 
 @contextlib.contextmanager
@@ -2875,6 +2925,20 @@ class Model:
         limit = (None if maximum_frequency is None
                  else (2.0 * np.pi * float(maximum_frequency)) ** 2)
         wanted = int(num_modes) if num_modes is not None else 24
+        if limit is not None and num_modes is None:
+            # Every mode up to a frequency: counted first, from the
+            # signs of one more factorization (`sparse_solve.count_below`),
+            # so one Lanczos run asks for them all; two over the count
+            # for a pivot whose sign is round-off. Guessing instead ran
+            # the whole Lanczos three to six times (2026-10-29: 24.9 s
+            # for 400 modes doubling from 24, 8.2 s predicting, 4.7 s
+            # asked outright). The check below still holds a miscount
+            # to the answer, at the cost of another run.
+            from .sparse_solve import count_below
+            try:
+                wanted = count_below(reduced_k, reduced_m, limit) + 2
+            except RuntimeError:
+                pass
         while True:
             wanted = max(1, min(wanted, size - 1))
             count = min(wanted + LANCZOS_GUARD, size - 1)
@@ -2893,10 +2957,20 @@ class Model:
             # the wanted modes, not the guard, have to reach the limit:
             # the guard is what keeps the last of them clean, and a
             # guard mode is never the answer to "every mode up to"
-            if (limit is None or np.sort(eigenvalues)[wanted - 1] > limit
+            # with `num_modes` as well, the lowest that many are the
+            # answer whether or not they reach the limit
+            if (limit is None or num_modes is not None
+                    or np.sort(eigenvalues)[wanted - 1] > limit
                     or wanted >= size - 1):
                 break
-            wanted *= 2
+            # Short of the limit: the next run asks for the count the
+            # modes found predict, not twice as many. Each run starts
+            # afresh, and doubling from 24 ran the whole Lanczos five or
+            # six times for a few hundred modes, 24.9 s where asking for
+            # the 400 modes outright took 4.7 s (2026-10-29)
+            expected = predicted_count(eigenvalues[:wanted], limit)
+            wanted = (2 * wanted if expected is None
+                      else max(wanted + 1, math.ceil(SEARCH_MARGIN * expected)))
         # Polish: block inverse iteration with the shifted factor, each
         # step followed by Rayleigh-Ritz, until the residuals say the
         # modes are converged (`polish_modes`). What is left of the

@@ -432,8 +432,8 @@ def control_channels(specification: Specification, measured: Psd,
     """The measured records a multi-point reading combines, by the rule
     `multi_point` uses: the records named, by index or by response
     DOF; by default the autospectra at the channels a channel `table`
-    flags as control channels (`ChannelTable.controls()`), where it
-    flags any; and otherwise the autospectra that pair with the
+    flags as the specification's loop's control channels
+    (`ChannelTable.controls_for`), where it flags any; and otherwise the autospectra that pair with the
     specification's records (`compliance.matched_records`). The window
     asks this before it offers the reading, so the reading is offered
     exactly where it can be made.
@@ -467,7 +467,8 @@ def control_channels(specification: Specification, measured: Psd,
     autos = [i for i in range(measured.num_records)
              if measured.reference_dof is None
              or str(measured.reference_dof[i]) == str(measured.response_dof[i])]
-    flagged = (np.asarray(table.controls(), dtype=bool)
+    flagged = (np.asarray(table.controls_for(specification.response_dof),
+                          dtype=bool)
                if table is not None and channels is None
                else np.zeros(0, dtype=bool))
     if flagged.any():

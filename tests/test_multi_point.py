@@ -931,6 +931,55 @@ def test_the_channel_tables_control_flags_name_the_channels():
         control_channels(spec, measured, table=table)
 
 
+def test_a_combined_runs_reading_takes_its_own_loops_controls():
+    """A sine and a random over one table: the random's reference is
+    held at the random's two channels, not at all four the Control
+    column flags as the loops' union. A transformed loop is named by
+    its matrix's rows, so a sine over channels 1 to 3 does not claim a
+    random reference at 2Z+ and 3Z+; a reference naming no one loop
+    falls back to its own pairing."""
+    from visualdynamics.core.channel_table import ChannelTable, Environment
+
+    table = ChannelTable({'channel': [1, 2, 3, 4],
+                          'node': ['1', '2', '3', '4'],
+                          'direction': ['Z+'] * 4, 'unit': ['g'] * 4})
+    table.set_environment('Random', Environment(controls=[1, 2]))
+    table.set_environment('Sine', Environment(controls=[3, 4]))
+    measured = run(1.0, 1.0, 1.0, 1.0)
+    assert list(table.controls()) == [True] * 4
+    spec = reference(('1Z+', '2Z+'))
+    assert control_channels(spec, measured, table=table) == [0, 1]
+    assert [c.label for c in multi_point(spec, measured, table=table,
+                                         scale_db=0).channels] == ['1Z+', '2Z+']
+    assert control_channels(reference(('3Z+', '4Z+')), measured,
+                            table=table) == [2, 3]
+
+    table.set_environment('Sine', Environment(
+        controls=[1, 2, 3], response_transformation=[[1, 1, 1]]))
+    table.set_environment('Random', Environment(controls=[2, 3]))
+    assert control_channels(reference(('2Z+', '3Z+', '4Z+')), measured,
+                            table=table) == [1, 2]
+
+    table.set_environment('Sine', Environment(controls=[2, 3]))
+    table.set_environment('Random', Environment(controls=[1, 2]))
+    assert control_channels(reference(('1Z+', '3Z+', '4Z+')), measured,
+                            table=table) == [0, 2, 3]
+
+    # a reference over a transformed loop's rows is that loop's, held
+    # at its physical control channels; three rows over two controls
+    table.set_environment('Sine', Environment(
+        controls=[1, 2], response_transformation=np.ones((3, 2))))
+    table.set_environment('Random', Environment(controls=[3, 4]))
+    for row in ('1', '3'):
+        assert control_channels(reference((row,)), measured,
+                                table=table) == [0, 1]
+
+    # one loop is the Control column, whatever the reference names
+    table.remove_environment('Sine')
+    assert control_channels(reference(('1Z+', '2Z+')), measured,
+                            table=table) == [2, 3]
+
+
 def test_a_short_average_says_how_many_lines_chance_puts_outside():
     """White noise at 5 frames: the reading says, at its degrees of
     freedom, what share of a working channel's lines fall outside the

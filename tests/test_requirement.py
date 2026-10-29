@@ -701,7 +701,7 @@ class _Table:
     def dof_strings(self):
         return list(self._dofs)
 
-    def controls(self):
+    def controls_for(self, dofs):
         return list(self._controls)
 
 
@@ -715,6 +715,21 @@ def test_the_one_channel_the_channel_table_flags_is_the_control():
                                          'autospectra the channel table'):
         rq.evaluate(single(), specification, measured,
                     table=_Table(['9Z+'], [True]))
+
+
+def test_a_combined_run_takes_the_specifications_own_loops_control():
+    """A random loop controlling 1Z+ and a sine loop 2Z+ on one table:
+    the random reference's single control channel is 1Z+, where the
+    Control column's union of both loops offered two candidates."""
+    from visualdynamics.core.channel_table import ChannelTable, Environment
+
+    table = ChannelTable({'channel': [1, 2], 'node': ['1', '2'],
+                          'direction': ['Z+'] * 2, 'unit': ['g'] * 2})
+    table.set_environment('Random', Environment(controls=[1]))
+    table.set_environment('Sine', Environment(controls=[2]))
+    results = rq.evaluate(single(), reference(('1Z+',)), run(1.0, HOT),
+                          table=table)
+    assert results.channels == ('1Z+',)
 
 
 def test_degrees_of_freedom_of_zero_or_nan_are_not_carried():

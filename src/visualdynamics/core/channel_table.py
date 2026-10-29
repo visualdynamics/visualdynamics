@@ -1038,6 +1038,48 @@ class ChannelTable:
             return np.array([_parse_flag(str(v)) for v in self.frame['control']])
         return self._flags(self._environment(environment).controls)
 
+    def controls_for(self, dofs: Sequence[Any]) -> np.ndarray:
+        """The control channels a reference over `dofs` was held at, as
+        a boolean per row.
+
+        A reference belongs to the loop that controlled what it is
+        over: a transformed loop's rows ('1', '2', ...), or another
+        loop's control channels. With no environments, or one, that is
+        the Control column (`controls`). With several, it is the one
+        loop the DOFs name; where none or more than one is named, no
+        channel is flagged, so a reader falls back to the reference's
+        own pairing rather than taking every loop's controls.
+
+        Parameters
+        ----------
+        dofs : sequence
+            The reference's DOFs, compared as text.
+
+        Returns
+        -------
+        numpy.ndarray
+            True where the channel is a control channel of that loop.
+        """
+        # The union of every loop's controls read a sine's channels into
+        # a random reading of a combined run (found in Kevin Cross's
+        # #199 on 2026-10-28; Brandon asked for the fix 2026-10-29).
+        if len(self.environments) <= 1:
+            return self.controls()
+        asked = {str(d) for d in dofs}
+        strings = self.dof_strings()
+        named = []
+        for name, environment in self.environments.items():
+            matrix = environment.response_transformation
+            if matrix is not None:
+                held = {str(k + 1) for k in range(matrix.shape[0])}
+            else:
+                held = {strings[r] for r in self.rows_of(environment.controls)}
+            if held & asked:
+                named.append(name)
+        if len(named) != 1:
+            return np.zeros(len(self.frame), dtype=bool)
+        return self.controls(named[0])
+
     def drives(self, environment: str) -> np.ndarray:
         """Which channels the environment drove, as a boolean per row.
 

@@ -1506,7 +1506,8 @@ def _records(requirement: TestRequirement, specification: Specification,
             raise ValueError(f'the measurement has no autospectrum at '
                              f'{named[0]}')
     else:
-        flagged = (np.asarray(table.controls(), dtype=bool)
+        flagged = (np.asarray(table.controls_for(specification.response_dof),
+                              dtype=bool)
                    if table is not None else None)
         if flagged is not None and flagged.any():
             dofs = table.dof_strings()

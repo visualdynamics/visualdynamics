@@ -22,7 +22,7 @@ from typing import Any
 
 from PySide6.QtCore import QSettings
 
-from ..theme import OVERRIDE, THEMES, system_scheme
+from ..theme import DARK_CHROME, DARK_CHROME_DISABLED, OVERRIDE, THEMES, system_scheme
 
 #: the remembered choices, in menu order
 APPEARANCES = ('system', 'light', 'dark')
@@ -165,8 +165,59 @@ def wear_appearance(app: Any = None, choice: str | None = None,
     hints.setColorScheme({'light': Qt.ColorScheme.Light,
                           'dark': Qt.ColorScheme.Dark}.get(
                               choice, Qt.ColorScheme.Unknown))
+    wear_palette(app, choice)
     if refresh:
         refresh_palettes(app)
+
+
+#: the application property that marks a palette worn by `wear_palette`,
+#: so that a later choice can take it off again
+WORN = 'visualdynamics_palette'
+
+
+def wear_palette(app: Any, choice: str) -> None:
+    """Give Qt's own widgets the palette of the chosen scheme where the
+    platform did not.
+
+    Asked for a scheme, macOS and Windows change the application
+    palette, and every widget follows. Linux without a platform-theme
+    plugin changes nothing: the window, the toolbars and the menus stay
+    light under Dark. When the palette's window color is on the wrong
+    side of mid-gray for the scheme that applies (`choice`, or for
+    'system' the platform's, `theme.system_scheme`), the application
+    wears `theme.DARK_CHROME`, or the style's standard palette for
+    light. A palette worn here is taken off before each new choice, so
+    System and a platform that does follow get the platform's own back.
+    Anything other than a `QApplication`, as in a test's stand-in, is
+    left alone.
+    """
+    # Brandon's Red Hat machine, 2026-10-29: Dark changed the 3-D view
+    # and the plots and left the window light. The offscreen platform
+    # the tests run on behaves the same, which is what pins this.
+    from PySide6.QtGui import QColor, QPalette
+    from PySide6.QtWidgets import QApplication
+
+    if not isinstance(app, QApplication):
+        return
+    if app.property(WORN):
+        app.setPalette(QPalette())          # the platform's own again
+        app.setProperty(WORN, False)
+    wanted = choice if choice in THEMES else system_scheme()
+    window = app.palette().color(QPalette.ColorRole.Window)
+    if ('dark' if window.lightness() < 128 else 'light') == wanted:
+        return
+    if wanted == 'dark':
+        palette = QPalette()
+        for role, color in DARK_CHROME.items():
+            palette.setColor(getattr(QPalette.ColorRole, role), QColor(color))
+        for role in ('WindowText', 'Text', 'ButtonText', 'PlaceholderText'):
+            palette.setColor(QPalette.ColorGroup.Disabled,
+                             getattr(QPalette.ColorRole, role),
+                             QColor(DARK_CHROME_DISABLED))
+    else:
+        palette = app.style().standardPalette()
+    app.setPalette(palette)
+    app.setProperty(WORN, True)
 
 
 def refresh_palettes(app: Any = None) -> None:

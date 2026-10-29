@@ -311,8 +311,8 @@ def _occt_section():
 
 
 def test_the_notice_names_every_package_the_builds_carry():
-    """Every runtime dependency, every extra the release builds install
-    (`step`, `app`) and the Sparkle framework the macOS build copies in
+    """Every runtime dependency, the extra the release builds install
+    (`app`) and the Sparkle framework the macOS build copies in
     is named in NOTICE.md. truststore, pyobjc-core and Sparkle shipped
     unnamed until 2026-10-21; a new dependency now fails here until its
     license is read and written down."""
@@ -323,7 +323,7 @@ def test_the_notice_names_every_package_the_builds_carry():
     root = pathlib.Path(__file__).parent.parent
     project = tomllib.loads((root / 'pyproject.toml').read_text(encoding='utf-8'))['project']
     extras = project.get('optional-dependencies', {})
-    wanted = [*project['dependencies'], *extras.get('step', []), *extras.get('app', [])]
+    wanted = [*project['dependencies'], *extras.get('app', [])]
     names = {re.split(r'[\s;<>=!~\[]', spec, maxsplit=1)[0] for spec in wanted}
     notice = (root / 'NOTICE.md').read_text(encoding='utf-8').lower()
     missing = sorted(n for n in names if n.lower() not in notice)
@@ -361,7 +361,7 @@ def test_every_library_the_opencascade_wheel_carries_has_its_notice():
     import pathlib
     import re
 
-    ocp = pytest.importorskip('OCP')
+    import OCP as ocp
     package = pathlib.Path(ocp.__file__).parent
     folders = [package / '.dylibs', *package.parent.glob('cadquery_ocp*.libs')]
     bundled = [f.name for folder in folders if folder.is_dir()

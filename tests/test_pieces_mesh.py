@@ -294,7 +294,6 @@ def test_the_pane_takes_a_size_per_piece(window, pump, monkeypatch):
     piece with the size each is likely to hold at, in place of the one
     box; Tetras puts the box back; Detect fills every row; and Mesh
     hands the sizes on, the bar's finer one tying it at the seam."""
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_mesh import _settled
     from test_solids_pane import _acts, _pick, _rows

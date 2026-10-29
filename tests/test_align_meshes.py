@@ -260,7 +260,6 @@ def test_the_frame_goes_onto_a_washer_and_nothing_else_moves():
     pulled round), and the frame is the piece that moves: only its top,
     onto the washer's underside — the frame's next layer down has the
     top's nodes nearer it, taken first. Then every place merges."""
-    pytest.importorskip('OCP')
     import visualdynamics
 
     project = visualdynamics.Project('p')

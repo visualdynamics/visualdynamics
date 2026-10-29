@@ -96,6 +96,16 @@ dependencies = [
     # dtype per column — which is where the per-column rules live.
     # BSD-3-Clause, so it constrains nothing.
     "pandas",
+    # The geometry kernel for solids and the STEP/IGES importer: OCP
+    # bindings (Apache-2.0) over OpenCASCADE (LGPL-2.1 with exception,
+    # the same dynamic-linking posture as Qt; see NOTICE.md). It was the
+    # `step` extra from 2026-09-01, kept out so a pip install stayed
+    # small; it is required since 2026-10-29 (Brandon: one install, not
+    # two — a pip install on a work machine needed the extra explained,
+    # and the base install already carries VTK and Qt). What it costs:
+    # the package installs only where OCP has a wheel (Python 3.11-3.14,
+    # glibc 2.28+, macOS, Windows), as PySide6 and VTK already ask.
+    "cadquery-ocp",
 ]
 
 [project.urls]
@@ -129,14 +139,6 @@ visualdynamics-gui = "visualdynamics.gui:main"
 # repository in a step of its own and CONTRIBUTING.md says how; the
 # tests that need it skip without it.
 dev = ["pytest", "pytest-cov", "pytest-xdist", "pyyaml", "ruff", "sdypy-sep005"]
-# The STEP/IGES importer's geometry kernel: OCP bindings (Apache-2.0)
-# over OpenCASCADE (LGPL-2.1 with exception — the same dynamic-linking
-# posture as Qt; see NOTICE.md). Optional so `pip install
-# visualdynamics` stays lean, but installed in every *packaging*
-# environment: the installers ship it, because a frozen app cannot
-# add it later and a capability most users cannot reach is not a
-# capability (Brandon, 2026-09-01).
-step = ["cadquery-ocp"]
 # MIT. The packaged macOS app updates itself through Sparkle
 # (2026-09-28), an Objective-C framework the app reaches through
 # pyobjc's runtime alone (`gui/updater.py`); every packaged build

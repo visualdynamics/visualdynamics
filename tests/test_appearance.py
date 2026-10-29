@@ -21,6 +21,9 @@ def fresh_store(monkeypatch):
     preferences.remember_appearance('system')
     yield
     preferences.remember_appearance('system')
+    # and the palette a choice may have worn on the application, which
+    # every later test in this process shares
+    preferences.wear_appearance(choice='system', refresh=False)
 
 
 def _appearance_actions(window):
@@ -254,3 +257,43 @@ def test_a_window_being_built_leaves_the_other_windows_alone(qt_app,
         from conftest import destroy_window
 
         destroy_window(window, qt_app)
+
+
+def test_where_the_platform_ignores_the_scheme_the_window_still_turns_dark(
+        window, pump):
+    """Linux without a platform-theme plugin ignores the request for a
+    scheme: on Brandon's Red Hat machine (2026-10-29) Dark changed the
+    3-D view and left the window, the toolbars and the status bar light,
+    and the project tree light text on white. The offscreen platform
+    the tests run on ignores it the same way, so the application wears
+    the scheme's palette itself, and the tree's viewport, which paints
+    its background, wears the tree's."""
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QApplication
+
+    from visualdynamics.gui.main_window import resolve_theme
+
+    def lightness(widget):
+        return widget.palette().color(QPalette.ColorRole.Window).lightness()
+
+    def tree_ground():
+        return window.tree.viewport().palette().color(
+            QPalette.ColorRole.Base).name()
+
+    app = QApplication.instance()
+    actions = _appearance_actions(window)
+    actions['&Dark'].trigger()
+    pump()
+    assert lightness(window) < 128 and lightness(window.statusBar()) < 128
+    assert lightness(window.menuBar()) < 128
+    assert tree_ground() == resolve_theme('dark')['scene_background'].lower()
+    actions['&Light'].trigger()
+    pump()
+    assert lightness(window) >= 128 and lightness(window.statusBar()) >= 128
+    assert tree_ground() == resolve_theme('light')['scene_background'].lower()
+    actions['&Dark'].trigger()
+    pump()
+    actions['&System'].trigger()
+    pump()
+    assert not app.property(preferences.WORN), 'System takes the palette off'
+    assert lightness(window) >= 128, "the platform's own, light here"

@@ -18,8 +18,6 @@ import visualdynamics
 from visualdynamics.core import solids
 from visualdynamics.gui.project_tree import ROLE_REFERENCE, SOLIDS_MIME
 
-pytest.importorskip('OCP')
-
 
 def _cone_shell():
     """Brandon's cone (2026-10-27): an outer cone with an inner one

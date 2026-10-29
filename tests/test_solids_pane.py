@@ -15,8 +15,6 @@ from conftest import select_objects
 
 from visualdynamics.core import solids
 
-pytest.importorskip('OCP')
-
 INCH = 0.0254
 
 

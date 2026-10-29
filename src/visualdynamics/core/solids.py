@@ -15,8 +15,7 @@ The table holds recipes, the numbers a person typed, so a saved project
 reopens editable and needs no geometry kernel to load. Evaluating a
 solid (its volume, its surface for drawing, the boolean itself) is done
 by OpenCASCADE (`shape`), through the OCP bindings the STEP importer
-also uses. Every packaged build has them, and a pip install gets them
-with `visualdynamics[step]`. Whether a point is inside a solid, which is
+also uses, a dependency of the package. Whether a point is inside a solid, which is
 what meshing asks, is worked out from the recipes without the kernel
 (`contains`).
 
@@ -1159,15 +1158,18 @@ def solid(geometry: Any, solid_id: int) -> Solid:
 # ---- the kernel ------------------------------------------------------------
 
 def require_kernel():
-    """The OCP bindings, or a ValueError whose message says how to
-    install them."""
+    """The OCP bindings, or a ValueError whose message says why they
+    did not import and how to reinstall them."""
+    # A dependency since 2026-10-29, so this refuses only a broken
+    # install, or a wheel that will not load on this machine (an older
+    # glibc), and says which rather than naming an extra that is gone.
     try:
         import OCP
-    except ImportError:
+    except ImportError as failure:
         raise ValueError(
-            'solids and STEP/IGES need the OpenCASCADE kernel, which is '
-            "not installed — pip install 'visualdynamics[step]' (the "
-            'packaged application already carries it)') from None
+            'solids and STEP/IGES need the OpenCASCADE kernel, which did '
+            f'not import ({failure}) — reinstall it with pip install '
+            '--force-reinstall cadquery-ocp') from None
     return OCP
 
 

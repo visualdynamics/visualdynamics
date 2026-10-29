@@ -20,8 +20,6 @@ import visualdynamics
 from visualdynamics.core import solids
 from visualdynamics.core.geometry import Geometry
 
-pytest.importorskip('OCP')
-
 INCH = 0.0254
 
 #: a size of each, and its area across: written out, not computed the

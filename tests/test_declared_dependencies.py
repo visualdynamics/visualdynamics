@@ -74,10 +74,10 @@ def third_party_imports():
 
 def declared():
     """The distribution names pyproject declares — the runtime
-    `dependencies`, plus the `step` and `app` extras: each import lives
-    behind a graceful fallback (a refusal that names the extra; the
-    manifest check where no Sparkle can be driven), which is the one
-    shape an optional import is allowed to take here. The dev/docs
+    `dependencies`, plus the `app` extra: its import lives behind a
+    graceful fallback (the manifest check where no Sparkle can be
+    driven), which is the one shape an optional import is allowed to
+    take here. The dev/docs
     extras stay out — hiding a runtime import in them would be the bug
     this test exists to catch."""
     import tomllib
@@ -85,7 +85,6 @@ def declared():
     with open(ROOT / 'pyproject.toml', 'rb') as handle:
         data = tomllib.load(handle)
     names = list(data['project']['dependencies'])
-    names += data['project']['optional-dependencies'].get('step', [])
     names += data['project']['optional-dependencies'].get('app', [])
     return {name.split(';')[0].split('[')[0].split('>')[0].split('=')[0]
             .strip().lower() for name in names}
@@ -169,3 +168,22 @@ def test_the_packages_own_name_is_the_command():
     assert installed.get('visualdynamics') == 'visualdynamics.gui:main', \
         'reinstall the package (pip install -e .) to grow the script'
 
+
+
+def test_the_cad_kernel_is_a_dependency_not_an_extra(monkeypatch):
+    """One install: the OpenCASCADE kernel is in `dependencies`, there
+    is no `step` extra to explain, and a kernel that will not import is
+    refused with the command that reinstalls it, not an extra's name."""
+    import tomllib
+
+    from visualdynamics.core import solids
+
+    with open(ROOT / 'pyproject.toml', 'rb') as handle:
+        project = tomllib.load(handle)['project']
+    assert 'cadquery-ocp' in project['dependencies']
+    assert 'step' not in project.get('optional-dependencies', {})
+    monkeypatch.setitem(sys.modules, 'OCP', None)
+    with pytest.raises(ValueError, match='pip install --force-reinstall '
+                                         'cadquery-ocp') as refused:
+        solids.require_kernel()
+    assert '[step]' not in str(refused.value)

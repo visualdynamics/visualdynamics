@@ -410,9 +410,8 @@ made of. A mesh already made from the solids stays as it was until
 
 The parts are drawn see-through in their own color, and the picked
 ones in the selection color. A solid is not an element, and nothing
-solves or exports it until it is meshed. Solids need the OpenCASCADE
-kernel, which is in every packaged build (`pip install
-'visualdynamics[step]'` otherwise). From a script, use
+solves or exports it until it is meshed. Solids are evaluated by the
+OpenCASCADE kernel, which is installed with the package. From a script, use
 `project.add_solid_block`, `add_solid_cylinder`, `add_solid_section`,
 `add_solid_hole`, `combine_solids`, `pattern_solids`,
 `separate_solids`, `delete_solids`, `edit_solid` and `move_solids`; the

@@ -272,7 +272,6 @@ def test_the_project_meshes_tets_on_request_and_journals_it():
 
 
 def test_the_pane_offers_tets_where_bricks_refuse_and_meshes_them(window, pump):
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_mesh import _settled
     from test_solids_pane import _acts, _pick, _rows
@@ -323,7 +322,6 @@ def test_the_pane_offers_tets_where_bricks_refuse_and_meshes_them(window, pump):
 
 
 def test_the_panes_tet_preview_stops_at_its_budget(window, pump, monkeypatch):
-    pytest.importorskip('OCP')
     from test_solids_mesh import _holed_part, _settled
 
     panel = _holed_part(window, pump)

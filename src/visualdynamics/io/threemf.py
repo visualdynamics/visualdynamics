@@ -6,8 +6,8 @@ tessellated (read as `tri3` face elements as they are), named objects
 for an assembly's parts, each of which becomes a named element group,
 and a declared unit, so there is nothing to ask at import. SolidWorks
 writes it from Save As, so a SolidWorks model can be imported by
-exporting it to 3MF; the native format is closed, and STEP (`io.step`)
-needs a CAD kernel, which a pip install has only as an option.
+exporting it to 3MF; the native format is closed. STEP (`io.step`)
+is read through a CAD kernel; 3MF needs none.
 
 Assemblies are component references with affine transforms. They are
 resolved recursively, so each placed instance of a part has its

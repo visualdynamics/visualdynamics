@@ -46,7 +46,7 @@ ssh $SSH_OPTS bzwink@$HOST 'cd vd-build && sudo rm -rf dist build && \
       wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
       chmod +x appimagetool-x86_64.AppImage
       mv appimagetool-x86_64.AppImage /usr/local/bin/appimagetool
-      pip install -q ".[step]" pyinstaller pillow
+      pip install -q . pyinstaller pillow
       PYTHON=python packaging/build_linux.sh'\'''
 
 mkdir -p dist

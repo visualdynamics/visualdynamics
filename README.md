@@ -126,9 +126,9 @@ visualdynamics                     # the desktop app
 import visualdynamics
 ```
 
-STEP and IGES import need the OpenCASCADE kernel, which `pip` keeps
-optional so a plain install stays small: `pip install -e '.[step]'`.
-Every packaged build includes it.
+STEP and IGES import and the solids use the OpenCASCADE kernel
+(`cadquery-ocp`), which is installed with the package and included in
+every packaged build.
 
 The packaged builds are a `.dmg` for Apple silicon and one for Intel, a
 Windows installer and a Linux AppImage. The release workflow

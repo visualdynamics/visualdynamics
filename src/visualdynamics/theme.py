@@ -143,6 +143,27 @@ THEMES = {'light': LIGHT, 'dark': DARK}
 
 DEFAULT = 'light'
 
+#: The dark palette for Qt's own widgets (the window, the toolbars, the
+#: menus, the dialogs), by `QPalette.ColorRole` name, with the disabled
+#: group's text. It is worn only where the platform does not change the
+#: application palette when asked for a scheme: on Linux without a
+#: platform-theme plugin, where asking for Dark changes nothing
+#: (`gui.preferences.wear_appearance`). A light scheme there uses the
+#: style's own standard palette, so only the dark one is written down.
+DARK_CHROME = {
+    'Window': '#2d2d2f', 'WindowText': '#e8e8ea',
+    'Base': '#1e1e20', 'AlternateBase': '#28282b',
+    'ToolTipBase': '#3a3a3d', 'ToolTipText': '#e8e8ea',
+    'PlaceholderText': '#8a8a8f', 'Text': '#e8e8ea',
+    'Button': '#3a3a3d', 'ButtonText': '#e8e8ea', 'BrightText': '#ff6b61',
+    'Light': '#55555a', 'Midlight': '#46464b', 'Mid': '#2a2a2d',
+    'Dark': '#1a1a1c', 'Shadow': '#000000',
+    'Highlight': '#2f6fd0', 'HighlightedText': '#ffffff',
+    'Link': '#5fa8ff', 'LinkVisited': '#b38cff',
+}
+#: the text roles' color when a widget is disabled
+DARK_CHROME_DISABLED = '#77777c'
+
 
 def theme(name: str | Mapping[str, str] | None = None) -> dict[str, str]:
     """The colors dict for a theme name, 'light' or 'dark'.

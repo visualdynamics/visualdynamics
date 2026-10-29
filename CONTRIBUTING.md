@@ -75,7 +75,7 @@ agreement to sign.
 ```bash
 git clone https://github.com/visualdynamics/visualdynamics
 cd visualdynamics
-pip install -e '.[dev,step]'
+pip install -e '.[dev]'
 pip install 'escdf @ git+https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format.git'
 python -m pytest tests -q
 ```

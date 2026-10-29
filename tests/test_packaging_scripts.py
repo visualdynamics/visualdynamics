@@ -163,8 +163,8 @@ def test_the_venvs_are_levelled_eagerly_and_gated_by_pytest_s_own_code():
               encoding='utf-8') as handle:
         script = handle.read()
     assert 'pip install -q -U --upgrade-strategy eager' in script
-    assert "level .venv -e '.[dev,step,docs,app]'" in script
-    assert "level .venv-x86_64 '.[step,app]'" in script
+    assert "level .venv -e '.[dev,docs,app]'" in script
+    assert "level .venv-x86_64 '.[app]'" in script
     gate = next(line for line in script.splitlines()
                 if '-m pytest tests' in line)
     assert '|' not in gate and gate.rstrip().endswith('\\')

@@ -3118,6 +3118,11 @@ class MainWindow(QMainWindow):
                          QColor(colors['scene_text']))
         self.tree.setPalette(palette)
         _keep_selection_vivid(self.tree)
+        # and its viewport, which paints the background and does not
+        # take the tree's palette: on Linux the tree went light text on
+        # white under Dark (Brandon, 2026-10-29). Elsewhere the platform's
+        # own palette had turned dark too, which hid it.
+        self.tree.viewport().setPalette(self.tree.palette())
         if self.report is not None:
             self._paint_compatibility()
         self.render_current()

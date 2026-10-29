@@ -3,10 +3,9 @@
 Unlike STL and 3MF, these files hold surfaces rather than triangles, so
 reading them needs a CAD kernel: OCP (Apache-2.0 bindings) over
 OpenCASCADE (LGPL-2.1 with an exception, a replaceable library as Qt
-is; see NOTICE.md). The kernel is included in every packaged build,
-because a frozen application cannot add it later. A pip install has it
-as an option (``visualdynamics[step]``), and without it this module
-refuses with the install command.
+is; see NOTICE.md). The kernel is a dependency of the package and is
+included in every packaged build; if it fails to import, this module
+refuses with the reason and the command that reinstalls it.
 
 The result is the same as the 3MF reader's: triangle face elements in
 meters, with the units defined, one named element group per top-level

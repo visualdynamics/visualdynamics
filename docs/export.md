@@ -234,9 +234,7 @@ OpenCASCADE kernel (LGPL-2.1 with exception, one more replaceable
 library; see NOTICE.md). Named parts become named element groups, and
 coordinates are converted to meters from whatever the file declares.
 These formats are import only: Visual Dynamics holds meshes, not
-surfaces, so a B-rep written from one would be made up. A pip install
-keeps the kernel optional (`pip install 'visualdynamics[step]'`); the
-packaged application includes it.
+surfaces, so a B-rep written from one would be made up.
 
 ⁷ MATLAB `.mat` is the project file in MATLAB's container, not a
 foreign format. A `.mat` written here holds what a `.vdyn` holds, under

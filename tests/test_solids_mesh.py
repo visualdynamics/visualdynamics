@@ -199,7 +199,6 @@ def _settled(window, pump):
 
 
 def test_the_pane_previews_the_bricks_and_meshes(window, pump):
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_pane import _acts, _pick, _rows
 
@@ -284,7 +283,6 @@ def test_once_meshed_the_solids_draw_only_when_picked(window, pump):
     """Over a mesh whose modes animate, see-through solids are in the
     way: once a geometry has elements they are drawn only with the Solids
     row or a solid picked (2026-10-11)."""
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_pane import _pick, _rows
 
@@ -540,7 +538,6 @@ def test_parts_kept_apart_share_a_grid_and_no_nodes():
 def test_the_pane_keeps_two_parts_apart_when_asked(window, pump):
     """Keep the parts apart shows with two parts picked, not one, and
     Mesh passes it on."""
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_pane import _acts, _pick, _rows
 
@@ -894,7 +891,6 @@ def test_the_preview_waits_for_the_size_box_to_settle(window, pump, monkeypatch)
     """Each change of the size meshed and drew at once, so a spin of the
     box at a fine size was one mesh per step on this thread. Three quick
     changes are one mesh, once the box rests."""
-    pytest.importorskip('OCP')
     panel = _holed_part(window, pump)
     meshed = []
     real = solids.extrusion_mesh
@@ -919,7 +915,6 @@ def test_a_preview_past_the_budget_is_counted_not_drawn(window, pump):
     part's volume and said, the preview is taken down, and Mesh is what
     makes them. The grid over it is 500,000 cells, its holes among them,
     and the count is what the mesh holds (2026-10-20)."""
-    pytest.importorskip('OCP')
     from visualdynamics.gui.main_window import MESH_PREVIEW_BRICKS
 
     panel = _holed_part(window, pump)
@@ -938,7 +933,6 @@ def test_a_preview_past_the_budget_is_counted_not_drawn(window, pump):
 def test_mesh_runs_with_the_bar_up(window, pump, monkeypatch):
     """Mesh goes through the window's long-verb path: the bar is fed
     (done, total) from the mesher's stages and ends full."""
-    pytest.importorskip('OCP')
     panel = _holed_part(window, pump)
     ticks = []
     monkeypatch.setattr(window, '_strip_tick',
@@ -975,7 +969,6 @@ def test_mesh_takes_the_size_as_typed_before_the_edit_is_finished(window, pump):
     (Brandon, 2026-10-19): the box reports only finished edits, and a
     button takes no focus on macOS, so the click finished nothing.
     The apply reads the text as typed."""
-    pytest.importorskip('OCP')
     panel = _holed_part(window, pump)
     assert panel.size.value() == pytest.approx(0.25)
     panel.size.lineEdit().setText('0.4')        # typed, not finished

@@ -12,8 +12,6 @@ from visualdynamics.core import shells, solids
 from visualdynamics.core.geometry import Geometry
 from visualdynamics.rotate import frame_from_angles
 
-pytest.importorskip('OCP')
-
 INCH = 0.0254
 
 

@@ -75,7 +75,7 @@ setup() {
 
     echo '== the project and its build tools, into Windows Python'
     "$WINE" "$PY" -m pip install --prefer-binary -q \
-        "$WINREPO" cadquery-ocp pyinstaller pillow 2>/dev/null
+        "$WINREPO" pyinstaller pillow 2>/dev/null
 
     if [[ ! -e "$WINEPREFIX/drive_c/Program Files (x86)/Inno Setup 6/ISCC.exe" ]]; then
         echo '== Inno Setup'

@@ -100,10 +100,11 @@ jobs:
           sudo apt-get update -qq
           grep -vE '^\s*(#|$)' packaging/linux/apt-packages.txt | tr '\n' '\0' |
             xargs -0 sudo apt-get satisfy -y -qq --no-install-recommends
-      # [step]: the CAD kernel ships in every packaged build (the spec
-      # collects OCP only if it is installed — without the extra the
-      # runner's package silently lacked STEP/IGES import, 2026-09-03)
-      - run: pip install -e '.[step,app]' pyinstaller pillow
+      # the CAD kernel ships in every packaged build: the spec collects
+      # OCP only if it is installed (without it the runner's package
+      # silently lacked STEP/IGES import, 2026-09-03), and it is a
+      # dependency since 2026-10-29, no longer the `step` extra
+      - run: pip install -e '.[app]' pyinstaller pillow
       - name: Build
         env:
           # appimagetool is itself an AppImage and needs FUSE, which a
@@ -127,10 +128,11 @@ jobs:
         with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
         with: {python-version: '3.14', cache: pip}
-      # [step]: the CAD kernel ships in every packaged build (the spec
-      # collects OCP only if it is installed — without the extra the
-      # runner's package silently lacked STEP/IGES import, 2026-09-03)
-      - run: pip install -e '.[step,app]' pyinstaller pillow
+      # the CAD kernel ships in every packaged build: the spec collects
+      # OCP only if it is installed (without it the runner's package
+      # silently lacked STEP/IGES import, 2026-09-03), and it is a
+      # dependency since 2026-10-29, no longer the `step` extra
+      - run: pip install -e '.[app]' pyinstaller pillow
       - run: powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
       # Run what was just built, on the real Windows this runner is:
       # install silently, open a project in the installed application,
@@ -172,10 +174,11 @@ jobs:
         with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
         with: {python-version: '3.14', cache: pip}
-      # [step]: the CAD kernel ships in every packaged build (the spec
-      # collects OCP only if it is installed — without the extra the
-      # runner's package silently lacked STEP/IGES import, 2026-09-03)
-      - run: pip install -e '.[step,app]' pyinstaller pillow
+      # the CAD kernel ships in every packaged build: the spec collects
+      # OCP only if it is installed (without it the runner's package
+      # silently lacked STEP/IGES import, 2026-09-03), and it is a
+      # dependency since 2026-10-29, no longer the `step` extra
+      - run: pip install -e '.[app]' pyinstaller pillow
       - name: Sparkle, the updater the app carries
         run: |
           packaging/fetch_sparkle.sh "$RUNNER_TEMP/sparkle"

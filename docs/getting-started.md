@@ -44,11 +44,12 @@ pytest-xdist, ruff and the rest).
 
 A Python install needs Python 3.12 or newer. The dependencies are
 installed with the package: numpy, scipy, pandas, h5py, netCDF4, pint,
-vtk, pyvista, pyvistaqt, PySide6, pyqtgraph, openpyxl, certifi and
-truststore. One part is optional: the geometry kernel that solids
-(Add Block, Mesh Solids and the rest) and the STEP/IGES importer
-use. The compiled packages include it, and a Python install adds it
-with `pip install "visualdynamics[step]"`.
+vtk, pyvista, pyvistaqt, PySide6, pyqtgraph, openpyxl, certifi,
+truststore and cadquery-ocp. The last is the OpenCASCADE geometry
+kernel that solids (Add Block, Mesh Solids and the rest) and the
+STEP/IGES importer use. It has wheels for Python 3.11 to 3.14 on
+macOS, Windows and Linux with glibc 2.28 or newer (RHEL 8 and later),
+so a Python install needs one of those.
 
 ## The app
 

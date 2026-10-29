@@ -135,7 +135,6 @@ def test_an_extrusion_keeps_its_rings_through_brick_mesh():
 
 
 def test_the_project_and_the_pane_mesh_a_tilted_hole_into_bricks(window, pump, monkeypatch):
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_mesh import _settled
     from test_solids_pane import _acts, _pick, _rows
@@ -297,7 +296,6 @@ def test_the_smallest_feature_and_the_size_suggested_from_it():
 def test_the_pane_opens_at_the_size_likely_to_hold(window, pump):
     """Brandon's block: the pane opened at 0.95 in, half a misread
     wall; it opens at 0.2 in, the holes' radius over five."""
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_pane import _acts, _pick, _rows
 
@@ -403,7 +401,6 @@ def test_a_suggested_size_over_the_limit_offers_tetras(window, pump, monkeypatch
     the limit: the question says so and offers tetrahedra in place of
     the size, and taking them switches the pane without meshing. A size
     typed past the limit is refused in the bar, not a traceback."""
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_pane import _acts, _pick, _rows
 
@@ -444,7 +441,6 @@ def test_a_suggested_size_over_the_limit_offers_tetras(window, pump, monkeypatch
 
 
 def test_the_question_names_the_thin_wall(window, pump, monkeypatch):
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_pane import _acts, _pick, _rows
 
@@ -495,7 +491,6 @@ def test_the_question_names_the_thin_wall(window, pump, monkeypatch):
 
 
 def test_detect_element_size_and_the_question_before_a_fit(window, pump, monkeypatch):
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_mesh import _settled
     from test_solids_pane import _acts, _pick, _rows

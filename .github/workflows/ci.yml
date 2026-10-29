@@ -93,7 +93,7 @@ jobs:
             libxdamage1 libxrandr2 libasound2t64
 
       - name: Install visualdynamics and its test tools
-        run: pip install -e '.[dev,step]'
+        run: pip install -e '.[dev]'
 
       # The ESCDF reference implementation is the agreement oracle for
       # io/escdf.py both ways; it is not on PyPI, and PyPI refuses a
@@ -222,7 +222,7 @@ jobs:
             libxdamage1 libxrandr2 libasound2t64
 
       - name: Install visualdynamics and its test tools
-        run: pip install -e '.[dev,step]'
+        run: pip install -e '.[dev]'
 
       - name: Test the demonstration models
         env:

@@ -29,7 +29,6 @@ def _project():
 
 
 def test_the_primitives_are_where_and_what_they_were_typed():
-    pytest.importorskip('OCP')
     project, name, geometry = _project()
     block = project.add_solid_block(name, (1, 2, 3), (4, 2, 1), unit='in')
     cylinder = project.add_solid_cylinder(name, (0, 0, 0), 0.5, 2.0, unit='in')
@@ -48,7 +47,6 @@ def test_angles_turn_a_solid_about_its_center_as_the_block_pane_does():
     """Degrees about X, then Y, then Z (`rotate.frame_from_angles`): a
     quarter turn about Y lays a cylinder along X; thirty degrees about Z
     leaves a block's volume and widens its footprint."""
-    pytest.importorskip('OCP')
     project, name, geometry = _project()
     laid = project.add_solid_cylinder(name, (0, 0, 0), 0.25, 4.0,
                                       angles=(0, 90, 0), unit='in')
@@ -64,7 +62,6 @@ def test_angles_turn_a_solid_about_its_center_as_the_block_pane_does():
 
 
 def test_the_booleans_are_the_arithmetic_of_their_volumes():
-    pytest.importorskip('OCP')
     project, name, geometry = _project()
     a = project.add_solid_block(name, (0, 0, 0), (2, 2, 2), unit='in')
     b = project.add_solid_block(name, (1, 0, 0), (2, 2, 2), unit='in')
@@ -151,7 +148,6 @@ def test_the_frame_wings_frame_is_a_plate_less_its_windows_and_holes():
     solids: a 16 by 6 by 0.5 in plate, its four windows and 41 insert
     holes subtracted — the volume to the arithmetic (the fillets not
     yet), the reason solids were wanted (Brandon, 2026-10-11)."""
-    pytest.importorskip('OCP')
     from visualdynamics.demo import frame_wing as fw
 
     project, name, geometry = _project()
@@ -198,7 +194,6 @@ def test_a_pattern_is_one_solid_made_of_its_original():
     (Brandon, 2026-10-11): it takes its original's name, its copies
     stand where they should, the hole made larger is every copy larger,
     and its counts changed are more holes."""
-    pytest.importorskip('OCP')
     project, name, geometry = _project()
     hole = project.add_solid_cylinder(name, (-7.75, -2.75, -0.25), 0.1451, 1.0,
                                       name='hole', unit='in')
@@ -239,7 +234,6 @@ def test_a_pattern_turned_turns_its_rows():
     """A row of three holes along X in a plate, the part turned a
     quarter about Z: the row runs along Y, the pattern's own axes
     turned with its original."""
-    pytest.importorskip('OCP')
     project, name, geometry = _project()
     plate = project.add_solid_block(name, (0, 0, 0), (4, 4, 0.5), unit='in')
     hole = project.add_solid_cylinder(name, (-1, 0, 0), 0.2, 1.0, unit='in')
@@ -273,7 +267,6 @@ def test_a_rounded_block_is_a_block_less_its_corners():
     its volume the box's less (4 - pi) c^2 per unit depth, a point in a
     corner's square inside only within the radius of the arc's center,
     and the radius at most half the narrower width across."""
-    pytest.importorskip('OCP')
     project, name, geometry = _project()
     window = project.add_solid_block(name, (0, 0, 0), (3.375, 5, 0.5), corner=0.138,
                                      unit='in')
@@ -315,7 +308,6 @@ def test_a_solid_is_changed_after_it_is_made():
     there. A hole made larger and moved is a larger hole elsewhere in
     the plate it was subtracted from — the boolean keeps its solid by id
     — and the journal reads what was typed; only what is given changes."""
-    pytest.importorskip('OCP')
     project, name, geometry = _project()
     plate = project.add_solid_block(name, (0, 0, 0), (4, 4, 0.5), name='plate',
                                     unit='in')
@@ -358,7 +350,6 @@ def test_a_part_moves_and_turns_whole():
     slid: the hole goes round with it, the volume is kept, and the
     extent lands where the turned and slid box does. Turned about the
     middle of its extent, so a part turned in place stays put."""
-    pytest.importorskip('OCP')
     project, name, geometry = _project()
     plate = project.add_solid_block(name, (0, 0, 0), (4, 2, 0.5), unit='in')
     hole = project.add_solid_cylinder(name, (1, 0, 0), 0.25, 1.0, unit='in')
@@ -394,8 +385,8 @@ def test_a_pattern_rides_the_file(tmp_path):
 
 
 def test_without_the_kernel_the_volume_says_how_to_install_it(monkeypatch):
-    """Every kernel call says how to get the kernel; the volume raised a
-    bare ImportError instead (2026-10-13)."""
+    """Every kernel call says how to get the kernel back; the volume
+    raised a bare ImportError instead (2026-10-13)."""
     import sys
 
     from visualdynamics.core import solids
@@ -404,5 +395,6 @@ def test_without_the_kernel_the_volume_says_how_to_install_it(monkeypatch):
     geometry = Geometry(node_id=[], node_xyz=np.empty((0, 3)))
     block = solids.add_block(geometry, (0, 0, 0), (1, 1, 1))
     monkeypatch.setitem(sys.modules, 'OCP', None)
-    with pytest.raises(ValueError, match=r"pip install 'visualdynamics\[step\]'"):
+    with pytest.raises(ValueError,
+                       match='pip install --force-reinstall cadquery-ocp'):
         solids.volume(geometry, block)

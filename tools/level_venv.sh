@@ -47,8 +47,8 @@ print('\n'.join(moved + added) if moved or added else '  already level')
 PY
 }
 
-level .venv -e '.[dev,step,docs,app]' pyinstaller pillow || exit 1
-level .venv-x86_64 '.[step,app]' pyinstaller pillow || exit 1
+level .venv -e '.[dev,docs,app]' pyinstaller pillow || exit 1
+level .venv-x86_64 '.[app]' pyinstaller pillow || exit 1
 
 # the two builds ship together, so the interpreter and the libraries
 # they freeze must agree — one interpreter start per venv, the Intel

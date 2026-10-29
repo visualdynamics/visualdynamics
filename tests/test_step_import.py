@@ -20,7 +20,6 @@ from visualdynamics.io import import_file
 
 def _write_box(path, dx=100.0, dy=50.0, dz=25.0):
     """A named box, written in millimeters."""
-    pytest.importorskip('OCP')
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.IFSelect import IFSelect_RetDone
     from OCP.Interface import Interface_Static
@@ -54,7 +53,6 @@ def test_a_step_box_arrives_as_meter_triangles(tmp_path):
 
 
 def test_iges_reads_through_the_same_door(tmp_path):
-    pytest.importorskip('OCP')
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.IGESControl import IGESControl_Controller, IGESControl_Writer
     from OCP.Interface import Interface_Static
@@ -111,10 +109,11 @@ def test_a_fresh_process_still_converts_to_meters(tmp_path):
         f'(imported from {where})')
 
 
-def test_without_the_kernel_the_refusal_names_the_extra(tmp_path,
-                                                        monkeypatch):
-    """`pip install visualdynamics` has no kernel; the error must say
-    what to install rather than being a bare ImportError."""
+def test_without_the_kernel_the_refusal_says_how_to_reinstall_it(
+        tmp_path, monkeypatch):
+    """A kernel that will not import (a broken install, or a wheel this
+    machine cannot load) is refused with the import error and the
+    command that reinstalls it, not a bare ImportError."""
     path = tmp_path / 'part.step'
     path.write_text('ISO-10303-21;\n', encoding='ascii')
     real_import = builtins.__import__
@@ -125,5 +124,6 @@ def test_without_the_kernel_the_refusal_names_the_extra(tmp_path,
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, '__import__', no_ocp)
-    with pytest.raises(ValueError, match=r"visualdynamics\[step\]"):
+    with pytest.raises(ValueError, match=r'No module named OCP.*pip install '
+                                         '--force-reinstall cadquery-ocp'):
         import_file(path)

@@ -155,7 +155,6 @@ def test_add_cone_and_add_sphere_in_the_pane(window, pump):
     Sphere a radius and no rotation, a sphere turned being the same
     sphere; each Add runs the project's verb, and a sphere, which has no
     sharp edge, draws."""
-    pytest.importorskip('OCP')
     from test_solids_pane import _acts, _add, _part, _pick, _rows
 
     geometry = _part(window, pump)
@@ -202,7 +201,6 @@ def test_add_cone_and_add_sphere_in_the_pane(window, pump):
 
 
 def test_a_cones_pencil_changes_its_top_radius(window, pump):
-    pytest.importorskip('OCP')
     from test_solids_pane import _part, _pencil, _rows
 
     geometry = _part(window, pump)

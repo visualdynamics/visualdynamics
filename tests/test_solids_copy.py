@@ -107,7 +107,6 @@ def test_the_project_copies_solids_and_journals_it():
 def test_copy_and_paste_in_the_tree_moves_solids_between_geometries(window, pump):
     """Solid rows copied, a geometry picked, pasted: the copies are in
     it and selected, and the status says so each way."""
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_pane import _pick, _rows
 
@@ -144,7 +143,6 @@ def test_copy_and_paste_in_the_tree_moves_solids_between_geometries(window, pump
 
 
 def test_a_paste_of_solids_needs_a_geometry_picked(window, pump):
-    pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_pane import _pick, _rows
 

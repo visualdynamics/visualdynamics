@@ -109,7 +109,12 @@ import numpy as np
 
 from ..units import UNKNOWN
 from .compliance import record_at
-from .matrix_checks import channel_labels
+from .matrix_checks import (
+    channel_labels,
+    entry_channels,
+    matrix_entries,
+    mirrors_disagree,
+)
 from .progress import Ticker
 
 #: how far the measured coherence may be from the specified one, either
@@ -297,19 +302,6 @@ def cross_term_lines(specified_coherence: Any, specified_phase: Any,
 
 # ---- the records, laid out as a matrix ---------------------------------------
 
-def _channel_of(data: Any, record: int) -> tuple[tuple[str, str],
-                                                  tuple[str, str]]:
-    """(row channel, column channel) of one record, each (DOF,
-    quantity): a cross term 'acceleration*force/frequency' runs from an
-    acceleration channel to a force channel, so a drive point's
-    accelerometer and its force gauge are two channels."""
-    from .data import channel_quantities
-
-    response, reference = data.record_pair(record)
-    out, into = channel_quantities(data.known_dim(record))
-    return (str(response), out), (str(reference), into)
-
-
 # `record_grid` gives which record holds each entry, not its values:
 # the comparison reads the specification at the measured lines and
 # names the records in its results.
@@ -341,43 +333,18 @@ def record_grid(data: Any, records: Sequence[int] | None = None
     ValueError
         If two records hold one entry.
     """
-    wanted = (range(data.num_records) if records is None
-              else [int(i) for i in records])
+    entries = matrix_entries(data, records)
     channels: list[tuple[str, str]] = []
-    for i in wanted:
-        if data.is_autospectrum(i):
-            row, _column = _channel_of(data, i)
-            if row not in channels:
-                channels.append(row)
+    for i, row, _column in entries:
+        if data.is_autospectrum(i) and row not in channels:
+            channels.append(row)
     index = {channel: k for k, channel in enumerate(channels)}
     grid: list[list[int | None]] = [[None] * len(channels)
                                     for _ in channels]
-    for i in wanted:
-        row, column = _channel_of(data, i)
+    for i, row, column in entries:
         if row in index and column in index:
-            r, c = index[row], index[column]
-            if grid[r][c] is not None:
-                raise ValueError(
-                    f'{data.record_label(grid[r][c])} and '
-                    f'{data.record_label(i)} are both the entry of '
-                    f'{row[0]} against {column[0]}; keep one')
-            grid[r][c] = i
+            grid[index[row]][index[column]] = i
     return channels, grid
-
-
-def _disagrees(term: np.ndarray, mirror: np.ndarray) -> bool:
-    """Whether a cross term and its mirror, both read at the same lines,
-    are not each other's conjugate, to a part in a million, on the lines
-    where both are numbers (a line that is not one is said by its own
-    note)."""
-    term = np.asarray(term, dtype=complex)
-    other = np.conj(np.asarray(mirror, dtype=complex))
-    finite = np.isfinite(term) & np.isfinite(other)
-    if not finite.any():
-        return False
-    term, other = term[finite], other[finite]
-    scale = float(np.max(np.abs(np.concatenate([term, other]))))
-    return not np.allclose(term, other, rtol=1e-6, atol=1e-9 * scale)
 
 
 # The specification is read at the measured lines by `compliance.record_at`,
@@ -1047,8 +1014,8 @@ def compare_matrix(specification: Any, measured: Any, *,
     where = {key: k for k, key in enumerate(measured_channels)}
 
     def measured_term(p: int, q: int) -> tuple[int | None, float]:
-        a = where.get(_channel_of(measured, p)[0])
-        b = where.get(_channel_of(measured, q)[0])
+        a = where.get(entry_channels(measured, p)[0])
+        b = where.get(entry_channels(measured, q)[0])
         if a is None or b is None:
             return None, 1.0
         if measured_grid[a][b] is not None:
@@ -1097,14 +1064,14 @@ def compare_matrix(specification: Any, measured: Any, *,
             # record the grid met first
             mirrors = []
             both = grid[r][c] is not None and grid[c][r] is not None
-            if both and _disagrees(
+            if both and mirrors_disagree(
                     record_at(specification, grid[r][c], lines),
                     record_at(specification, grid[c][r], lines)):
                 mirrors.append('specification')
-            a = where[_channel_of(measured, p)[0]]
-            b = where[_channel_of(measured, q)[0]]
+            a = where[entry_channels(measured, p)[0]]
+            b = where[entry_channels(measured, q)[0]]
             held = (measured_grid[a][b], measured_grid[b][a])
-            if None not in held and _disagrees(ordinate[held[0]],
+            if None not in held and mirrors_disagree(ordinate[held[0]],
                                                ordinate[held[1]]):
                 mirrors.append('measurement')
             if mirrors:

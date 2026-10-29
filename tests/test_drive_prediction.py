@@ -570,7 +570,7 @@ def test_two_records_for_one_entry_are_refused():
                             response_dof=list(spec.response_dof) + ['1Z+'],
                             reference_dof=list(spec.reference_dof) + ['1Z+'],
                             ordinate_dim='acceleration**2/frequency')
-    with pytest.raises(ValueError, match=r'two records at 1Z\+, 1Z\+'):
+    with pytest.raises(ValueError, match=r'both the entry of 1Z\+ against 1Z\+'):
         predict_drives(matrix_frf(TWO), doubled)
 
 

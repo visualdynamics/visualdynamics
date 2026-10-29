@@ -204,6 +204,26 @@ def test_a_fully_coherent_pair_is_drawn_and_an_impossible_one_refused():
         signals.random_history(_pair(cross=1.3), duration=1.0, sample_rate=FS)
 
 
+def test_a_target_is_refused_where_the_realizability_check_fails_it():
+    """Two channels 80 dB apart with a coherence of 1.01 between them.
+    The raw matrix's smallest eigenvalue is about 2e-10 of its largest,
+    small enough to pass for rounding against the loud channel, but the
+    coherence matrix's is -0.01: no set of signals has it, the
+    realizability check says so, and the generator refuses it too."""
+    from visualdynamics.core.matrix_checks import read_realizability
+
+    quiet = 1e-8
+    target = Specification(
+        np.array(BAND), np.array([[1.0] * 2, [1.01 * np.sqrt(quiet)] * 2,
+                                  [quiet] * 2]),
+        response_dof=['1X+', '1X+', '2X+'],
+        reference_dof=['1X+', '2X+', '2X+'],
+        ordinate_dim='force**2/frequency')
+    assert not read_realizability(target).realizable
+    with pytest.raises(ValueError, match='not a matrix any set of signals'):
+        signals.random_history(target, duration=1.0, sample_rate=FS)
+
+
 def test_dofs_are_drawn_in_the_order_asked():
     history = signals.random_history(_pair(), duration=1.0, sample_rate=FS,
                                      dofs=['2X+'], seed=13)

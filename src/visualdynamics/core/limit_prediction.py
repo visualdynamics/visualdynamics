@@ -556,13 +556,15 @@ class LimitPrediction:
 
 def _autospectra(curve: Psd) -> dict[str, list[int]]:
     """The records of `curve` that are autospectra, by response DOF."""
+    from .data import autospectrum
+
+    # `autospectrum` is the one rule: one DOF *and* one quantity on both
+    # sides. Matching the DOFs alone read a drive point's acceleration
+    # against its force as the acceleration's profile (2026-10-28).
     out: dict[str, list[int]] = {}
     for i in range(curve.num_records):
-        reference = (None if curve.reference_dof is None
-                     else str(curve.reference_dof[i]))
-        dof = str(curve.response_dof[i])
-        if reference in (None, '', dof):
-            out.setdefault(dof, []).append(i)
+        if autospectrum(curve, i):
+            out.setdefault(str(curve.response_dof[i]), []).append(i)
     return out
 
 

@@ -237,6 +237,111 @@ def frf_matrix(frf: Any, records: Any = None, values: Any = None
     return rows, columns, matrix, filled
 
 
+def entry_channels(data: Any, record: int
+                   ) -> tuple[tuple[str, str], tuple[str, str]]:
+    """(row channel, column channel) of one record of a spectral matrix.
+
+    A channel is (DOF, quantity), read from the record's dimension
+    (`channel_quantities`): a cross term 'acceleration*force/frequency'
+    runs from an acceleration channel to a force channel, so a drive
+    point's accelerometer and its force gauge are two channels. A
+    record with no reference is its own channel's autospectrum.
+
+    Parameters
+    ----------
+    data : Psd or Specification
+        The matrix's records.
+    record : int
+        Which record.
+
+    Returns
+    -------
+    tuple of ((str, str), (str, str))
+        The row channel and the column channel.
+    """
+    from .data import channel_quantities
+
+    response, reference = data.record_pair(record)
+    out, into = channel_quantities(data.known_dim(record))
+    return (str(response), out), (str(reference), into)
+
+
+# One reading of which record is which entry, for everything that lays a
+# spectral matrix out: the checks here, the matrix comparison and the
+# drive prediction each built their own, and the checks kept the last of
+# two records for one entry where the other two refused (2026-10-28).
+def matrix_entries(data: Any, records: Any = None,
+                   quantity: str | None = None
+                   ) -> list[tuple[int, tuple[str, str], tuple[str, str]]]:
+    """Each record of a spectral matrix with the entry it holds.
+
+    Parameters
+    ----------
+    data : Psd or Specification
+        The matrix's records.
+    records : sequence of int, optional
+        Which records; all of them when omitted.
+    quantity : str, optional
+        Keep only the records whose two channels are both of this
+        quantity.
+
+    Returns
+    -------
+    list of (int, (str, str), (str, str))
+        The record, its row channel and its column channel
+        (`entry_channels`), in record order.
+
+    Raises
+    ------
+    ValueError
+        If two records hold one entry: which of them is the matrix is
+        not in the data.
+    """
+    wanted = (range(data.num_records) if records is None
+              else [int(i) for i in records])
+    entries = []
+    held: dict[tuple[tuple[str, str], tuple[str, str]], int] = {}
+    for i in wanted:
+        row, column = entry_channels(data, i)
+        if quantity is not None and (row[1], column[1]) != (quantity,
+                                                             quantity):
+            continue
+        if (row, column) in held:
+            raise ValueError(
+                f'{data.record_label(held[(row, column)])} and '
+                f'{data.record_label(i)} are both the entry of '
+                f'{row[0]} against {column[0]}; keep one')
+        held[(row, column)] = i
+        entries.append((i, row, column))
+    return entries
+
+
+def mirrors_disagree(term: Any, mirror: Any) -> bool:
+    """Whether a cross term and its mirror, read at the same lines, are
+    not each other's conjugate, to a part in a million of the larger, on
+    the lines where both are numbers. A line that is not a number is
+    left to the note that says so.
+
+    Parameters
+    ----------
+    term, mirror : array_like
+        The two halves of one pair, complex, one value per line.
+
+    Returns
+    -------
+    bool
+        True when they disagree.
+    """
+    term = np.asarray(term, dtype=complex)
+    other = np.conj(np.asarray(mirror, dtype=complex))
+    finite = np.isfinite(term) & np.isfinite(other)
+    if not finite.any():
+        return False
+    term, other = term[finite], other[finite]
+    scale = float(np.max(np.abs(np.concatenate([term, other]))))
+    return not np.allclose(term, other, rtol=1e-6, atol=1e-9 * scale)
+
+
 def spectral_matrix(psd: Any, records: Any = None,
                     quantity: str | None = None
                     ) -> tuple[list[tuple[str, str]], np.ndarray, np.ndarray]:
@@ -248,23 +353,12 @@ def spectral_matrix(psd: Any, records: Any = None,
     channel to a force channel. `records` picks the records (all when
     omitted) and `quantity` keeps only the records whose two channels
     are both of it. Returns (channels, matrix of lines x n x n, filled),
-    with an entry no record supplied zero and not filled. The principal
-    shapes and the realizability and conditioning readings all assemble
-    their matrix here.
+    with an entry no record supplied zero and not filled; two records
+    for one entry are refused (`matrix_entries`). The principal shapes
+    and the realizability and conditioning readings all assemble their
+    matrix here.
     """
-    from .data import channel_quantities
-
-    wanted = (list(range(psd.num_records)) if records is None
-              else [int(i) for i in records])
-    references = (psd.reference_dof if psd.reference_dof is not None
-                  else psd.response_dof)
-    entries = []
-    for i in wanted:
-        out, into = channel_quantities(psd.known_dim(i))
-        if quantity is not None and (out, into) != (quantity, quantity):
-            continue
-        entries.append((i, (str(psd.response_dof[i]), out),
-                        (str(references[i]), into)))
+    entries = matrix_entries(psd, records, quantity)
     channels: list[tuple[str, str]] = []
     for _i, row, _column in entries:
         if row not in channels:
@@ -973,23 +1067,41 @@ class Realizability:
         return text
 
 
-def check_spectral_matrix(frequency: Any, matrix: Any, channels: Any, *,
-                          tolerance: float = REALIZABLE_TOLERANCE,
-                          keep_diagonal: bool = True,
-                          notes: Any = (),
-                          progress: Callable[[int, int], None] | None = None
-                          ) -> Realizability:
-    """Whether a cross-spectral matrix is realizable at every line, and
-    the nearest that is, as a `Realizability`.
+# The verdict, line by line, apart from the repair: the random signal
+# generator refuses a target on the lines this fails, so the two cannot
+# disagree. It once tested the raw matrix's eigenvalues at 1e-9 of the
+# largest, which misses an impossible coherence between two channels far
+# apart in level (2026-10-28).
+def judge_lines(frequency: Any, matrix: Any, channels: Any, *,
+                tolerance: float = REALIZABLE_TOLERANCE,
+                keep_diagonal: bool = True) -> Realizability:
+    """Whether a cross-spectral matrix is realizable at every line, with
+    nothing repaired and nothing noted: `check_spectral_matrix` without
+    its repair. `repaired` is the coherence matrix as it stands.
 
-    `matrix` is lines x n x n, complex, any units (the check is on the
-    coherence matrix). A line holding a value that is not a finite
-    number is not judged, and is noted with the first entry that holds
-    one; so is a line where the matrix is zero throughout, since a
-    matrix of nothing says nothing about how channels move together. A
-    channel with no power and no cross term at any line judged is named.
-    Lines that fail are repaired (`repair_coherence`, which `progress`
-    is passed to); the rest are left exactly as they are.
+    Parameters
+    ----------
+    frequency : array_like
+        The lines, in Hz.
+    matrix : array_like
+        Lines x n x n, complex, any units.
+    channels : sequence
+        A label per channel.
+    tolerance : float, optional
+        As for `check_spectral_matrix`.
+    keep_diagonal : bool, optional
+        Carried into the reading.
+
+    Returns
+    -------
+    Realizability
+        Its `failing` says which lines fail.
+
+    Raises
+    ------
+    ValueError
+        If the tolerance is not between 0 and 1, or the matrix is not
+        one square matrix per line, or is empty.
     """
     tolerance = float(tolerance)
     if not 0.0 < tolerance < 1.0:
@@ -1019,12 +1131,43 @@ def check_spectral_matrix(frequency: Any, matrix: Any, channels: Any, *,
         eigenvalues[:, judged] = np.linalg.eigvalsh(
             0.5 * (coherence[judged] + conjugate[judged])).T
     coherence = np.where(finite[:, None, None], coherence, np.nan + 0j)
-    reading = Realizability(
+    return Realizability(
         frequency=f, coherence=coherence, scale=scale,
         eigenvalues=eigenvalues,
         asymmetry=np.where(finite, asymmetry, np.nan), negative=negative,
         repaired=coherence, channels=tuple(str(c) for c in channels),
         tolerance=tolerance, keep_diagonal=bool(keep_diagonal), notes=())
+
+
+def check_spectral_matrix(frequency: Any, matrix: Any, channels: Any, *,
+                          tolerance: float = REALIZABLE_TOLERANCE,
+                          keep_diagonal: bool = True,
+                          notes: Any = (),
+                          progress: Callable[[int, int], None] | None = None
+                          ) -> Realizability:
+    """Whether a cross-spectral matrix is realizable at every line, and
+    the nearest that is, as a `Realizability`.
+
+    `matrix` is lines x n x n, complex, any units (the check is on the
+    coherence matrix). A line holding a value that is not a finite
+    number is not judged, and is noted with the first entry that holds
+    one; so is a line where the matrix is zero throughout, since a
+    matrix of nothing says nothing about how channels move together. A
+    channel with no power and no cross term at any line judged is named.
+    Lines that fail are repaired (`repair_coherence`, which `progress`
+    is passed to); the rest are left exactly as they are.
+    """
+    reading = judge_lines(frequency, matrix, channels, tolerance=tolerance,
+                          keep_diagonal=keep_diagonal)
+    f, coherence, scale = reading.frequency, reading.coherence, reading.scale
+    eigenvalues, negative = reading.eigenvalues, reading.negative
+    matrix = np.asarray(matrix, dtype=np.complex128)
+    n = matrix.shape[1]
+    finite = np.isfinite(matrix).all(axis=(1, 2))
+    safe = np.where(finite[:, None, None], matrix, 0.0)
+    zero = finite & ~np.any(safe, axis=(1, 2))
+    judged = finite & ~zero
+    asymmetry = reading.asymmetry
     failing = reading.failing
     repaired = coherence.copy()
     if failing.any():

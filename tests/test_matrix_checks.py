@@ -371,6 +371,24 @@ def test_an_incomplete_matrix_is_refused_and_a_mirror_completes_one():
         read_realizability(_frf(np.eye(2)))
 
 
+def test_two_records_for_one_entry_are_refused_as_the_comparison_refuses():
+    """A second record of 1Z+ against 2Z+ that disagrees with the first:
+    which one is the matrix is not in the data, so realizability,
+    conditioning and the principal shapes refuse it, in the words the
+    matrix comparison and the drive prediction use. It once kept the
+    last one and judged that."""
+    full = _csd(OPPOSED)
+    doubled = Psd(F, np.vstack([full.ordinate, np.zeros((1, len(F)))]),
+                  response_dof=list(full.response_dof) + ['1Z+'],
+                  reference_dof=list(full.reference_dof) + ['2Z+'],
+                  ordinate_dim=list(full.ordinate_dim)
+                  + ['acceleration**2/frequency'])
+    for read in (read_realizability, read_conditioning):
+        with pytest.raises(ValueError, match=r'both the entry of 1Z\+ '
+                                             r'against 2Z\+; keep one'):
+            read(doubled)
+
+
 def test_a_phase_that_wanders_fails_only_where_it_cannot_hold():
     """Coherence 0.81 between every pair, in step between 1-2 and 2-3,
     and 1-3's phase swept from 0 to 180 degrees. Each line's verdict is

@@ -606,11 +606,20 @@ def _matrix_to_modal(data, shapes, records, report):
         if kind == 'motion':
             inverse = _fit(phi, qi, len(kept), shapes, report)
             modal = inverse @ block @ inverse.conj().T
-            explained = phi @ modal @ phi.T
+            # The residual is the density of the motion the modes miss,
+            # r = P u with P = I − Φ Φ⁺, so its autos are diag(P S Pᵀ):
+            # the same signal the rows and the FRF paths take. Its autos
+            # were once read as diag(S) − diag(Φ Φ⁺ S Φ⁺ᵀ Φᵀ), which keeps
+            # the cross terms between the explained motion and the
+            # residual; they cancel in the sum over channels but not
+            # channel by channel, so a channel whose residual moved in
+            # step with a mode was misread, down to zero (2026-10-28,
+            # found by Kevin Cross's transformation reading, #209).
+            missed = np.eye(len(kept)) - phi @ inverse
+            residual = missed @ block @ missed.T
             for a, dof in enumerate(kept):
                 power = float(np.sum(np.real(block[:, a, a])))
-                short = float(np.sum(np.real(block[:, a, a]
-                                             - explained[:, a, a])))
+                short = float(np.sum(np.real(residual[:, a, a])))
                 report.residual[dof] = (max(short, 0.0) / power
                                         if power > 0.0 else 0.0)
         else:

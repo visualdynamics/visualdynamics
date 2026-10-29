@@ -191,6 +191,28 @@ def test_the_density_residual_is_the_share_of_each_autos_power_missed():
     assert report.notes == [], 'no cross-quantity terms to leave out'
 
 
+def test_a_density_residual_moving_with_a_mode_is_still_read_per_channel():
+    """One coherent motion, u = Φ₁ + 0.5 v with v = (1, 1, -1) out of
+    reach, so S = u uᵀ and the residual is 0.5 v on every channel. Each
+    channel's share of power is then the square of the rows path's rms
+    share on the same motion: 1/9, 1 and 1. Subtracting the explained
+    power instead keeps the cross terms and reads 5/9, 1 and 0."""
+    u = PHI[:, 0] + 0.5 * np.array([1.0, 1.0, -1.0])
+    matrix = np.outer(u, u)
+    pairs = [(a, b) for a in DOFS for b in DOFS]
+    _modal, report = to_modal(_psd(pairs, [matrix[DOFS.index(a), DOFS.index(b)]
+                                           for a, b in pairs]), _shapes())
+    assert report.residual == {'1X+': pytest.approx(1.0 / 9.0),
+                               '2X+': pytest.approx(1.0),
+                               '3X+': pytest.approx(1.0)}
+    history = visualdynamics.TimeHistory(
+        T, np.outer(u, np.sin(2 * np.pi * 4 * T)), response_dof=DOFS,
+        ordinate_dim='acceleration')
+    _rows, rows = to_modal(history, _shapes())
+    assert {dof: share ** 2 for dof, share in rows.residual.items()} == \
+        pytest.approx(report.residual)
+
+
 @pytest.mark.parametrize('data, said', [
     (_psd([(a, b) for a in DOFS for b in DOFS], dims='temperature**2/frequency'),
      (r'nothing to transform: no motion or force density of this object is on '

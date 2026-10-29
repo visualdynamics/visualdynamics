@@ -644,6 +644,21 @@ def test_the_matching_quantity_is_chosen_among_records_at_one_channel():
     assert p.notches[0].depth_db == pytest.approx(10 * np.log10(2.0))
 
 
+def test_a_drive_point_cross_term_at_a_limit_channel_is_not_its_profile():
+    """At 2Z+ a cross term of its acceleration against a force gauge on
+    the same DOF comes first, then the acceleration's own profile. One
+    DOF on both sides is not an autospectrum when the quantities differ,
+    so the profile is read, and the notch is the 3 dB one."""
+    profiles = Specification(np.array([20.0, 2000.0]),
+                             np.array([[1.0, 1.0], [0.18 * G ** 2] * 2]),
+                             response_dof=['2Z+', '2Z+'],
+                             reference_dof=['2Z+', '2Z+'],
+                             ordinate_dim=['acceleration*force/frequency',
+                                           'acceleration**2/frequency'])
+    p = predict_limits(frf(bump(3.0, 240, 260)), spec(), profiles)
+    assert p.notches[0].depth_db == pytest.approx(10 * np.log10(2.0))
+
+
 def test_an_undeclared_profile_is_preferred_over_another_quantity():
     """And with only a force and an undeclared one, the undeclared one is
     taken, and refused for its undeclared units, the nearer reason."""

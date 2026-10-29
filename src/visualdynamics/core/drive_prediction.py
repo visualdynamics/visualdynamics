@@ -116,7 +116,13 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .matrix_checks import channel_labels, runs
+from .matrix_checks import (
+    channel_labels,
+    entry_channels,
+    matrix_entries,
+    mirrors_disagree,
+    runs,
+)
 from .progress import Ticker
 from .shaker import ShakerRating
 
@@ -296,16 +302,6 @@ def through(plant: Any, density: Any) -> np.ndarray:
 
 # ---- channels and the two matrices --------------------------------------------
 
-def _channel(dof: Any, dimension: str, side: int) -> tuple[str, str]:
-    """(DOF, quantity) for one side of a record: 0 the response, 1 the
-    reference, read from the record's dimension (`channel_quantities`),
-    so a drive point's accelerometer and its force gauge are two
-    channels."""
-    from .data import channel_quantities
-
-    return str(dof), channel_quantities(dimension)[side]
-
-
 def _plant(frf: Frf) -> tuple[list[tuple[str, str]], list[tuple[str, str]],
                               np.ndarray, np.ndarray]:
     """The FRF's records as (rows, columns, matrix, filled), assembled
@@ -357,26 +353,15 @@ def _read_target(specification: Psd, channels: list[tuple[str, str]],
     from ..units import UNKNOWN
     from .compliance import record_at
 
-    references = (specification.reference_dof
-                  if specification.reference_dof is not None
-                  else specification.response_dof)
-    held: dict[tuple[tuple[str, str], tuple[str, str]], int] = {}
     for i in range(specification.num_records):
-        dimension = str(specification.ordinate_dim[i])
-        if dimension == UNKNOWN:
+        if str(specification.ordinate_dim[i]) == UNKNOWN:
             raise ValueError(
                 f'the units of the specification at '
                 f'{specification.response_dof[i]} are not declared, so '
                 'its levels cannot be read against the FRF; declare '
                 'them first')
-        row = _channel(specification.response_dof[i], dimension, 0)
-        column = _channel(references[i], dimension, 1)
-        if (row, column) in held:
-            raise ValueError(
-                f'the specification holds two records at '
-                f'{specification.response_dof[i]}, {references[i]}; '
-                'keep one')
-        held[(row, column)] = i
+    held = {(row, column): i
+            for i, row, column in matrix_entries(specification)}
     labels = channel_labels(channels)
     n = len(channels)
     ordinate = np.atleast_2d(np.asarray(specification.ordinate))
@@ -397,20 +382,16 @@ def _read_target(specification: Psd, channels: list[tuple[str, str]],
                     'channels the drives depend on how each pair moves '
                     'together, so every pair has to be written')
             values = ordinate[record]
-            if a != b and pair in held and mirror in held:
-                # a cross term and its mirror are one statement, each the
-                # other's conjugate; two that disagree leave the target
-                # unread rather than read from whichever comes first
-                other = np.conj(ordinate[held[mirror]])
-                scale = max(float(np.max(np.abs(values), initial=0.0)),
-                            float(np.max(np.abs(other), initial=0.0)))
-                if not np.allclose(values, other, rtol=1e-6,
-                                   atol=1e-9 * scale):
-                    raise ValueError(
-                        'the cross terms of the specification between '
-                        f'{labels[a]} and {labels[b]} are not conjugates '
-                        'of each other, so the target between them '
-                        'cannot be read; keep one or make them agree')
+            # a cross term and its mirror are one statement, each the
+            # other's conjugate; two that disagree leave the target
+            # unread rather than read from whichever comes first
+            if (a != b and pair in held and mirror in held
+                    and mirrors_disagree(values, ordinate[held[mirror]])):
+                raise ValueError(
+                    'the cross terms of the specification between '
+                    f'{labels[a]} and {labels[b]} are not conjugates '
+                    'of each other, so the target between them '
+                    'cannot be read; keep one or make them agree')
             read = record_at(specification, record, lines)
             if a == b:
                 read = np.real(read)
@@ -442,7 +423,7 @@ def _control_channels(specification: Psd, rows: list[tuple[str, str]]
                 f'{specification.response_dof[i]} are not declared, so '
                 'its levels cannot be read against the FRF; declare '
                 'them first')
-        key = _channel(specification.response_dof[i], dimension, 0)
+        key = entry_channels(specification, i)[0]
         if key not in wanted:
             wanted.append(key)
     for dof, quantity in wanted:

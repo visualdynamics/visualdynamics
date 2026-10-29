@@ -79,11 +79,6 @@ from .sine import SineSweepSpecification
 #: the square root of
 _DENSITY = '**2/frequency'
 
-#: how far below zero an eigenvalue of a target's matrix at a line may
-#: be, as a share of the largest, and still be read as rounding: a
-#: matrix no set of signals has is refused, not drawn
-NEGATIVE_EIGENVALUE = 1e-9
-
 #: the share of a burst frame's on-time each cosine taper takes, at
 #: either end of the burst, by default
 BURST_TAPER = 0.05
@@ -179,15 +174,19 @@ def _factors(block: np.ndarray, lines: np.ndarray) -> np.ndarray:
         autos = np.real(np.einsum('kii->ki', block))
         return np.sqrt(np.clip(autos, 0.0, None))[..., None] \
             * np.eye(block.shape[1])[None]
-    values, vectors = np.linalg.eigh(np.conj(block))
-    top = np.max(np.abs(values), axis=1, keepdims=True)
-    bad = values < -NEGATIVE_EIGENVALUE * np.where(top > 0, top, 1.0)
-    if bad.any():
-        k = int(np.flatnonzero(bad.any(axis=1))[0])
+    from .matrix_checks import judge_lines
+
+    # a matrix no set of signals has is refused, not drawn, on exactly
+    # the lines the realizability check fails
+    verdict = judge_lines(lines, block, range(block.shape[1]))
+    if verdict.failing.any():
+        k = int(np.flatnonzero(verdict.failing)[0])
         raise ValueError(
             f'at {lines[k]:.4g} Hz the target is not a matrix any set of '
-            f'signals has (an eigenvalue of {values[k].min():.3g} against '
-            f'{top[k, 0]:.3g}): its coherences cannot all hold together')
+            f'signals has (its coherence matrix has an eigenvalue of '
+            f'{verdict.smallest[k]:.3g} against {verdict.largest[k]:.3g}): '
+            'its coherences cannot all hold together')
+    values, vectors = np.linalg.eigh(np.conj(block))
     return vectors * np.sqrt(np.clip(values, 0.0, None))[:, None, :]
 
 

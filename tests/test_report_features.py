@@ -12,6 +12,7 @@ off.
 from __future__ import annotations
 
 import json
+import re
 
 import numpy as np
 import pytest
@@ -32,6 +33,12 @@ PRESET_LIVE = ('skeleton_sections', 'run_sections', 'findings',
                'check_blocks', 'data_index', 'calibration_in_date',
                'report_identity', 'record_captions', 'plot_conventions',
                'shared_decades')
+#: a feature not yet built that waits on no other feature, read off the
+#: registry so the tests of a refusal do not change each time one is built
+UNBUILT = next(key for key, feature in rf.FEATURES.items()
+               if not feature.available
+               and not any(need in rf.FEATURES for need in feature.requires))
+UNBUILT_TITLE = rf.FEATURES[UNBUILT].title
 #: the plot conventions and their option
 CONVENTIONS = ('plot_conventions', 'shared_decades')
 
@@ -138,9 +145,9 @@ def test_a_lone_string_is_one_key_not_its_letters():
 def test_a_feature_not_yet_built_is_refused_and_says_so():
     report = Report()
     with pytest.raises(ValueError,
-                       match='Requirement and results.*not yet available'):
-        rf.configure(report, enable=['test_requirement'])
-    assert rf.reason('test_requirement') == 'not yet available'
+                       match=f'{re.escape(UNBUILT_TITLE)}.*not yet available'):
+        rf.configure(report, enable=[UNBUILT])
+    assert rf.reason(UNBUILT) == 'not yet available'
     # and an unbuilt feature names what it will wait on
     assert rf.reason('cross_axis') == (
         'not yet available; waits on Requirement and results')
@@ -182,9 +189,8 @@ def test_a_capability_is_probed_by_its_module():
 
 def test_a_refused_call_changes_nothing():
     report = Report(features=['plot_conventions'])
-    for bad in ({'enable': ['plot_conventions', 'test_requirement']},
-                {'disable': ['plot_conventions'],
-                 'enable': ['test_requirement']},
+    for bad in ({'enable': ['plot_conventions', UNBUILT]},
+                {'disable': ['plot_conventions'], 'enable': [UNBUILT]},
                 {'enable': ['shared_decades'], 'disable': ['shared_decades']}):
         with pytest.raises(ValueError):
             rf.configure(report, **bad)
@@ -238,7 +244,7 @@ def test_a_preset_replaces_and_the_set_is_read_back_as_a_preset():
 def test_enabled_reads_only_what_can_act():
     """A key stored on the report that the registry does not know, an
     unbuilt one, or one whose requirement is off does nothing."""
-    report = Report(features=['from_a_later_version', 'test_requirement',
+    report = Report(features=['from_a_later_version', UNBUILT,
                               'shared_decades'])
     assert rf.enabled(report) == ()
     report.features = [*report.features, 'plot_conventions']
@@ -269,7 +275,7 @@ def test_the_project_verb_is_journaled_and_refuses_in_the_core(run):
             f"project.report_features({name!r}, preset='test_report')")
         before = list(project.journal)
         with pytest.raises(ValueError, match='not yet available'):
-            project.report_features(name, enable=['test_requirement'])
+            project.report_features(name, enable=[UNBUILT])
         assert project.journal == before, 'a refusal is not journaled'
         with pytest.raises(TypeError, match='not a report'):
             project.report_features('Specification', enable=['plot_conventions'])
@@ -749,7 +755,7 @@ def test_a_refusal_shows_on_the_panel_and_changes_nothing(editing):
     _window, editor, report, _name = editing
     edits = []
     editor.edited.connect(lambda: edits.append(1))
-    editor._operate({'op': 'features', 'enable': ['test_requirement']})
+    editor._operate({'op': 'features', 'enable': [UNBUILT]})
     assert report.features == []
     assert 'not yet available' in editor.features_panel.notes.text()
     assert edits == [], 'nothing changed: no edit to journal, no rebuild'

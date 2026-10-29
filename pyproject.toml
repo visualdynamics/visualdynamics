@@ -53,6 +53,14 @@ dependencies = [
     # a Mozilla bundle never looks (2026-09-25). pip's own choice for
     # the same job; no dependencies of its own.
     "truststore",
+    # BSD-3-Clause, pure Python, no dependencies of its own. The sparse
+    # eigensolution limits the BLAS thread pools through it while it
+    # runs (`fem.blas_threads`): numpy and scipy each load their own
+    # OpenBLAS with a thread per logical CPU, and the solver alternates
+    # between them on every step, so the two pools contend; a plate of
+    # 10,086 DOF solved for 200 modes took 19.6 s on 20 logical CPUs and
+    # 1.7 s at four threads a pool (2026-10-29).
+    "threadpoolctl",
     # BSD-3-Clause. Runtime, not test-only: the low-pass, the
     # integration, the filter view's response curve and the sine matched
     # filter all call it. It was declared a test dependency for a long

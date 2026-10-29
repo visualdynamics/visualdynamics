@@ -107,9 +107,10 @@ last four.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any
@@ -271,6 +272,21 @@ LANCZOS_BASIS = 20
 #: of them for 400 modes (2026-10-29), and growing by a twentieth
 #: between checks costs at most a twentieth more basis than needed.
 LANCZOS_CHECK_GROWTH = 0.05
+#: the logical CPUs per BLAS thread the sparse eigensolution allows each
+#: OpenBLAS pool (`blas_threads`), and the most threads it gives one.
+#: numpy and scipy load one pool each, a thread per logical CPU, and
+#: the solver alternates between them on every step; an idle OpenBLAS
+#: thread spins before it sleeps, so the two pools together are
+#: twice the machine. Measured on the 10,086-DOF plate for 200 modes
+#: (2026-10-29): on 20 logical CPUs 1.7 s at four or six threads a
+#: pool, 2.8 s at ten, 9.0 s at twelve and 19.6 s at the default
+#: twenty; on four-CPU Linux and three-CPU Apple silicon runners 2.8
+#: and 3.0 s at one or two against 10.1 and 10.2 s at the default.
+#: Windows' OpenBLAS showed no contention and is unaffected either way,
+#: and Accelerate, which macOS 14 and later's wheels use, is not an
+#: OpenBLAS pool and is left alone.
+BLAS_CPUS_PER_THREAD = 4
+BLAS_MOST_THREADS = 8
 
 
 #: how many elements of one family are rotated and scattered at once:
@@ -1342,6 +1358,32 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
             raise NotConverged(
                 f'{dimension} Lanczos vectors left a residual of {worst:.1e}')
     return sigma + 1.0 / theta, basis[:, :dimension] @ ritz, residuals
+
+
+@contextlib.contextmanager
+def blas_threads() -> Iterator[int | None]:
+    """Hold each BLAS thread pool to a quarter of the logical CPUs (at
+    least one, at most `BLAS_MOST_THREADS`) for the duration, and yield
+    that count; None, and nothing limited, when the user has set
+    ``OPENBLAS_NUM_THREADS`` themselves.
+
+    The sparse eigensolution runs inside this. Its steps alternate
+    between numpy's BLAS and scipy's, which are separate libraries
+    with separate pools, and the operations are small enough that a
+    pool's threads mostly wait on one another, so fewer threads are
+    faster and two full pools contend (`BLAS_CPUS_PER_THREAD`). The
+    limit is undone on the way out, so the rest of the package keeps
+    every core.
+    """
+    from threadpoolctl import threadpool_limits
+
+    if os.environ.get('OPENBLAS_NUM_THREADS'):
+        yield None
+        return
+    threads = max(1, min(BLAS_MOST_THREADS,
+                         (os.cpu_count() or 1) // BLAS_CPUS_PER_THREAD))
+    with threadpool_limits(limits=threads, user_api='blas'):
+        yield threads
 
 
 class Model:
@@ -2570,8 +2612,9 @@ class Model:
         ticker = Ticker(progress)
         if solver == 'sparse' or (solver == 'auto'
                                   and self.num_dof > SPARSE_ABOVE):
-            eigenvalues, full, stiffness = self._sparse_modes(
-                fixed, maximum_frequency, num_modes, ticker)
+            with blas_threads():
+                eigenvalues, full, stiffness = self._sparse_modes(
+                    fixed, maximum_frequency, num_modes, ticker)
         else:
             eigenvalues, full, stiffness = self._dense_modes(fixed, ticker)
         if ticker.total:

@@ -8,7 +8,7 @@ besides.
 
 | Package | License | Obligation if this is redistributed |
 | --- | --- | --- |
-| numpy, scipy, h5py, pandas, pint, VTK | BSD-3-Clause | keep the copyright notice |
+| numpy, scipy, h5py, pandas, pint, VTK, threadpoolctl | BSD-3-Clause | keep the copyright notice |
 | netCDF4, pyvista, pyvistaqt, pyqtgraph, openpyxl, truststore (the update check's use of the system's certificate store) | MIT | keep the copyright notice |
 | pyobjc-core (the macOS app only) | MIT | keep the copyright notice |
 | **Sparkle** 2, the macOS app's updater: a framework the build copies into the app from Sparkle's own release, not a PyPI package | MIT, with parts under BSD-2-Clause (bsdiff, the signature verifier), MIT (sais-lite) and zlib (Ed25519) | its text, with those parts' notices, ships as `licenses/third-party/Sparkle-LICENSE.txt`; source at github.com/sparkle-project/Sparkle |

@@ -546,3 +546,55 @@ def test_the_sparse_matrices_are_the_dense_ones():
     transform = model.constraint_transform()
     assert np.array_equal(model.constraint_transform(sparse=True).toarray(),
                           transform)
+
+
+def _blas_pools():
+    from threadpoolctl import threadpool_info
+
+    return sorted(pool['num_threads'] for pool in threadpool_info()
+                  if pool['user_api'] == 'blas')
+
+
+def _pools_during_the_solve(monkeypatch):
+    """The BLAS pools' thread counts as the polish sees them, and as they
+    are before and after the solve."""
+    seen = []
+    polish = fem.polish_modes
+
+    def spy(*args, **kwargs):
+        seen.append(_blas_pools())
+        return polish(*args, **kwargs)
+
+    from visualdynamics.demo import plate
+
+    monkeypatch.setattr(fem, 'polish_modes', spy)
+    before = _blas_pools()
+    plate.build(6).eigensolution(num_modes=8, solver='sparse')
+    return before, seen, _blas_pools()
+
+
+def test_the_sparse_solve_holds_each_blas_pool_to_a_quarter_of_the_cpus(monkeypatch):
+    """numpy's OpenBLAS and scipy's are separate pools of a thread per
+    logical CPU, and the solver alternates between them, so it holds
+    each to a quarter of the CPUs while it runs, and gives them back."""
+    monkeypatch.delenv('OPENBLAS_NUM_THREADS', raising=False)
+    if not _blas_pools():
+        pytest.skip('no BLAS pool threadpoolctl can limit (Accelerate)')
+    monkeypatch.setattr(fem.os, 'cpu_count', lambda: 4)
+    before, seen, after = _pools_during_the_solve(monkeypatch)
+    assert seen == [[1] * len(before)], 'one thread a pool on four CPUs'
+    assert after == before, 'the pools are given back'
+    with fem.blas_threads() as threads:
+        assert threads == 1
+    monkeypatch.setattr(fem.os, 'cpu_count', lambda: 400)
+    with fem.blas_threads() as threads:
+        assert threads == fem.BLAS_MOST_THREADS
+
+
+def test_a_thread_count_the_user_set_is_left_alone(monkeypatch):
+    monkeypatch.setenv('OPENBLAS_NUM_THREADS', '3')
+    monkeypatch.setattr(fem.os, 'cpu_count', lambda: 4)
+    before, seen, after = _pools_during_the_solve(monkeypatch)
+    assert seen == [before] and after == before
+    with fem.blas_threads() as threads:
+        assert threads is None

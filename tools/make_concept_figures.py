@@ -1722,14 +1722,10 @@ def _low_level_survey():
     area = np.trapezoid(shape ** 2, f)
     x *= np.sqrt(area / 16.0) / np.std(x)
 
-    def mode(fn, q):
-        r, z = f / fn, 1.0 / (2.0 * q)
-        return (1.0 + 2j * z * r) / (1.0 - r ** 2 + 2j * z * r)
-
     rows = [x]
     for k, (fn, q) in enumerate(((250.0, 15.0), (700.0, 8.0),
                                  (1200.0, 10.0))):
-        y = np.fft.irfft(np.fft.rfft(x) * mode(fn, q), n)
+        y = np.fft.irfft(np.fft.rfft(x) * _resonance(f, fn, q), n)
         rows.append(y + np.random.default_rng(2611 + k).standard_normal(n)
                     * 0.05)
     history = TimeHistory(np.arange(n) / fs, np.vstack(rows) * g,

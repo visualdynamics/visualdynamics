@@ -276,3 +276,36 @@ def test_a_dense_grid_is_not_outlined():
     plotter, _info = scene(np.full((OUTLINE_LIMIT, OUTLINE_LIMIT), 0.97))
     assert 'mac-bars-edges' in plotter.renderer.actors
     plotter.close()
+
+
+def test_no_axis_title_is_empty():
+    """The mode axes are titled with a space: an empty title has VTK log
+    'vtkVectorText: Text is not set!' on every draw of a real window,
+    which an off-screen render does not, so the title itself is
+    pinned."""
+    plotter, _info = scene(np.eye(3))
+    axes = plotter.renderer.cube_axes_actor
+    titles = [axes.GetXTitle(), axes.GetYTitle(), axes.GetZTitle()]
+    assert all(titles), titles
+    plotter.close()
+
+
+def test_no_bounds_box_in_the_package_is_given_an_empty_title():
+    """Every `show_bounds` call, not only this one: the waterfall, the
+    paired and banded views and the MAC bars each passed '' once."""
+    import ast
+    from pathlib import Path
+
+    import visualdynamics
+
+    found = []
+    for path in Path(visualdynamics.__file__).parent.rglob('*.py'):
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+            if (isinstance(node, ast.Call)
+                    and getattr(node.func, 'attr', None) == 'show_bounds'):
+                found += [f'{path.name}:{node.lineno} {k.arg}'
+                          for k in node.keywords
+                          if k.arg in ('xtitle', 'ytitle', 'ztitle')
+                          and isinstance(k.value, ast.Constant)
+                          and k.value.value == '']
+    assert not found, found

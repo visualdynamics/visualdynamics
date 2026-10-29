@@ -286,11 +286,14 @@ def add_mac_bars(plotter: Any, frequencies: Sequence[float],
         plotter.remove_actor('mac-bars-matched')
 
     # the one axis with a number worth reading: the value, 0..1. The
-    # mode axes are named by the labels on their own edges
+    # mode axes are named by the labels on their own edges, and titled
+    # with a space, not '': an empty title logs 'vtkVectorText: Text is
+    # not set!' on every draw of a real window, a pair per auto-MAC
+    # after a solve (Brandon, 2026-10-29, on a Linux blade's terminal)
     plotter.show_bounds(
         axes_ranges=(0, columns, 0, rows, 0.0, 1.0),
         fmt='%.4g',
-        xtitle='', ytitle='', ztitle='MAC',
+        xtitle=' ', ytitle=' ', ztitle='MAC',
         show_xlabels=False, show_ylabels=False, grid='back',
         location='outer', use_3d_text=False, color=colors['scene_text'])
     return {'rows': rows, 'columns': columns, 'named_rows': named_rows,

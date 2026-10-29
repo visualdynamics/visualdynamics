@@ -263,6 +263,14 @@ LANCZOS_RESIDUAL = 1e-6
 #: modes asked for (never over the model's size); a model not converged
 #: by then goes to ARPACK. The Frame-Wing's 32 modes took 120 vectors.
 LANCZOS_BASIS = 20
+#: once the basis holds the modes asked for, the block Lanczos checks
+#: them only each time the basis has grown by this fraction since the
+#: last check, not after every block. A check is a dense eigensolve of
+#: the whole projected matrix; the basis grows to about twice the
+#: modes before they converge, so checking after every block did forty
+#: of them for 400 modes (2026-10-29), and growing by a twentieth
+#: between checks costs at most a twentieth more basis than needed.
+LANCZOS_CHECK_GROWTH = 0.05
 
 
 #: how many elements of one family are rotated and scattered at once:
@@ -1226,6 +1234,7 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
     start = rng.standard_normal((size, width))
     block, m_block, _r, _keep, _share = _m_orthonormal(start, mass)
     worst_before = math.inf
+    check_at = min(int(count), size)
     while True:
         width = block.shape[1]
         grown = dimension + width
@@ -1265,11 +1274,6 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
         projected[dimension:grown, :dimension] = coefficients[:dimension].T
         relation[:grown, dimension:grown] = coefficients
         dimension = grown
-        h = (projected[:dimension, :dimension]
-             + projected[:dimension, :dimension].T) / 2.0
-        theta, ritz = scipy_eigh(h)
-        order = np.argsort(theta)[::-1][:count]
-        theta, ritz = theta[order], ritz[:, order]
         # the next block: the surviving directions, as many as the
         # space the basis has not yet taken has room for; a dependent
         # direction's column is empty and its row of the triangle zero,
@@ -1291,7 +1295,6 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
         # halving its corrections moved a 14 kHz Ritz value by 1e-7
         relation[dimension:dimension + len(chosen), dimension - width:dimension] = \
             beta[chosen]
-        krylov = np.linalg.norm(beta @ ritz[dimension - width:], axis=0)
         block = block[:, chosen]
         # M Q taken afresh, not the combinations of M W the
         # orthonormalization carried: the first solve's block is almost
@@ -1307,6 +1310,24 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
         # same numbers again; kept so the guarantee does not rest on
         # that call's default
         m_block = mass @ block
+        # No Ritz step until the basis holds as many vectors as modes
+        # asked for (then one per LANCZOS_CHECK_GROWTH of growth):
+        # fewer cannot converge them all, and the dense
+        # eigensolve of the whole projected matrix after every block
+        # was the stage that grew fastest with the modes asked for
+        # (2026-10-29: 2.5 of a 59,000-DOF plate's 22.6 s for 400 modes,
+        # 46 solves of up to 552 square for 200). The basis does not
+        # depend on the Ritz pairs, so skipping the early ones changes
+        # nothing it is built from.
+        if dimension < check_at and len(chosen) and dimension < size:
+            continue
+        check_at = dimension + max(1, math.ceil(LANCZOS_CHECK_GROWTH * dimension))
+        h = (projected[:dimension, :dimension]
+             + projected[:dimension, :dimension].T) / 2.0
+        theta, ritz = scipy_eigh(h)
+        order = np.argsort(theta)[::-1][:count]
+        theta, ritz = theta[order], ritz[:, order]
+        krylov = np.linalg.norm(beta @ ritz[dimension - width:], axis=0)
         drift = np.linalg.norm((relation[:dimension, :dimension] - h) @ ritz, axis=0)
         residuals = np.sqrt(krylov ** 2 + drift ** 2) / np.abs(theta)
         worst = float((krylov / np.abs(theta)).max())

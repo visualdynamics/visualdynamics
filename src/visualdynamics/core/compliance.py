@@ -2036,6 +2036,37 @@ def _srs_refusal(specification: Any, measured: Any, spec_record: int,
     return refused
 
 
+def srs_band_text(inner: tuple[Any, Any],
+                  outer: tuple[Any, Any] | None) -> str:
+    """An SRS tolerance band in words: '−1.5/+3 dB', or '−1.5/+3 dB
+    within −3/+6 dB' with an outer band, an inner band with no ceiling
+    '−1.5/up dB'. A band read from limit curves that vary along it is
+    named for them, 'the warning limits' and 'the abort limits'. The
+    plot's title and legend and the report's caption both say it so.
+
+    Parameters
+    ----------
+    inner : (float, float)
+        The inner band, dB below and above the requirement, or an
+        array of dB at each point for an edge that varies.
+    outer : (float, float) or None
+        The outer band, the same way; None for none.
+
+    Returns
+    -------
+    str
+    """
+    def pair(band, name):
+        below, above = band
+        if np.ndim(below) or np.ndim(above):
+            return f'the {name} limits'
+        top = 'up' if np.isinf(above) else f'{above:+g}'
+        return f'{below:+g}/{top} dB'.replace('-', '−')
+
+    text = pair(inner, 'warning')
+    return text if outer is None else f'{text} within {pair(outer, "abort")}'
+
+
 def srs_tolerance(specification: DataArray, measured: DataArray,
                   spec_record: int = 0, measured_record: int = 0, *,
                   inner: tuple[float, float] | None = None,

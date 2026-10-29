@@ -702,7 +702,8 @@ class ReportEditor(QWidget):
 
     def _record_caption_rows(self, form, block, objects, object_groups):
         """The record's caption block, for a plot block of a measured
-        spectrum: a check to draw it under the figure, and the caption
+        spectrum, shock response spectrum, sine level or time history: a
+        check to draw it under the figure, and the caption
         itself read out beneath, as the page will show it
         (`report.block_caption`). Nothing for any other block."""
         from ..report import block_caption
@@ -714,10 +715,9 @@ class ReportEditor(QWidget):
         self.record_caption_check = QCheckBox('Caption from the record')
         self.record_caption_check.setChecked(bool(block.get('record_caption')))
         self.record_caption_check.setToolTip(
-            'Draw the caption block under the figure: the channel, its '
-            'location and axis, the run, the estimate, the resolution, the '
-            'window and overlap, the DOF and the requirement, each read '
-            'from the record')
+            'Draw the caption block under the figure, each row read from '
+            'the record: the channel, its location and axis, the run, the '
+            'analysis settings and the requirement')
         self.record_caption_check.toggled.connect(
             lambda checked: self._field_edited(
                 {'op': 'field', 'at': self.selected,

@@ -34,7 +34,7 @@ from typing import Any
 
 import numpy as np
 
-from ..core.compliance import SRS_POINTS_PERCENT
+from ..core.compliance import SRS_POINTS_PERCENT, srs_band_text
 from . import _signed_db
 
 #: the marker each polarity wears, in the order the spectra are given
@@ -76,18 +76,9 @@ def _db(value: Any) -> str:
 def band_text(inner: tuple[Any, Any],
               outer: tuple[Any, Any] | None) -> str:
     """The band in words, as the title and the legend give it:
-    '−1.5/+3 dB', or '−1.5/+3 dB within −3/+6 dB' with an outer band.
-    A band read from limit curves that vary along it is named for
-    them, 'the warning limits' and 'the abort limits'."""
-    def pair(band, name):
-        below, above = band
-        if np.ndim(below) or np.ndim(above):
-            return f'the {name} limits'
-        top = 'up' if np.isinf(above) else f'{above:+g}'
-        return f'{below:+g}/{top} dB'.replace('-', '\u2212')
-
-    text = pair(inner, 'warning')
-    return text if outer is None else f'{text} within {pair(outer, "abort")}'
+    '−1.5/+3 dB', or '−1.5/+3 dB within −3/+6 dB' with an outer band
+    (`compliance.srs_band_text`, which the report captions share)."""
+    return srs_band_text(inner, outer)
 
 
 def describe(result: dict[str, Any]) -> str:

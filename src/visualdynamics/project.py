@@ -2074,11 +2074,25 @@ class Project(dict):
 
     def caption_of(self, name: Any, records: int | Sequence[int] = 0, *,
                    specification: Any = None, per_octave: int | None = None,
-                   unit_system: Any = None) -> Any:
-        """The caption a report plot of a spectrum carries, read off the
-        record and the project around it (`core.report_caption`).
+                   unit_system: Any = None, tone: str | None = None) -> Any:
+        """The caption a report plot of a measured record carries, read
+        off the record and the project around it (`core.report_caption`):
+        a spectrum's, a shock response spectrum's, a sine level's or a
+        time history's (`report_caption.caption_kind`).
 
             print(project.caption_of('Time History PSDs', 2).text())
+
+        A shock response spectrum's run is the time history it was
+        computed from, with that run's sample rate and the filters
+        applied in the project on the way to it; against a requirement
+        each record is judged by the points rule in the polarity drawn
+        and in each other polarity the project holds of the same events
+        at the same Q and spacing. A sine level's run is the recording
+        it was extracted from, its sweep is the tone as the requirement
+        specifies it, and its distortion is the check the report's check
+        blocks have already made of the tone (`check_blocks.kept`); the
+        check rebuilds every tone and is not made for a caption. A time
+        history is its own run.
 
         Every row comes from the project, none is typed. The run is the
         time history the spectrum was computed from, and the stretch of
@@ -2114,25 +2128,34 @@ class Project(dict):
             Bands per octave the spectrum is drawn on, for one banded
             only for the plot.
         unit_system : UnitSystem, optional
-            The display units the rms values are written in.
+            The display units the rms values and ranges are written in.
+        tone : str, optional
+            For a sine level set, the tone drawn; its first when omitted.
 
         Returns
         -------
-        RecordCaption
+        RecordCaption, SrsCaption, SineCaption or TimeCaption
 
         Raises
         ------
         TypeError
-            If the object is not a measured spectrum (a `Psd`).
+            If the object is not a measured record a caption reads.
         """
-        from .core.report import resolve_binding
-        from .core.report_caption import record_caption
+        from .core.report_caption import caption_kind, record_caption
 
         name = self.name_of(name)
         spectrum = self[name]
-        if not isinstance(spectrum, Psd) or isinstance(spectrum, Specification):
-            raise TypeError(f'{name!r} is not a measured spectrum; a caption '
-                            'reads one (a Psd)')
+        kind = caption_kind(spectrum)
+        if kind is None:
+            raise TypeError(f'{name!r} is not a measured record a caption '
+                            'reads (a spectrum, a shock response spectrum, '
+                            'a sine level or a time history)')
+        if kind == 'srs':
+            return self._srs_caption_of(name, records, specification)
+        if kind == 'sine':
+            return self._sine_caption_of(name, records, specification, tone)
+        if kind == 'time':
+            return self._time_caption_of(name, records, unit_system)
         # a banded spectrum is read through the narrowband one it was
         # banded from: the averaging, the run, the lines and the DOF
         # are all that spectrum's
@@ -2161,33 +2184,10 @@ class Project(dict):
         if history is not None and len(history.abscissa) > 1:
             sample_rate = history.sample_rate
             origin = float(history.abscissa[0])
-        # the channel table and the geometry linked with the spectrum,
-        # its narrowband source or its run come first: a project can
-        # hold two tests' tables
-        linked: list[str] = []
-        for member in (name, narrow_name, history_name):
-            if member:
-                linked.extend(self.object_group_of(member) or [])
-        candidates = linked + [other for other in self.names
-                               if other not in linked]
-        wanted = ([int(records)] if np.ndim(records) == 0
-                  else [int(record) for record in records])
-        dofs = {str(spectrum.response_dof[record]) for record in wanted
-                if 0 <= record < spectrum.num_records}
-        table = next((self[other] for other in candidates
-                      if isinstance(self[other], ChannelTable)
-                      and dofs & set(self[other].dof_strings())), None)
-        geometry = next((self[other] for other in linked
-                         if isinstance(self[other], Geometry)), None)
-        if geometry is None:
-            basis = resolve_binding('@basis:Geometry', self, self.object_groups)
-            geometry = self.get(basis) if basis else None
-        bound, requirement, scale_db = None, None, None
-        if specification is not None:
-            bound = (self[specification] if isinstance(specification, str)
-                     else specification)
-            requirement = next((other for other, obj in self.items()
-                                if obj is bound), None)
+        table, geometry = self._caption_surroundings(
+            spectrum, records, (name, narrow_name, history_name))
+        bound, requirement = self._caption_requirement(specification)
+        scale_db = None
         drawn = spectrum
         if per_octave and getattr(spectrum, 'bandwidth', None) is None:
             from .core.compliance import comparison_scale_db
@@ -2343,6 +2343,173 @@ class Project(dict):
         return self._derive(names[0], spec,
                             name or f'{names[0]} Derived Specification',
                             recipe=('derive_specification', params))
+
+    def _caption_surroundings(self, data: Any, records: Any,
+                              members: Sequence[str | None]) -> tuple[Any, Any]:
+        """(channel table, geometry) for a caption of `records` of
+        `data`. The table and the geometry linked with any of `members`
+        (the record, what it was made from, its run) come first, since a
+        project can hold two tests' tables; then any table that names a
+        channel drawn, and the Basis geometry."""
+        from .core.report import resolve_binding
+
+        linked: list[str] = []
+        for member in members:
+            if member:
+                linked.extend(self.object_group_of(member) or [])
+        candidates = linked + [other for other in self.names
+                               if other not in linked]
+        wanted = ([int(records)] if np.ndim(records) == 0
+                  else [int(record) for record in records])
+        dofs = {str(data.response_dof[record]) for record in wanted
+                if 0 <= record < data.num_records}
+        table = next((self[other] for other in candidates
+                      if isinstance(self[other], ChannelTable)
+                      and dofs & set(self[other].dof_strings())), None)
+        geometry = next((self[other] for other in linked
+                         if isinstance(self[other], Geometry)), None)
+        if geometry is None:
+            basis = resolve_binding('@basis:Geometry', self, self.object_groups)
+            geometry = self.get(basis) if basis else None
+        return table, geometry
+
+    def _caption_requirement(self, specification: Any) -> tuple[Any, Any]:
+        """(requirement, its name in the project) for a caption, given
+        by name or as the object; (None, None) for none."""
+        if specification is None:
+            return None, None
+        bound = (self[specification] if isinstance(specification, str)
+                 else specification)
+        return bound, next((other for other, obj in self.items()
+                            if obj is bound), None)
+
+    def _made_from(self, name: str, verb: str) -> str | None:
+        """The time history `name` was made from by `verb`, from its
+        provenance, or None (an import, or a source since removed)."""
+        made = self.provenance.get(name, {})
+        source = made.get('source')
+        if made.get('verb') == verb and isinstance(self.get(source),
+                                                   TimeHistory):
+            return source
+        return None
+
+    def _filters_on_the_way(self, run: str) -> tuple[str, ...]:
+        """Each filter applied in the project on the way to `run`, the
+        first applied first, in words: the setting recorded when the
+        filtered record was made, its order and its zero-phase pass
+        (`filter_data`)."""
+        from .core.filters import Filtering
+
+        out: list[str] = []
+        seen: set[str] = set()
+        current = run
+        while current and current not in seen:
+            seen.add(current)
+            made = self.provenance.get(current) or {}
+            if made.get('verb') == 'filter_data':
+                state = made.get('state') or (None, None)
+                try:
+                    setting = Filtering(**state[1])
+                except (TypeError, ValueError):
+                    out.append('a filter whose setting is not recorded')
+                else:
+                    out.append(f'{setting.describe()}, order '
+                               f'{setting.order}, zero phase')
+            current = made.get('source')
+        return tuple(reversed(out))
+
+    def _srs_caption_of(self, name: str, records: Any,
+                        specification: Any) -> Any:
+        """`caption_of` for a shock response spectrum."""
+        from .core.report_caption import caption_kind, srs_caption
+
+        srs = self[name]
+        run = self._made_from(name, 'compute_srs')
+        history = self.get(run) if run else None
+        sample_rate = None
+        if history is not None and len(history.abscissa) > 1:
+            try:
+                sample_rate = history.sample_rate
+            except ValueError:
+                sample_rate = None      # not evenly sampled: no one rate
+        made = self.provenance.get(name, {})
+        # the other polarities of the same events: computed from the
+        # same run over the same windows, at the same Q and spacing
+        polarities: list[Any] = []
+        if run is not None:
+            for other, obj in self.items():
+                theirs = self.provenance.get(other, {})
+                if (other != name and caption_kind(obj) == 'srs'
+                        and theirs.get('verb') == 'compute_srs'
+                        and theirs.get('source') == run
+                        and theirs.get('state') == made.get('state')
+                        and obj.q == srs.q and obj.kind != srs.kind
+                        and obj.num_records == srs.num_records
+                        and np.array_equal(obj.abscissa, srs.abscissa)
+                        and all(obj.kind != held.kind
+                                for held in polarities)):
+                    polarities.append(obj)
+        order = ('maximax', 'positive', 'negative')
+        polarities.sort(key=lambda obj: (order.index(obj.kind)
+                                         if obj.kind in order else len(order)))
+        table, geometry = self._caption_surroundings(srs, records,
+                                                     (name, run))
+        bound, requirement = self._caption_requirement(specification)
+        return srs_caption(
+            srs, records, run=run, sample_rate=sample_rate,
+            filters=None if run is None else self._filters_on_the_way(run),
+            channel_table=table, geometry=geometry, specification=bound,
+            requirement=requirement, polarities=polarities)
+
+    def _sine_caption_of(self, name: str, records: Any, specification: Any,
+                         tone: str | None) -> Any:
+        """`caption_of` for a sine level or a set of them."""
+        from .core.report_caption import sine_caption
+        from .core.sine import SineLevelSet
+        from .report.check_blocks import Refusal, kept
+
+        levels = self[name]
+        run = self._made_from(name, 'extract_sine')
+        bound, _requirement = self._caption_requirement(specification)
+        if bound is None and run is not None:
+            # the requirement the levels were extracted against
+            spec_name = (self.provenance[name].get('params') or {}).get(
+                'specification')
+            bound = self.get(spec_name) if spec_name else None
+        level = levels
+        if isinstance(levels, SineLevelSet) and levels.levels:
+            level = levels.tone(tone) if tone else levels.levels[0]
+        table, geometry = (self._caption_surroundings(level, records,
+                                                      (name, run))
+                           if not isinstance(level, SineLevelSet)
+                           else (None, None))
+        # the distortion check already made of this tone over the run
+        # the levels came from; a check of another recording is not
+        # this level's
+        distortion = None
+        if (run is not None and bound is not None
+                and not isinstance(level, SineLevelSet)):
+            reading = kept('distortion',
+                           {'source': self[run], 'specification': bound,
+                            'measured': levels},
+                           {'tone': level.tone})
+            if reading is not None:
+                distortion = (reading.reason if isinstance(reading, Refusal)
+                              else reading)
+        return sine_caption(levels, records, tone=tone, run=run,
+                            channel_table=table, geometry=geometry,
+                            specification=bound, distortion=distortion)
+
+    def _time_caption_of(self, name: str, records: Any,
+                         unit_system: Any) -> Any:
+        """`caption_of` for a time history, which is its own run."""
+        from .core.report_caption import time_caption
+
+        history = self[name]
+        table, geometry = self._caption_surroundings(history, records,
+                                                     (name,))
+        return time_caption(history, records, run=name, channel_table=table,
+                            geometry=geometry, unit_system=unit_system)
 
     def compute_octave(self, source: Any, per_octave: int | None = None
                        ) -> str:

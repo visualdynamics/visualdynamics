@@ -417,7 +417,7 @@ def test_an_imported_spectrum_names_no_run(run):
     rows = _rows(project.caption_of('Run 9 ASD'))
     assert rows['Run'] == NOT_RECORDED
     assert rows['Window'] == NOT_RECORDED
-    with pytest.raises(TypeError, match='not a measured spectrum'):
+    with pytest.raises(TypeError, match='not a measured record'):
         run.caption_of('Specification')
 
 
@@ -483,14 +483,21 @@ def test_without_a_project_there_is_nothing_to_read_the_window_from(run):
 
 
 def test_the_editor_reads_out_what_the_figure_will_carry(run):
-    from visualdynamics.report import block_caption
+    from visualdynamics.report import MAX_REPORT_CURVES, block_caption
 
     block = {'kind': 'plot', 'source': '@basis:Psd',
              'specification': '@basis:Specification', 'channel': '110Z+'}
     caption = block_caption(block, run, run.object_groups)
     assert caption == run.caption_of('Time History PSDs', 2,
                                      specification='Specification')
-    assert block_caption({'kind': 'plot', 'source': 'Time History'}, run) is None
+    # a time history's figure carries its own caption, the run, its
+    # sample rate and each channel's range
+    history = block_caption({'kind': 'plot', 'source': 'Time History'}, run)
+    assert history == run.caption_of(
+        'Time History', list(range(min(run['Time History'].num_records,
+                                       MAX_REPORT_CURVES))))
+    assert block_caption({'kind': 'plot', 'source': 'Specification'},
+                         run) is None, 'a requirement is not a measurement'
     assert block_caption({'kind': 'text', 'text': ''}, run) is None
 
 

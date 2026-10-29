@@ -39,6 +39,18 @@ them into a `RecordCaption`:
   the comparison scales the measurement, the rms as drawn) beside the
   one the specification calls for, over the band it is written.
 
+A shock response spectrum, a sine level and a time history carry
+captions of their own kind (`caption_kind`). `srs_caption` gives an
+SRS's Q, its spacing in lines per octave, the kind of peak, the filters
+its run came through, the run's sample rate, and each record drawn
+against the points rule in each polarity the project holds.
+`sine_caption` gives a sine level's sweep as the requirement specifies
+it, the detector it was extracted with and the distortion check already
+made of its tone. `time_caption` gives a time history's span, the
+stretch its averaging reads, its sample rate and each channel's range.
+Each caption names its rows (`ROWS`) and the rows that belong to one
+channel (`CHANNEL_ROWS`), so a grid states the others once.
+
 A fact nothing records is written as "not recorded" rather than left
 out, so a reader sees the gap instead of assuming the line was never
 needed. `Project.caption_of` gathers the record's surroundings from a
@@ -50,7 +62,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 
@@ -202,6 +214,11 @@ class RecordCaption:
         when no specification is drawn.
     """
 
+    #: the rows, and those that belong to one channel, as every
+    #: caption kind names them
+    ROWS: ClassVar[tuple[str, ...]] = ROWS
+    CHANNEL_ROWS: ClassVar[tuple[str, ...]] = CHANNEL_ROWS
+
     channels: tuple[CaptionChannel, ...]
     kind: str
     run: str | None = None
@@ -236,7 +253,7 @@ class RecordCaption:
         list of tuple of str
             Each row's label and what it says.
         """
-        return list(zip(ROWS, (self._channel(), self._place(), self._run(),
+        return list(zip(self.ROWS, (self._channel(), self._place(), self._run(),
                                self._estimate(), self._resolution(),
                                self._window(), self._dof(),
                                self._requirement()), strict=True))
@@ -736,3 +753,766 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
         reference_rms=reference_rms, rms_unit=unit, rms_band=band,
         scale_db=int(scale_db or 0) if specification is not None else 0,
         drawn_rms=drawn_rms, averaging=averaging, not_compared=not_compared)
+
+
+# ---- the shock response spectrum, the sine level, the time history -------
+
+
+def caption_kind(data: Any) -> str | None:
+    """Which caption a record carries: 'spectrum' for a measured `Psd`,
+    'srs' for a measured `Srs`, 'sine' for a `SineLevel` or a
+    `SineLevelSet`, 'time' for a measured `TimeHistory`; None for
+    anything else, a requirement among them, since a requirement is
+    what a measurement is read against and not a measurement.
+
+    Parameters
+    ----------
+    data : object
+        The object a figure draws.
+
+    Returns
+    -------
+    str or None
+    """
+    from .data import Bounded, Psd, Srs, TimeHistory, TransientSpecification
+    from .sine import SineLevel, SineLevelSet
+
+    if isinstance(data, Bounded):
+        return None
+    if isinstance(data, Psd):
+        return 'spectrum'
+    if isinstance(data, Srs):
+        return 'srs'
+    if isinstance(data, (SineLevel, SineLevelSet)):
+        return 'sine'
+    if isinstance(data, TimeHistory) \
+            and not isinstance(data, TransientSpecification):
+        return 'time'
+    return None
+
+
+def _records_wanted(data: Any, records: int | Sequence[int]) -> list[int]:
+    """The records asked for, each checked against `data`'s count."""
+    wanted = [int(records)] if np.ndim(records) == 0 else [int(r) for r in records]
+    if not wanted:
+        raise IndexError('a caption needs at least one record')
+    for record in wanted:
+        if not 0 <= record < data.num_records:
+            raise IndexError(f'record {record} is not one of the '
+                             f'{data.num_records} records')
+    return wanted
+
+
+def _one_channel(data: Any, record: int, channel_table: Any,
+                 geometry: Any) -> CaptionChannel:
+    """The channel one record of a single-quantity record measures."""
+    from .data import channel_quantities
+
+    dimension = str(data.known_dim(record))
+    quantity = ('' if dimension == 'unknown'
+                else channel_quantities(dimension)[0])
+    return _channel_at(str(data.response_dof[record]), quantity,
+                       channel_table, geometry)
+
+
+def _channels(data: Any, wanted: Sequence[int], channel_table: Any,
+              geometry: Any) -> tuple[CaptionChannel, ...]:
+    """Each channel the records drawn measure, once, in order: an SRS
+    holds one record per channel per event."""
+    out: dict[tuple[str, str], CaptionChannel] = {}
+    for record in wanted:
+        key = (str(data.response_dof[record]), str(data.known_dim(record)))
+        if key not in out:
+            out[key] = _one_channel(data, record, channel_table, geometry)
+    return tuple(out.values())
+
+
+def _events(data: Any, wanted: Sequence[int]) -> tuple[str, ...]:
+    """The block labels of the records drawn, in order, each once."""
+    if data.block is None:
+        return ()
+    out: list[str] = []
+    for record in wanted:
+        label = data.block[record]
+        if label and str(label) not in out:
+            out.append(str(label))
+    return tuple(out)
+
+
+def lines_per_octave(abscissa: Any) -> float | None:
+    """The lines per octave of a geometrically spaced axis, as an SRS's
+    natural frequencies are (`srs.octave_frequencies`), else None: for
+    an axis of fewer than two lines, one that does not rise from above
+    zero, or one whose steps are not one ratio.
+
+    Parameters
+    ----------
+    abscissa : array_like
+        The natural frequencies in Hz.
+
+    Returns
+    -------
+    float or None
+    """
+    f = np.asarray(abscissa, dtype=np.float64)
+    if f.size < 2 or not np.all(np.isfinite(f)) or not f[0] > 0.0:
+        return None
+    ratios = f[1:] / f[:-1]
+    if not np.all(ratios > 1.0) or not np.allclose(ratios, ratios[0],
+                                                   rtol=1e-6, atol=0.0):
+        return None
+    return float(1.0 / np.log2(ratios[0]))
+
+
+@dataclass(frozen=True)
+class PointsCount:
+    """One measured SRS record against the points rule, as
+    `compliance.srs_tolerance` judged it: its polarity, its event, the
+    points judged, how many lie inside the inner band and inside the
+    outer one (None without an outer band), whether it passed (None when
+    nothing was judged), why no point was judged when none was
+    (`reason`), and how many of its points are not a number, which no
+    rule judges (`missing`)."""
+
+    kind: str
+    event: str | None
+    points: int
+    inside: int
+    inside_outer: int | None
+    passed: bool | None
+    reason: str | None
+    missing: int
+
+    def text(self) -> str:
+        """'maximax, shock 1: 40 of 44 points inside the inner band and
+        44 inside the outer, passes', or why nothing was judged."""
+        where = self.kind + (f', {self.event}' if self.event else '')
+        if self.reason is not None:
+            return f'{where}: not judged, {self.reason}'
+        said = (f'{where}: {self.inside} of {self.points} '
+                f'point{"s" * (self.points != 1)} inside the inner band')
+        if self.inside_outer is not None:
+            said += f' and {self.inside_outer} inside the outer'
+        if self.missing:
+            said += (f' ({self.missing} point{"s" * (self.missing != 1)} '
+                     'not a number, not judged)')
+        return f'{said}, {"passes" if self.passed else "fails"}'
+
+
+@dataclass(frozen=True)
+class SrsCaption:
+    """The facts a report plot of a shock response spectrum carries,
+    read off its records by `srs_caption`.
+
+    Attributes
+    ----------
+    channels : tuple of CaptionChannel
+        The channels drawn, each once.
+    run : str or None
+        The time history the spectrum was computed from.
+    events : tuple of str
+        The events of the records drawn, by their block labels.
+    q : float
+        The oscillators' amplification.
+    kind : str
+        Which peak each point is: 'maximax', 'positive' or 'negative'.
+    per_octave : float or None
+        Natural-frequency lines per octave; None when they are not
+        geometrically spaced.
+    band : tuple of float or None
+        The first and last natural frequency, in Hz.
+    filters : tuple of str or None
+        Each filter applied in the project on the way to the run, in
+        the order applied; empty for none, None when the run is not
+        known.
+    sample_rate : float or None
+        The run's sample rate in Hz.
+    requirement : str or None
+        The name of the requirement drawn, None when none is.
+    rule : str
+        The points rule in words, with the band it judges against.
+    points : tuple of PointsCount
+        Each record drawn against the requirement, in each polarity the
+        project holds, the one drawn first.
+    not_compared : str or None
+        Why no record could be read against the requirement drawn.
+    """
+
+    #: the rows of an SRS caption, in the order they are read
+    ROWS: ClassVar[tuple[str, ...]] = (
+        'Channel', 'Location and axis', 'Run', 'Q', 'Spacing', 'Type',
+        'Filter', 'Sample rate', 'Points rule')
+    #: the rows that belong to one channel
+    CHANNEL_ROWS: ClassVar[tuple[str, ...]] = (
+        'Channel', 'Location and axis', 'Points rule')
+
+    channels: tuple[CaptionChannel, ...]
+    run: str | None = None
+    events: tuple[str, ...] = ()
+    q: float = 10.0
+    kind: str = 'maximax'
+    per_octave: float | None = None
+    band: tuple[float, float] | None = None
+    filters: tuple[str, ...] | None = None
+    sample_rate: float | None = None
+    requirement: str | None = None
+    rule: str = ''
+    points: tuple[PointsCount, ...] = ()
+    not_compared: str | None = None
+
+    def rows(self) -> list[tuple[str, str]]:
+        """The caption as (label, text) rows, one per `ROWS` entry.
+
+        Returns
+        -------
+        list of tuple of str
+        """
+        from .srs import damping_for
+
+        run = NOT_RECORDED if self.run is None else self.run
+        if self.events:
+            run += ', ' + ', '.join(self.events)
+        spacing = ('lines not geometrically spaced' if self.per_octave is None
+                   else f'{self.per_octave:.3g} lines per octave')
+        if self.band is not None:
+            spacing += f', {self.band[0]:.4g} Hz to {self.band[1]:.4g} Hz'
+        if self.filters is None:
+            filtered = NOT_RECORDED
+        else:
+            filtered = ('; then '.join(self.filters) if self.filters
+                        else 'none applied in the project')
+        rate = (NOT_RECORDED if self.sample_rate is None
+                else f'{self.sample_rate:.6g} Hz')
+        q = (f'{self.q:g} ({100.0 * damping_for(self.q):.3g} % of critical '
+             'damping)')
+        return list(zip(self.ROWS, (
+            _names(self.channels), _places(self.channels), run, q, spacing,
+            self.kind, filtered, rate, self._points()), strict=True))
+
+    def text(self) -> str:
+        """The caption as one paragraph, 'Label: text' rows joined by
+        '. '.
+
+        Returns
+        -------
+        str
+        """
+        return _paragraph(self.rows())
+
+    def _points(self) -> str:
+        if self.requirement is None:
+            return 'no requirement drawn'
+        if not self.points:
+            return f'{self.requirement}, not judged: {self.not_compared}'
+        head = (f'{self.requirement}, {self.rule}' if self.rule
+                else self.requirement)
+        return f'{head}; ' + '; '.join(point.text() for point in self.points)
+
+
+def _names(channels: Sequence[CaptionChannel]) -> str:
+    return '; '.join(channel.name() for channel in channels)
+
+
+def _places(channels: Sequence[CaptionChannel]) -> str:
+    return '; '.join(channel.place() for channel in channels)
+
+
+def _paragraph(rows: Sequence[tuple[str, str]]) -> str:
+    return '. '.join(f'{label}: {said}' for label, said in rows) + '.'
+
+
+def _unjudged(values: np.ndarray) -> str:
+    """Why an SRS record had no point to judge, in words."""
+    finite = np.isfinite(values)
+    if not finite.any():
+        return "none of the record's points is a number"
+    if not (values[finite] > 0.0).any():
+        return 'every point of the record is zero'
+    return "no point of the record lies where the requirement is written"
+
+
+def srs_caption(srs: Any, records: int | Sequence[int] = 0, *,
+                run: str | None = None, sample_rate: float | None = None,
+                filters: Sequence[str] | None = None,
+                channel_table: Any = None, geometry: Any = None,
+                specification: Any = None, requirement: str | None = None,
+                polarities: Sequence[Any] = ()) -> SrsCaption:
+    """The caption a report plot of a shock response spectrum carries,
+    read off the records drawn and the objects around them.
+
+        caption = srs_caption(srs, [0, 1], run='Drop 3',
+                              specification=spec)
+        caption.text()
+
+    The Q, the kind of peak and the natural frequencies are the
+    spectrum's own; the run, its sample rate and the filters applied on
+    the way to it are what `Project.caption_of` reads from the
+    provenance. Against a requirement each record drawn is judged by
+    the points rule as the SRS points check judges it
+    (`compliance.srs_tolerance`, paired as `compliance.srs_tolerance_all`
+    pairs, its bands read from the requirement's limit curves where it
+    has them), once in each polarity given: the spectrum drawn, then
+    each of `polarities`, a spectrum of the same events at the same Q
+    holding another peak, record for record.
+
+    Parameters
+    ----------
+    srs : Srs
+        The measured spectrum; a requirement is refused.
+    records : int or sequence of int, default 0
+        The records the plot draws.
+    run : str, optional
+        The time history the spectrum was computed from.
+    sample_rate : float, optional
+        The run's sample rate in Hz.
+    filters : sequence of str, optional
+        Each filter applied on the way to the run, in words; empty for
+        none, None when it is not known.
+    channel_table : ChannelTable, optional
+        The channel number and comment.
+    geometry : Geometry, optional
+        The global axis each measured direction is nearest.
+    specification : ShockSpecification, optional
+        The requirement drawn.
+    requirement : str, optional
+        Its name; 'specification' when omitted.
+    polarities : sequence of Srs, optional
+        The same records in other polarities; one with another count of
+        records is not the same records, and is passed over.
+
+    Returns
+    -------
+    SrsCaption
+
+    Raises
+    ------
+    TypeError
+        If `srs` is not a measured `Srs`.
+    IndexError
+        If a record is not one of the spectrum's, or none is asked for.
+    """
+    from .compliance import _srs_pairs, srs_band_text, srs_tolerance
+
+    if caption_kind(srs) != 'srs':
+        raise TypeError('an SRS caption reads a measured shock response '
+                        f'spectrum; {type(srs).__name__} is not one')
+    wanted = _records_wanted(srs, records)
+    abscissa = np.asarray(srs.abscissa, dtype=float)
+    band = ((float(abscissa[0]), float(abscissa[-1])) if abscissa.size
+            else None)
+
+    points: list[PointsCount] = []
+    rule = ''
+    not_compared = None
+    if specification is not None:
+        spectra = [srs] + [other for other in polarities
+                           if other.num_records == srs.num_records]
+        for spectrum in spectra:
+            pairs = {i: j for _dof, j, i, _event
+                     in _srs_pairs(specification, spectrum)}
+            for record in wanted:
+                if record not in pairs:
+                    continue
+                result = srs_tolerance(specification, spectrum,
+                                       pairs[record], record)
+                event = (None if spectrum.block is None
+                         else spectrum.block[record] or None)
+                values = np.real(np.asarray(spectrum.ordinate[record],
+                                            dtype=complex))
+                reason = result.get('refused')
+                if reason is None and not result['points']:
+                    reason = _unjudged(values)
+                judged = int(result['points'])
+                points.append(PointsCount(
+                    str(spectrum.kind), event, judged,
+                    int(result.get('inside_count', 0)),
+                    (None if result.get('outer') is None
+                     else judged - int(result['outer_count'])),
+                    result['passed'], reason,
+                    int((~np.isfinite(values)).sum())))
+                if not rule and reason is None:
+                    share = (f'at least {result["percent"]:g} % of the '
+                             'points inside the inner band'
+                             if result['rule'] == 'share' else
+                             'every point at or above the lower edge')
+                    rule = ('band '
+                            + srs_band_text(result['inner'], result['outer'])
+                            + f', rule {share}')
+                    if result.get('limits'):
+                        rule += ", the band read from the requirement's limits"
+        if not points:
+            not_compared = 'the requirement names none of the channels drawn'
+    return SrsCaption(
+        channels=_channels(srs, wanted, channel_table, geometry), run=run,
+        events=_events(srs, wanted), q=float(srs.q), kind=str(srs.kind),
+        per_octave=lines_per_octave(abscissa), band=band,
+        filters=None if filters is None else tuple(filters),
+        sample_rate=None if sample_rate is None else float(sample_rate),
+        requirement=(None if specification is None
+                     else requirement or 'specification'),
+        rule=rule, points=tuple(points), not_compared=not_compared)
+
+
+@dataclass(frozen=True)
+class SineCaption:
+    """The facts a report plot of a sine sweep's extracted level
+    carries, read off its records by `sine_caption`.
+
+    Attributes
+    ----------
+    channels : tuple of CaptionChannel
+        The control channels drawn.
+    tone : str
+        The tone the level was extracted for.
+    run : str or None
+        The time history the level was extracted from.
+    onset : float or None
+        Seconds into the run where the tone's sweep was found.
+    sweep : tuple of str or None
+        Each segment of the tone as specified, in words: its law, its
+        rate and units, its direction and its span, or a dwell's
+        frequency and duration; None without the requirement.
+    drift_hz : float
+        The sweep-clock correction the extraction applied at the end of
+        the tone, in Hz; 0 for none.
+    cycles : float or None
+        The Vold-Kalman smoothing the level was read with, in cycles of
+        the tone's own frequency; None when it is not recorded.
+    distortion : object
+        The distortion check of this tone (`sine_distortion.check_distortion`),
+        or a reason in words why it could not be judged, or None when no
+        check was made.
+    """
+
+    #: the rows of a sine caption, in the order they are read
+    ROWS: ClassVar[tuple[str, ...]] = (
+        'Channel', 'Location and axis', 'Run', 'Sweep', 'Detector',
+        'Distortion')
+    #: the rows that belong to one channel
+    CHANNEL_ROWS: ClassVar[tuple[str, ...]] = (
+        'Channel', 'Location and axis', 'Distortion')
+
+    channels: tuple[CaptionChannel, ...]
+    tone: str = ''
+    run: str | None = None
+    onset: float | None = None
+    sweep: tuple[str, ...] | None = None
+    drift_hz: float = 0.0
+    cycles: float | None = None
+    distortion: Any = None
+
+    def rows(self) -> list[tuple[str, str]]:
+        """The caption as (label, text) rows, one per `ROWS` entry.
+
+        Returns
+        -------
+        list of tuple of str
+        """
+        run = NOT_RECORDED if self.run is None else self.run
+        if self.tone:
+            run += f', tone {self.tone}'
+            if self.onset is not None and self.run is not None:
+                run += f' found at {self.onset:.4g} s'
+        sweep = NOT_RECORDED if not self.sweep else '; then '.join(self.sweep)
+        if self.drift_hz:
+            # the clock the levels were read on was the specification's,
+            # corrected toward the run's; said, since a sweep that
+            # drifted is not the sweep specified
+            sweep += (f'; sweep clock corrected by {self.drift_hz:+.3g} Hz '
+                      'at its end')
+        detector = (NOT_RECORDED if self.cycles is None else
+                    f'Vold-Kalman filter tracking each tone, {self.cycles:g} '
+                    "cycles of the tone's frequency per reading")
+        return list(zip(self.ROWS, (
+            _names(self.channels), _places(self.channels), run, sweep,
+            detector, self._distortion()), strict=True))
+
+    def text(self) -> str:
+        """The caption as one paragraph, 'Label: text' rows joined by
+        '. '.
+
+        Returns
+        -------
+        str
+        """
+        return _paragraph(self.rows())
+
+    def _distortion(self) -> str:
+        if self.distortion is None:
+            return 'not checked'
+        if isinstance(self.distortion, str):
+            return f'not judged: {self.distortion}'
+        said = []
+        for channel in self.channels:
+            if channel.dof in self.distortion.dofs:
+                # the check's own statement of each channel's verdict
+                said.append(self.distortion.describe(channel.dof))
+            else:
+                said.append(f'{channel.dof}: not read by the check')
+        return '; '.join(said)
+
+
+def sweep_segments(tone: Any) -> tuple[str, ...]:
+    """Each segment of a specified tone in words: 'logarithmic, 1 oct/min,
+    ascending 5 Hz to 500 Hz', or 'dwell at 40 Hz for 30 s'.
+
+    Parameters
+    ----------
+    tone : SineTone
+        The tone as specified.
+
+    Returns
+    -------
+    tuple of str
+    """
+    from .sine import LINEAR
+
+    seconds = tone.segment_seconds()
+    out = []
+    for k, rate in enumerate(tone.segment_rate):
+        f0, f1 = float(tone.frequency[k]), float(tone.frequency[k + 1])
+        if tone.is_dwell(k):
+            out.append(f'dwell at {f0:.4g} Hz for {float(seconds[k]):.4g} s')
+            continue
+        law, unit = (('linear', 'Hz/s') if tone.segment_type[k] == LINEAR
+                     else ('logarithmic', 'oct/min'))
+        direction = 'ascending' if f1 > f0 else 'descending'
+        out.append(f'{law}, {abs(float(rate)):.4g} {unit}, {direction} '
+                   f'{f0:.4g} Hz to {f1:.4g} Hz')
+    return tuple(out)
+
+
+def sine_caption(levels: Any, records: int | Sequence[int] = 0, *,
+                 tone: str | None = None, run: str | None = None,
+                 channel_table: Any = None, geometry: Any = None,
+                 specification: Any = None,
+                 distortion: Any = None) -> SineCaption:
+    """The caption a report plot of a sine sweep's extracted level
+    carries, read off the records drawn and the objects around them.
+
+        caption = sine_caption(levels, 0, tone='Up', run='Run 2',
+                               specification=spec)
+        caption.text()
+
+    The sweep is the tone as the requirement specifies it, segment by
+    segment, with the correction the extraction made to its clock; the
+    detector is the Vold-Kalman filter the extraction tracks each tone
+    with, and the smoothing a set of levels was read with
+    (`SineLevelSet.cycles`). The distortion is a check already made
+    (`sine_distortion.check_distortion`), passed in: it rebuilds every
+    tone on every channel, which is too slow to make for a caption, so
+    a caption with none says it was not checked. Which sweep of a run's
+    several this was is not held by a level, so the caption does not
+    say.
+
+    Parameters
+    ----------
+    levels : SineLevel or SineLevelSet
+        The extracted level, or the set holding it.
+    records : int or sequence of int, default 0
+        The records (control channels) the plot draws.
+    tone : str, optional
+        For a set, the tone drawn; its first when omitted.
+    run : str, optional
+        The time history the level was extracted from.
+    channel_table : ChannelTable, optional
+        The channel number and comment.
+    geometry : Geometry, optional
+        The global axis each measured direction is nearest.
+    specification : SineSweepSpecification, optional
+        The requirement drawn, which specifies the sweep.
+    distortion : DistortionCheck or str, optional
+        The distortion check of the tone, or why it could not be judged.
+
+    Returns
+    -------
+    SineCaption
+
+    Raises
+    ------
+    TypeError
+        If `levels` is not a sine level or a set of them.
+    KeyError
+        If the set holds no tone `tone`.
+    IndexError
+        If a record is not one of the level's, or none is asked for.
+    """
+    from .sine import SineLevelSet
+
+    if caption_kind(levels) != 'sine':
+        raise TypeError('a sine caption reads an extracted sine level; '
+                        f'{type(levels).__name__} is not one')
+    cycles = None
+    if isinstance(levels, SineLevelSet):
+        cycles = levels.cycles
+        if not levels.levels:
+            raise IndexError('the set holds no tone to caption')
+        level = levels.tone(tone) if tone else levels.levels[0]
+    else:
+        level = levels
+    wanted = _records_wanted(level, records)
+    sweep = None
+    if specification is not None:
+        try:
+            sweep = sweep_segments(specification.tone(level.tone))
+        except KeyError:
+            sweep = None        # a tone the requirement does not name
+    return SineCaption(
+        channels=_channels(level, wanted, channel_table, geometry),
+        tone=level.tone, run=run, onset=float(level.onset), sweep=sweep,
+        drift_hz=float(level.drift_hz), cycles=cycles,
+        distortion=distortion)
+
+
+@dataclass(frozen=True)
+class TimeCaption:
+    """The facts a report plot of a time history carries, read off its
+    records by `time_caption`.
+
+    Attributes
+    ----------
+    channels : tuple of CaptionChannel
+        The channels drawn.
+    run : str or None
+        The run: the time history's name.
+    span : tuple of float or None
+        The first and last instant recorded, in seconds.
+    stretch : tuple of float or None
+        The (start, stop) of the stretch analyzed (the record's
+        averaging), in seconds; None when no averaging is set.
+    sample_rate : float or None
+        The sample rate in Hz; None for fewer than two samples or a
+        record not evenly sampled.
+    ranges : tuple of str or None
+        Each channel's measurement range, in words: its full scale from
+        the channel table, or why it has none; None without a table.
+    """
+
+    #: the rows of a time-history caption, in the order they are read
+    ROWS: ClassVar[tuple[str, ...]] = (
+        'Channel', 'Location and axis', 'Run', 'Sample rate', 'Range')
+    #: the rows that belong to one channel
+    CHANNEL_ROWS: ClassVar[tuple[str, ...]] = (
+        'Channel', 'Location and axis', 'Range')
+
+    channels: tuple[CaptionChannel, ...]
+    run: str | None = None
+    span: tuple[float, float] | None = None
+    stretch: tuple[float, float] | None = None
+    sample_rate: float | None = None
+    ranges: tuple[str, ...] | None = None
+
+    def rows(self) -> list[tuple[str, str]]:
+        """The caption as (label, text) rows, one per `ROWS` entry.
+
+        Returns
+        -------
+        list of tuple of str
+        """
+        run = NOT_RECORDED if self.run is None else self.run
+        if self.span is not None:
+            run += f', {self.span[0]:.4g} s to {self.span[1]:.4g} s recorded'
+        if self.stretch is not None:
+            run += (f', {self.stretch[0]:.4g} s to {self.stretch[1]:.4g} s '
+                    'analyzed')
+        rate = (NOT_RECORDED if self.sample_rate is None
+                else f'{self.sample_rate:.6g} Hz')
+        ranges = (NOT_RECORDED if self.ranges is None
+                  else '; '.join(self.ranges))
+        return list(zip(self.ROWS, (
+            _names(self.channels), _places(self.channels), run, rate,
+            ranges), strict=True))
+
+    def text(self) -> str:
+        """The caption as one paragraph, 'Label: text' rows joined by
+        '. '.
+
+        Returns
+        -------
+        str
+        """
+        return _paragraph(self.rows())
+
+
+def time_caption(history: Any, records: int | Sequence[int] = 0, *,
+                 run: str | None = None, channel_table: Any = None,
+                 geometry: Any = None, unit_system: Any = None) -> TimeCaption:
+    """The caption a report plot of a time history carries, read off the
+    records drawn and the objects around them.
+
+        caption = time_caption(history, [0, 1], run='Run 4',
+                               channel_table=table)
+        caption.text()
+
+    The span and the sample rate are the record's own, and the stretch
+    analyzed is its averaging. The range of each channel is its full
+    scale from the channel table, the level it clips at in its own
+    units (`overload.table_full_scales`), so a reader can set a trace's
+    peaks against it.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The measured record; a transient specification is refused.
+    records : int or sequence of int, default 0
+        The records the plot draws.
+    run : str, optional
+        The run's name.
+    channel_table : ChannelTable, optional
+        The channel number, comment and range.
+    geometry : Geometry, optional
+        The global axis each measured direction is nearest.
+    unit_system : UnitSystem, optional
+        The display units the ranges are written in.
+
+    Returns
+    -------
+    TimeCaption
+
+    Raises
+    ------
+    TypeError
+        If `history` is not a measured `TimeHistory`.
+    IndexError
+        If a record is not one of the history's, or none is asked for.
+    """
+    from ..units import DEFAULT_SYSTEM
+
+    if caption_kind(history) != 'time':
+        raise TypeError('a time-history caption reads a measured time '
+                        f'history; {type(history).__name__} is not one')
+    wanted = _records_wanted(history, records)
+    us = DEFAULT_SYSTEM if unit_system is None else unit_system
+    t = np.asarray(history.abscissa, dtype=float)
+    span = (float(t[0]), float(t[-1])) if t.size else None
+    rate = stretch = None
+    if t.size > 1:
+        try:
+            rate = float(history.sample_rate)
+        except ValueError:
+            rate = None         # not evenly sampled: no one rate to state
+    averaging = getattr(history, 'averaging', None)
+    if averaging is not None and rate:
+        stretch = (span[0] + averaging.start_sample(rate) / rate,
+                   averaging.stop(rate, span[0]))
+    ranges = None
+    if channel_table is not None:
+        from .overload import table_full_scales
+
+        scales = table_full_scales(channel_table, history)
+        said = []
+        for record in wanted:
+            value = float(scales.full_scales[record])
+            dimension = str(history.ordinate_dim[record])
+            name = str(history.response_dof[record])
+            if not np.isfinite(value):
+                said.append(f'{name}: {scales.reasons[record]}')
+                continue
+            unit = us.label_text(dimension)
+            said.append(f'{name}: ±{float(us.from_si(value, dimension)):.4g}'
+                        f'{" " + unit if unit else ""} full scale')
+        ranges = tuple(said)
+    return TimeCaption(
+        channels=_channels(history, wanted, channel_table, geometry),
+        run=run, span=span, stretch=stretch, sample_rate=rate,
+        ranges=ranges)

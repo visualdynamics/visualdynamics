@@ -455,10 +455,42 @@ def _state(obj: Any) -> tuple:
 
 
 def _key(item: Item, objects: Mapping[str, Any]) -> tuple:
-    found = item.objects(objects)
-    return (item.check.key,
-            tuple((name, _state(obj)) for name, obj in found.items()),
-            json.dumps(item.settings, sort_keys=True, default=repr))
+    return _found_key(item.check.key, item.objects(objects), item.settings)
+
+
+def _found_key(key: str, found: Mapping[str, Any],
+               settings: Mapping[str, Any]) -> tuple:
+    return (key, tuple((name, _state(obj)) for name, obj in found.items()),
+            json.dumps(settings, sort_keys=True, default=repr))
+
+
+def kept(key: str, found: Mapping[str, Any],
+         settings: Mapping[str, Any] | None = None) -> Any:
+    """The reading kept for check `key` over the objects `found` (each
+    of the check's fields by name) with `settings`, or None when none is
+    kept or it was canceled. Never reads: a caption states what a check
+    has found, and the slow checks are made on the app's worker
+    (`prepare`), not where a caption is read.
+
+    Parameters
+    ----------
+    key : str
+        The check, one of `CHECKS`.
+    found : mapping
+        The object each of the check's fields reads, by field name.
+    settings : mapping, optional
+        The settings it was read with; none when omitted.
+
+    Returns
+    -------
+    object or None
+        What the check's core function returned, a `Refusal`, or None.
+    """
+    ordered = {name: found.get(name) for name, _default in check(key).fields}
+    if any(obj is None for obj in ordered.values()):
+        return None
+    reading = _kept(_found_key(key, ordered, settings or {}), ordered)
+    return None if reading is _CANCELED else reading
 
 
 def _kept(key: tuple, found: Mapping[str, Any]) -> Any:

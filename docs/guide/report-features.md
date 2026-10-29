@@ -980,12 +980,15 @@ acceleration ASD and a force ASD, are scaled apart.
 ## Record captions
 
 **Record captions** (group Figures) puts the caption block a record
-carries under every figure of a measured spectrum in the report: the
-channel, the run, the analysis settings and the requirement, read off
-the record as [Report captions](report-captions.md) describes. Without
-the feature the same block can be asked for one figure at a time, with
-the figure's own check box in the editor; the feature asks for it on
-every figure at once.
+carries under every figure of a measured spectrum, a shock response
+spectrum, a sine level and a time history in the report: the channel,
+the run, the analysis settings and the requirement, read off the
+record as [Report captions](report-captions.md) describes. Without the
+feature the same block can be asked for one figure at a time, with the
+figure's own check box in the editor, and the built-in templates
+already ask for it on their spectrum, shock response spectrum and sine
+figures; the feature asks for it on every figure at once, the time
+histories among them.
 
 ## What is planned
 

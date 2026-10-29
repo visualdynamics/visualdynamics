@@ -775,6 +775,12 @@ def test_record_captions_put_the_facts_on_every_spectrum_figure(run):
     check box did the same thing)."""
     project, name = run
     report = project[name]
+    # the built-in template captions its spectra itself; with that taken
+    # off, the feature is what puts the caption block back
+    assert any(block.get('record_caption') for block in report.blocks)
+    stored = [dict(block) for block in report.blocks]
+    for block in report.blocks:
+        block.pop('record_caption', None)
     plain = _render(project, name)
     assert 'facts' not in json.dumps(_payload(plain)['blocks'])
     rf.configure(report, enable=['record_captions'])
@@ -791,4 +797,5 @@ def test_record_captions_put_the_facts_on_every_spectrum_figure(run):
             'the stored blocks are not changed'
     finally:
         rf.configure(report, disable=['record_captions'])
+        report.blocks[:] = stored
     assert rf.FEATURES['record_captions'].available

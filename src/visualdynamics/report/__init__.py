@@ -231,6 +231,16 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     #: (built block, its figure kind) for the plot conventions
     kinded: list[tuple[dict[str, Any], str | None]] = []
     figures = tables = 0
+    if 'check_blocks' in active:
+        from . import check_blocks
+
+        # the readings the Checks below will state, read before the
+        # figures, so a figure's caption states the same check and
+        # never "not checked" beside it. Each is read as the Checks
+        # read it (`check_blocks.read`): kept, or canceled and kept so,
+        # when the app has already read it on its worker
+        for item in check_blocks.items(report, objects, object_groups):
+            check_blocks.read(item, objects)
     for index, block in enumerate(report.blocks):
         if 'check' in block:
             # a check of its own (`check_blocks.add`): drawn with the
@@ -903,10 +913,10 @@ def block_caption(block: Mapping[str, Any], objects: Mapping[str, Any],
     What the report editor reads out beside a plot block: the caption
     `Project.caption_of` reads for the records the figure opens on: the
     channel the block names, else the first channel the block's
-    specification bounds, else the records its filter keeps that the
-    first figure draws. None
-    when the block draws no measured spectrum, or the objects are not
-    a project.
+    requirement names, else the records its filter keeps that the
+    first figure draws. None when the block draws no measured record a
+    caption reads (`report_caption.caption_kind`), draws a grid, or the
+    objects are not a project.
 
     Parameters
     ----------
@@ -921,45 +931,81 @@ def block_caption(block: Mapping[str, Any], objects: Mapping[str, Any],
 
     Returns
     -------
-    RecordCaption or None
+    RecordCaption, SrsCaption, SineCaption, TimeCaption or None
     """
     from ..core.compliance import matched_records
-    from ..core.data import Bounded, Psd, Specification
+    from ..core.data import ShockSpecification, Specification
     from ..core.report import base_quantity, resolve_binding
+    from ..core.report_caption import caption_kind
+    from ..core.sine import SineLevelSet, SineSweepSpecification
 
     caption_of = getattr(objects, 'caption_of', None)
     if caption_of is None or block.get('kind') != 'plot' or block.get('grid'):
         return None
     name = resolve_binding(block.get('source'), objects, object_groups)
     source = objects.get(name or '')
-    if not isinstance(source, Psd) or isinstance(source, Bounded):
+    kind = caption_kind(source)
+    if kind is None:
         return None
     against = objects.get(resolve_binding(block.get('specification'), objects,
                                           object_groups) or '')
-    if not isinstance(against, Specification):
-        against = None
-    if against is not None:
-        named = block.get('channel')
+    named = block.get('channel')
+    tone = block.get('tone') or None
+    measured, target = source, None
+    if kind == 'sine' and isinstance(source, SineLevelSet):
+        try:
+            measured = (source.tone(tone) if tone else
+                        source.levels[0] if source.levels else None)
+        except KeyError:
+            return None
+        if measured is None:
+            return None
+    if kind == 'spectrum' and isinstance(against, Specification):
         pairs = [mi for _label, si, mi in matched_records(against, source)
                  if not named or _channel_label(against, si) == str(named)]
         if not pairs:
             return None
         record = pairs[0]
+    elif kind == 'srs' and isinstance(against, ShockSpecification):
+        target = against
+    elif kind == 'sine' and isinstance(against, SineSweepSpecification):
+        try:
+            target = against.tone_curve(measured.tone)
+        except KeyError:
+            return None
     else:
+        against = None
+    if target is not None:
+        # an SRS or sine figure draws a channel at a time, every event
+        # of it: the channel the block names, else the requirement's
+        # first that the measurement holds (`_srs_comparison_block`)
+        held = {_pair_key(measured, i) for i in range(measured.num_records)}
+        keys = [_pair_key(target, j) for j in range(target.num_records)
+                if _pair_key(target, j) in held
+                and (not named or _channel_label(target, j) == str(named))]
+        if not keys:
+            return None
+        record = [i for i in range(measured.num_records)
+                  if _pair_key(measured, i) == keys[0]]
+    elif kind != 'spectrum' or against is None:
         select = block.get('select', '')
-        records = list(range(source.num_records))
-        if select.startswith('dim:'):
+        records = list(range(measured.num_records))
+        if select == 'drive' and measured.reference_dof is not None:
             records = [i for i in records
-                       if base_quantity(source.known_dim(i)) == select[4:]]
+                       if measured.response_dof[i] == measured.reference_dof[i]]
+        elif select.startswith('dim:'):
+            records = [i for i in records
+                       if base_quantity(measured.known_dim(i)) == select[4:]]
         if not records:
             return None
         # the figure's own records: a block of many continues into
         # further figures, and the first draws the first page of them
         record = records[:MAX_REPORT_CURVES]
+    extra = {'tone': measured.tone} if kind == 'sine' else {}
     return caption_of(name, record, specification=against,
                       per_octave=(int(block['octave']) if block.get('octave')
                                   else None),
-                      unit_system=unit_system or DEFAULT_SYSTEM)
+                      unit_system=unit_system or DEFAULT_SYSTEM, **extra)
 
 
 def _caption_figures(built, block, source, objects, us):
@@ -968,38 +1014,56 @@ def _caption_figures(built, block, source, objects, us):
     page sets under the caption. A figure drawn a channel at a time
     carries one per channel, and the page shows the one picked.
 
-    A grid says once what its cells share, under the grid (the run,
-    the estimate, the resolution, the window, the DOF), and each cell
-    says only its own channel's rows (`report_caption.CHANNEL_ROWS`),
-    so eight cells do not repeat the same five lines eight times.
+    A grid says once what its cells share, under the grid (for a
+    spectrum the run, the estimate, the resolution, the window and the
+    DOF), and each cell says only its own channel's rows (the caption's
+    `CHANNEL_ROWS`), so eight cells do not repeat the same five lines
+    eight times.
 
-    Only a measured spectrum has one, and only when the objects are a
-    project, since the window and the run are read from its
-    provenance; any other figure is left as it is.
+    A measured spectrum, a shock response spectrum, a sine level and a
+    time history have one (`report_caption.caption_kind`), and only
+    when the objects are a project, since the run and the settings are
+    read from its provenance; any other figure is left as it is.
     """
-    from ..core.data import Bounded, Psd, Specification
-    from ..core.report_caption import CHANNEL_ROWS, ROWS
+    from ..core.data import ShockSpecification, Specification
+    from ..core.report_caption import caption_kind
+    from ..core.sine import SineSweepSpecification
 
     caption_of = getattr(objects, 'caption_of', None)
-    if (caption_of is None or not isinstance(source, Psd)
-            or isinstance(source, Bounded)):
+    kind = caption_kind(source)
+    if caption_of is None or kind is None:
         return
     name = block.get('source')
     against = (objects.get(block['specification'])
                if block.get('specification') else None)
-    if not isinstance(against, Specification):
+    # the requirement each kind is drawn against: a spectrum's
+    # specification, a shock response spectrum's, a sine level's sweep
+    if not isinstance(against, {'spectrum': Specification,
+                                'srs': ShockSpecification,
+                                'sine': SineSweepSpecification}.get(kind,
+                                                                    ())):
         against = None
     octave = int(block['octave']) if block.get('octave') else None
+    extra = {'tone': block['tone']} if block.get('tone') else {}
 
-    def rows(records, specification, only=None):
-        return [list(row) for row in caption_of(
-            name, records, specification=specification, per_octave=octave,
-            unit_system=us).rows() if only is None or row[0] in only]
+    def read(records, specification):
+        return caption_of(name, records, specification=specification,
+                          per_octave=octave, unit_system=us, **extra)
+
+    def rows(caption, only=None):
+        return [list(row) for row in caption.rows()
+                if only is None or row[0] in only]
 
     def channels_of(figure):
         return [channel for channel in figure.get('channels') or []
                 if isinstance(channel, dict)
                 and channel.get('_record') is not None]
+
+    def records_of(channel):
+        # a spectrum's channel draws one record; an SRS channel draws
+        # one per event, and a sine channel one per tone's channel
+        held = channel['_record']
+        return [int(held)] if np.ndim(held) == 0 else [int(r) for r in held]
 
     for figure in built if isinstance(built, list) else [built]:
         if figure.get('kind') == 'grid':
@@ -1009,23 +1073,28 @@ def _caption_figures(built, block, source, objects, us):
                     for cell in column:
                         own = channels_of(cell)
                         for channel in own:
-                            channel['facts'] = rows(channel['_record'],
-                                                    against, CHANNEL_ROWS)
-                            drawn.append(channel['_record'])
+                            caption = read(channel['_record'], against)
+                            channel['facts'] = rows(caption,
+                                                    caption.CHANNEL_ROWS)
+                            drawn.extend(records_of(channel))
                         if own:
                             cell['facts'] = own[0]['facts']
             if drawn:
-                figure['facts'] = rows(sorted(set(drawn)), None,
-                                       [label for label in ROWS
-                                        if label not in CHANNEL_ROWS])
+                # a spectrum's shared rows do not read the requirement;
+                # a sine level's sweep is the requirement's
+                shared = read(sorted(set(drawn)),
+                              None if kind == 'spectrum' else against)
+                figure['facts'] = rows(shared, [
+                    label for label in shared.ROWS
+                    if label not in shared.CHANNEL_ROWS])
             continue
         own = channels_of(figure)
         for channel in own:
-            channel['facts'] = rows(channel['_record'], against)
+            channel['facts'] = rows(read(channel['_record'], against))
         if own:
             figure['facts'] = own[0]['facts']
         elif figure.get('_records'):
-            figure['facts'] = rows(figure['_records'], None)
+            figure['facts'] = rows(read(figure['_records'], None))
 
 
 def _without_records(built):
@@ -1354,6 +1423,10 @@ def _stage_page(block, source, objects, us, caption, page):
         xlabel = xlabel.removeprefix('log10 ')
     built = {'kind': 'stage', 'caption': caption,
              'runs': runs, 'labels': labels,
+             # which records this figure draws, for its caption block;
+             # never sent to the page (`_without_records`)
+             '_records': ([int(i) for i in drawing]
+                          if floor_object is None else []),
              'stations': stations,
              'extents': [float(x0), float(x1), float(z0), float(z1)],
              'log': bool(log), 'logx': logx,
@@ -2887,7 +2960,9 @@ def _srs_comparison_block(block, measured, specification, us, caption):
                               'y': mapped(np.abs(shown[i]))})
         channel = {'label': _channel_label(specification, record),
                    'y': mapped(target), 'zones': zones,
-                   'responses': responses}
+                   'responses': responses,
+                   # the measured records drawn, for the caption block
+                   '_record': list(rows)}
         channel['key'] = _channel_key(channel, edges, target,
                                       specification.known_dim(record))
         channels.append(channel)

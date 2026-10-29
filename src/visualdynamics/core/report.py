@@ -1558,11 +1558,13 @@ def modal_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[s
          'select': 'dim:acceleration', 'caption': 'Response '
          'acceleration time histories, all frames'},
         {'kind': 'plot', 'source': psd, 'mode': 'stage',
-         'select': 'dim:force', 'caption': 'Averaged excitation force '
-         'auto-power spectral density'},
+         'select': 'dim:force', 'record_caption': True,
+         'caption': 'Averaged excitation force auto-power spectral '
+         'density'},
         {'kind': 'plot', 'source': psd, 'mode': 'stage',
-         'select': 'dim:acceleration', 'caption': 'Averaged response '
-         'acceleration auto-power spectral densities'},
+         'select': 'dim:acceleration', 'record_caption': True,
+         'caption': 'Averaged response acceleration auto-power spectral '
+         'densities'},
         {'kind': 'text', 'text':
             '## Data Quality\n\n'
             'The drive point FRF magnitudes '
@@ -1957,6 +1959,7 @@ def shock_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[s
             'requirement is small.'},
         {'kind': 'plot', 'source': '@basis:Srs', 'mode': 'curves',
          'specification': '@basis:ShockSpecification',
+         'record_caption': True,
          'caption': 'Measured shock response spectra against the '
          'specification'},
         # the judgment, not just the picture: RMS deviation across the
@@ -2025,7 +2028,8 @@ def _sine_level_blocks(objects: Mapping[str, Any]) -> list[dict[str, Any]]:
         for tone in level_set.tone_names:
             head = {'kind': 'plot', 'source': name, 'tone': tone,
                     'mode': 'curves',
-                    'specification': '@basis:SineSweepSpecification'}
+                    'specification': '@basis:SineSweepSpecification',
+                    'record_caption': True}
             caption = f'{tone}: extracted level against the requirement'
             if tiled:
                 blocks.append({**head, 'grid': True, 'caption': caption})
@@ -2040,6 +2044,7 @@ def _sine_level_blocks(objects: Mapping[str, Any]) -> list[dict[str, Any]]:
             blocks.append(
                 {'kind': 'plot', 'source': name, 'mode': 'curves',
                  'specification': '@basis:SineSweepSpecification',
+                 'record_caption': True,
                  'caption': f'{objects[name].tone}: extracted level '
                  'against the requirement'})
     else:
@@ -2047,6 +2052,7 @@ def _sine_level_blocks(objects: Mapping[str, Any]) -> list[dict[str, Any]]:
             {'kind': 'plot', 'source': '@basis:SineLevelSet',
              'mode': 'curves',
              'specification': '@basis:SineSweepSpecification',
+             'record_caption': True,
              'caption': 'Extracted levels against the requirement'})
     blocks.append({'kind': 'text', 'text':
         '## Level Against Requirement\n\n'
@@ -2561,6 +2567,7 @@ def transient_template(objects: Mapping[str, Any],
             'and neither stands in for the other.'},
         {'kind': 'plot', 'source': '@basis:Psd',
          'specification': '@basis:Specification', 'mode': 'curves',
+         'record_caption': True,
          'caption': 'Control spectra against the specification'},
         {'kind': 'bars', 'mode': 'error', 'source': '@basis:Specification',
          'measured': '@basis:Psd',
@@ -2818,17 +2825,14 @@ def _comparisons(psd_token: str, spec_token: str, caption: str,
     channel the bound specification names, each opening on its own
     channel; one figure that picks when nothing binds yet."""
     labels = control_channel_labels(objects, object_groups, spec_token)
+    head = {'kind': 'plot', 'source': psd_token,
+            'specification': spec_token, 'mode': 'curves',
+            'record_caption': True}
     if not labels:
-        return [{'kind': 'plot', 'source': psd_token,
-                 'specification': spec_token, 'mode': 'curves',
-                 'caption': caption}]
+        return [{**head, 'caption': caption}]
     if len(labels) > GRID_ABOVE:
-        return [{'kind': 'plot', 'source': psd_token,
-                 'specification': spec_token, 'mode': 'curves',
-                 'grid': True, 'caption': caption}]
-    return [{'kind': 'plot', 'source': psd_token,
-             'specification': spec_token, 'mode': 'curves',
-             'channel': label, 'caption': f'{caption} — {label}'}
+        return [{**head, 'grid': True, 'caption': caption}]
+    return [{**head, 'channel': label, 'caption': f'{caption} — {label}'}
             for label in labels]
 
 

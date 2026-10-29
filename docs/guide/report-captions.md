@@ -69,12 +69,72 @@ freedom. The overlap is written the same way in a caption, a label and
 a `{{Object.overlap}}` reference: two-thirds overlap is 66.7% in all
 three.
 
+## A shock response spectrum's caption
+
+A shock response spectrum is read at a Q, on natural frequencies spaced
+so many to an octave, as one kind of peak, from a record that may have
+been filtered on its way there, and it is accepted on how many of its
+points lie inside a band. Each of those changes what the curve means,
+so its caption block has nine rows:
+
+| Row | Read from |
+|---|---|
+| Channel, Location and axis | As for a spectrum, one entry per channel drawn |
+| Run | The time history the spectrum was computed from, and the events drawn by their labels |
+| Q | The spectrum's amplification, with the damping it stands for |
+| Spacing | Natural-frequency lines per octave, read off the spectrum's own frequencies, and the first and last of them |
+| Type | Which peak each point is: maximax, positive or negative |
+| Filter | Each filter applied in the project on the way to the run, with its order and its zero-phase pass, or none |
+| Sample rate | The run's |
+| Points rule | Against the requirement drawn: the band and the rule ([Judging an SRS against its tolerance](srs-tolerance.md)), then each record drawn, in each polarity the project holds, with the count of its points inside the inner band and inside the outer, and whether it passes |
+
+The polarities are the spectrum drawn and each other spectrum the
+project holds of the same events at the same Q and spacing: compute a
+positive and a negative spectrum beside the maximax one and each
+caption judges all three. A record with no point to judge says why (a
+record of zeros, a record of points that are not numbers, a spectrum
+outside the requirement's band) and never passes; a point that is not
+a number is left out of the count and the row says how many were.
+Whether a spectrum is of the primary or the residual response is not
+held by the spectrum, so the caption does not say.
+
+## A sine level's caption
+
+A sine level is read off a recording by tracking each tone, so its
+caption block names the sweep, the detector and the distortion beside
+the level:
+
+| Row | Read from |
+|---|---|
+| Channel, Location and axis | As for a spectrum, one entry per control channel drawn |
+| Run | The recording the level was extracted from, the tone, and where in the recording its sweep was found |
+| Sweep | Each segment of the tone as the requirement specifies it: linear in Hz/s or logarithmic in oct/min, ascending or descending, from and to; a dwell's frequency and duration; and the correction the extraction made to the sweep's clock, where it made one |
+| Detector | The Vold-Kalman filter the extraction tracks each tone with, and the smoothing the levels were read with, in cycles of the tone's frequency |
+| Distortion | The distortion check of the tone on each channel ([Checking a sine record for distortion](sine-distortion.md)), its worst line and how many lines were over the limit |
+
+The distortion check rebuilds every tone on every channel, so a
+caption does not make it: it states the check the report's **Check
+blocks** made of that tone over the same recording, and says "not
+checked" when the report makes none. Which sweep of a run's several a
+level was is not held by the level, so the caption does not say.
+
+## A time history's caption
+
+| Row | Read from |
+|---|---|
+| Channel, Location and axis | As for a spectrum, one entry per channel drawn |
+| Run | The time history, the span recorded and, where an averaging is set, the stretch analyzed |
+| Sample rate | The record's |
+| Range | Each channel's full scale from the channel table, in its own units (the level it clips at), or why the table gives none |
+
 ## From a script
 
 `Project.caption_of` reads the caption for one record, or for the
 records a plot draws, from the project: the averaging from the
 spectrum's provenance, the run it came from, and the channel table and
-geometry linked with them.
+geometry linked with them. It reads a shock response spectrum's, a
+sine level's (name the tone of a set with `tone`) and a time history's
+the same way.
 
 ```python
 import visualdynamics
@@ -101,15 +161,21 @@ both, for a spectrum and its averaging held outside a project.
 
 ## In a report
 
-A plot block of a measured spectrum draws the caption block under its
-figure when the block sets `'record_caption': True`, or when **Caption
-from the record** is checked in the editor's pane for that block. The
+A plot block of a measured spectrum, a shock response spectrum, a sine
+level or a time history draws the caption block under its figure when
+the block sets `'record_caption': True`, or when **Caption from the
+record** is checked in the editor's pane for that block. The built-in
+templates set it on every figure of a measured spectrum, a shock
+response spectrum and a sine level they write, so a report generated
+from one carries the blocks from the start; uncheck the box to take a
+figure's away. The
 pane reads the caption out beneath the check, as the page will show
 it. A figure drawn a channel at a time carries each channel's block,
 and the page shows the one picked. A grid of control channels says
 once, under the grid, what its cells share (the run, the estimate, the
 resolution, the window and the DOF), and each cell gives only its own
-channel's rows. The block's own caption stays the figure's title, and
+channel's rows (for a sine level, the run, the sweep and the
+detector). The block's own caption stays the figure's title, and
 figure references still find the figure by it.
 
 ```python

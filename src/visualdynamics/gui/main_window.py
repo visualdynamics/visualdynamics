@@ -19554,20 +19554,29 @@ class MainWindow(QMainWindow):
         the worker, nothing is read, the report is rebuilt once it is
         done, and the answer is False."""
         from ..core.progress import Cancelled
+        from ..report import requirement
         from ..report.check_blocks import pending, prepare
 
-        if not pending(report, self.objects, self.object_groups):
+        # the results against a test requirement (report feature
+        # `test_requirement`) are read on the worker the same way
+        readers = [(prepare, 'the report checks')] if pending(
+            report, self.objects, self.object_groups) else []
+        if requirement.pending(report, self.objects, self.object_groups):
+            readers.append((requirement.prepare,
+                            'the results against the requirement'))
+        if not readers:
             return True
         if self._importing:
             # the worker is in use: try again once it is free
             self._report_settle.start(REPORT_SETTLE_MS)
             return False
-        try:
-            self._run_long('Reading the report checks…', prepare, report,
-                           self.objects, self.object_groups)
-        except Cancelled:
-            self._show_status('Reading the report checks was canceled; '
-                              'the page says which were not read')
+        for reader, what in readers:
+            try:
+                self._run_long(f'Reading {what}…', reader, report,
+                               self.objects, self.object_groups)
+            except Cancelled:
+                self._show_status(f'Reading {what} was canceled; the page '
+                                  'says which were not read')
         return True
 
     def export_report_pdf(self) -> None:

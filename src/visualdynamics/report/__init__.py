@@ -215,6 +215,12 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     # identity and issue: the identification block first, the end mark
     # last, and the printed page's margins (`report/identity.py`)
     identity = 'report_identity' in active
+    # the test requirement: its words and its result table, and the
+    # pass/fail box read from it (or labeled a screening)
+    required = 'test_requirement' in active
+    #: each requirement block's words and results, held for the
+    #: skeleton's Requirement and Results
+    requirements: list[Any] = []
     #: the report block each page block was built from, and each
     #: section's own blocks, for the skeleton
     origins: list[Mapping[str, Any]] = []
@@ -229,6 +235,29 @@ def _report_payload(report, objects, unit_system=None, edit=False,
         if 'check' in block:
             # a check of its own (`check_blocks.add`): drawn with the
             # other checks, and only while that feature is on
+            continue
+        if 'requirement' in block:
+            # a test requirement (`requirement.add`): drawn only while
+            # its feature is on, in place, or under the skeleton's
+            # Requirement and Results
+            if not required:
+                continue
+            from .requirement import build as build_requirement
+
+            made = build_requirement(block, objects, object_groups)
+            if made is None:
+                continue
+            if edit:
+                for built in made.words + made.results:
+                    built['index'] = index
+            if skeleton:
+                requirements.append(made)
+                continue
+            for built in made.words + made.results:
+                if built['kind'] == 'table':
+                    tables += 1
+                    built['label'] = f'Table {tables}'
+                payload['blocks'].append(built)
             continue
         if 'section' in block:
             # a skeleton section's own words: drawn only while the
@@ -249,6 +278,11 @@ def _report_payload(report, objects, unit_system=None, edit=False,
         else:
             built = _build_block(_captioned(block) if captions else block,
                                  objects, us, object_groups)
+            if required and block.get('kind') == 'verdict':
+                from .requirement import verdict as requirement_verdict
+
+                built = requirement_verdict(built, block, report, objects,
+                                            object_groups)
         if built is None:
             if not edit:
                 continue
@@ -322,6 +356,11 @@ def _report_payload(report, objects, unit_system=None, edit=False,
                       in zip(payload['blocks'], origins, strict=True)}
         payload['blocks'] = arrange(payload['blocks'], origins, held,
                                     objects, object_groups, edit=edit)
+        if requirements:
+            from .requirement import place as place_requirements
+
+            payload['blocks'] = place_requirements(payload['blocks'],
+                                                   requirements)
         if indexed:
             from .data_index import page_blocks
             from .skeleton import under

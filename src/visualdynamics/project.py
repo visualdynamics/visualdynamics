@@ -5993,6 +5993,141 @@ class Project(dict):
                     'caption': str(caption)})
         return report.num_blocks - 1
 
+    def report_requirement(self, name: str, specification: Any,
+                           measured: Any, document: str,
+                           composite_bands: Sequence[Any], *,
+                           revision: str = '', clause: str = '',
+                           strategy: str = 'single',
+                           channels: Sequence[str] = (),
+                           weights: Sequence[float] | None = None,
+                           individual_bands: Sequence[Any] = (),
+                           grms_percent: float | None = None,
+                           duration: float | None = None,
+                           duration_tolerance: Sequence[float] | None = None,
+                           min_dof: float | None = None,
+                           max_line_spacing: float | None = None,
+                           cross_axis: Sequence[Any] = (),
+                           rule: str = 'any_line', combine: int = 1,
+                           sources: Mapping[str, Any] | None = None,
+                           duration_run: float | None = None,
+                           caption: str = '') -> int:
+        """Bind a test requirement to a run in the report `name`, and
+        return its block's index.
+
+        While the report feature `test_requirement` is on, the block
+        draws the requirement in words and a result table with one row
+        per criterion, worded met, not met or not judged, and the
+        report's pass/fail box for the same specification and run reads
+        from it (`visualdynamics.report.requirement`). The requirement's
+        fields are `core.requirement.TestRequirement`'s; a band is
+        (low, high, below_db, above_db), low or high None for the
+        specification's own end.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        specification : str or object
+            The specification the run was controlled to; a symbolic
+            binding ('@basis:Specification') is kept as given, so a
+            template carries it.
+        measured : str or object
+            The run's PSD, likewise.
+        document : str
+            The governing document.
+        composite_bands : sequence
+            The control band: the one channel's, or the composite's
+            under a multi-point strategy; one band per frequency range.
+        revision, clause : str, optional
+            The document's revision, and the tolerance clause as the
+            plan copied it.
+        strategy : str, default 'single'
+            'single', or a multi-point composite: 'average', 'weighted',
+            'maximum' or 'minimum'.
+        channels : sequence of str, optional
+            The control channels by response DOF; by default the
+            channel table's Control flags, else the records that pair
+            with the specification.
+        weights : sequence of float, optional
+            One per channel, under 'weighted' only.
+        individual_bands : sequence, optional
+            Each control channel's band, under a multi-point strategy.
+        grms_percent : float, optional
+            The overall rms tolerance, plus or minus, percent.
+        duration : float, optional
+            The nominal duration at level, seconds.
+        duration_tolerance : (float, float), optional
+            Its tolerance below and above, percent.
+        min_dof : float, optional
+            The fewest degrees of freedom the control may have.
+        max_line_spacing : float, optional
+            The widest line spacing the control may have, Hz.
+        cross_axis : sequence, optional
+            The cross-axis limits, each (low, high, percent).
+        rule : str, default 'any_line'
+            The decision rule: 'any_line' or 'combined'.
+        combine : int, default 1
+            How many adjacent lines are combined under 'combined'.
+        sources : mapping, optional
+            Where each number came from, by field: (origin, owner), the
+            origin 'laboratory', 'customer' or 'derived'.
+        duration_run : float, optional
+            How long the run was at level, seconds: the controller's
+            counter, which the duration row is judged on.
+        caption : str, optional
+            The result table's caption.
+
+        Returns
+        -------
+        int
+            The block's index in the report.
+
+        Raises
+        ------
+        ValueError
+            For a requirement `TestRequirement` refuses, or a run it
+            cannot be read against at all (`core.requirement.evaluate`
+            says why). Nothing is changed.
+        TypeError
+            When `name` is not a report, or the specification or the run
+            is not of its kind.
+        """
+        from .core.report import resolve_binding
+        from .core.requirement import TestRequirement, evaluate
+        from .report.requirement import add, channel_table
+
+        report = self._report(name)
+        bound = []
+        for given in (specification, measured):
+            if isinstance(given, str) and given.startswith('@'):
+                # a symbolic binding is kept as given, so a template
+                # carries it; it must resolve here
+                held = resolve_binding(given, self, self.object_groups)
+                if held not in self:
+                    raise ValueError(f'{given!r} names nothing in this '
+                                     'project')
+                bound.append((given, held))
+            else:
+                held = self.name_of(given)
+                bound.append((held, held))
+        (specification_name, spec_held), (measured_name, run_held) = bound
+        requirement = TestRequirement(
+            document, tuple(composite_bands), revision=revision,
+            clause=clause, strategy=strategy, channels=tuple(channels),
+            weights=None if weights is None else tuple(weights),
+            individual_bands=tuple(individual_bands),
+            grms_percent=grms_percent, duration=duration,
+            duration_tolerance=(None if duration_tolerance is None
+                                else tuple(duration_tolerance)),
+            min_dof=min_dof, max_line_spacing=max_line_spacing,
+            cross_axis=tuple(cross_axis), rule=rule, combine=combine,
+            sources=dict(sources or {}))
+        evaluate(requirement, self[spec_held], self[run_held],
+                 table=channel_table(self), duration_run=duration_run)
+        return add(report, requirement, source=specification_name,
+                   measured=measured_name, duration_run=duration_run,
+                   caption=caption)
+
     def index_file(self, path: str | os.PathLike, holds: str | None = None,
                    *, role: str = 'referenced', objects: Sequence[str] = (),
                    source: str = 'author',
@@ -8217,6 +8352,7 @@ _JOURNALED_VERBS = (
     'set_run_identity', 'report_runs', 'report_chronology',
     'accept_chronology',
     'report_finding', 'draft_finding_fact',
+    'report_requirement',
     'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:

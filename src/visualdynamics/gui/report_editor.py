@@ -620,6 +620,8 @@ class ReportEditor(QWidget):
                 self._section_pane(form, block)
             elif block.get('kind') == 'text' and 'check' in block:
                 self._check_pane(form, block)
+            elif block.get('kind') == 'text' and 'requirement' in block:
+                self._requirement_pane(form, block)
             elif block.get('kind') == 'text':
                 form.addRow(QLabel(f'<b>Block {self.selected + 1}</b> — text'))
                 self.text_editor = QPlainTextEdit(block.get('text', ''))
@@ -752,6 +754,38 @@ class ReportEditor(QWidget):
             shown = QLabel(value)
             shown.setWordWrap(True)
             form.addRow(name, shown)
+
+    def _requirement_pane(self, form, block) -> None:
+        """The pane for a test requirement's block (report feature
+        `test_requirement`): what it is bound to, the requirement in
+        words and each criterion's result, as the page draws them. The
+        requirement is set from a script (`Project.report_requirement`);
+        Remove takes the block."""
+        from ..report.requirement import read, requirement_lines
+
+        form.addRow(QLabel('<b>Test requirement</b> \u2014 requirement and '
+                           'results'))
+        for name in ('source', 'measured'):
+            shown = QLabel(str(block.get(name, '')))
+            shown.setWordWrap(True)
+            form.addRow({'source': 'Specification',
+                         'measured': 'Run'}[name], shown)
+        objects = self.objects() if self.objects else {}
+        object_groups = self.object_groups() if self.object_groups else None
+        try:
+            lines = requirement_lines(block)
+            found = read(block, objects, object_groups)
+        except (TypeError, ValueError) as refusal:
+            lines, found = [f'Not read: {refusal}.'], None
+        if found is not None:
+            lines += [f'{row.name}, {row.required}: {row.state} '
+                      f'({row.measured})' for row in found.rows]
+            lines.append(f'Result: {found.state}.')
+        told = QLabel('<br>'.join(html_escape.escape(line) for line in lines))
+        told.setWordWrap(True)
+        told.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        form.addRow(told)
 
     def _section_pane(self, form, block) -> None:
         """The pane for a skeleton section's own block: its heading and

@@ -42,6 +42,8 @@ from typing import Any
 # (`report/data_index.py`) prints under its Record and Data Package.
 # P21 (the findings register, `report/findings.py`) fills the
 # skeleton's deviations section.
+# P17 (the requirement and its result table, `report/requirement.py`)
+# prints under the skeleton's Requirement and Results.
 
 #: the groups the selection tool lays the features out in, in order
 GROUPS = ('Structure', 'Results', 'Records', 'Issue control', 'Figures')
@@ -114,10 +116,11 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 
 
 #: every report feature, in the order the selection tool shows them
-#: within their groups. `skeleton_sections`, `run_sections`, `findings`,
-#: `check_blocks`, `prediction`, `data_index`, `calibration_in_date`,
-#: `report_identity`, `record_captions`, `plot_conventions` and its option
-#: `shared_decades` are built; the rest are the road map.
+#: within their groups. `skeleton_sections`, `run_sections`,
+#: `test_requirement`, `findings`, `check_blocks`, `prediction`,
+#: `data_index`, `calibration_in_date`, `report_identity`,
+#: `record_captions`, `plot_conventions` and its option `shared_decades`
+#: are built; the rest are the road map.
 FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'skeleton_sections', 'Skeleton sections', 'Structure',
@@ -136,10 +139,12 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         requires=('skeleton_sections',)),
     ReportFeature(
         'test_requirement', 'Requirement and results', 'Results',
-        'The test requirement in words, and a result table with one row '
-        'per criterion, worded met or not met. Without a requirement '
-        'the pass/fail box is labeled a screening.',
-        requires=('multi_point', 'chance'), available=False),
+        'The test requirement in words, with the source of each number, '
+        'and a result table with one row per criterion, worded met, not '
+        'met or not judged, each miss with its band and size. The '
+        'pass/fail box reads from the requirement; without one it is '
+        'labeled a screening.',
+        requires=('multi_point', 'chance')),
     ReportFeature(
         'findings', 'Findings register', 'Results',
         'Deviations, anomalies and nonconformances entered in a register, '

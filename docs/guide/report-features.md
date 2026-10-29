@@ -62,12 +62,12 @@ pages knows whether all of them are there.
 |---|---|---|
 | 1. Identification | title, number and revision, the laboratory, the customer, the dates, who authorized it | the author, or the identification block with Identity and issue on |
 | 2. Summary | what was tested and why, the result against each requirement, the deviations by number, the open anomalies | the author, above the pass/fail box and the generated description |
-| 3. Requirement | the governing document, the plan and procedure, the tolerance clause, the completion criteria | the author |
+| 3. Requirement | the governing document, the plan and procedure, the tolerance clause, the completion criteria | the author, with the requirement in words under it when Requirement and results is on |
 | 4. Test Article | description, part and serial, configuration, condition | the author |
 | 5. Setup and Method | facility, fixture, control strategy, settings, equipment and calibration | the author |
 | 6. Instrumentation | the channel table and any sensor averaging | the geometry, DOF scenes, photographs and channel table |
 | 7. Chronology | the runs in order, interruptions and failures, from the log | the author |
-| 8. Results | the control against the tolerance and every other result | every other generated figure and its text |
+| 8. Results | the control against the tolerance and every other result | every other generated figure and its text, opened by the result table when Requirement and results is on |
 | 9. Deviations, Anomalies and Nonconformances | each one in full, or None | the author |
 | 10. Discussion and Interpretation | what the results mean, and by whom, or None | the author |
 | 11. Conclusion | the statement of conformity and the rule it was decided by | the author, with the generated reading guide under it |
@@ -564,6 +564,100 @@ without the feature or without a channel table. `report_calibration`
 refuses a report with no test date, since there is then nothing to
 judge against. What to do about a lapsed sensor stays the engineer's.
 
+## Requirement and results
+
+**Requirement and results** (group Results) states the requirement a
+random run was accepted on, and the run against it one criterion at a
+time, each worded met, not met or not judged, so a reader never has to
+infer a result from a plot.
+
+**The requirement** is typed from the test plan and bound to the
+specification and the run it reads, from the console or a script:
+
+```python
+project.report_requirement(
+    'Report', 'Specification', 'Time History PSDs', 'Test plan TP-12',
+    [(None, 500, -3, 3), (500, None, -6, 6)], revision='B',
+    strategy='average', channels=['101Z+', '104Z+', '110Z+', '113Z+'],
+    individual_bands=[(None, None, -6, 6)], grms_percent=10,
+    duration=180, duration_tolerance=(5, 5), duration_run=184,
+    min_dof=120, max_line_spacing=2.5,
+    sources={'composite_bands': ('customer', 'Prime contractor')})
+```
+
+A band is (low, high, below, above): its frequency range in hertz,
+`None` for the specification's own end, and its edges in dB about the
+reference. A band that steps is a band per range. Under the single
+strategy the one control channel is judged against the control band;
+under a multi-point strategy (average, weighted, maximum or minimum)
+the composite the controller held ([Multi-point control](multi-point.md))
+is judged against the composite band, and each control channel against
+its individual band, which a multi-point requirement must state. The
+control channels are those named, else the channel table's Control
+flags, else the records that pair with the specification. The overall
+rms tolerance is in percent of the reference's, and the duration's
+tolerance may differ below and above (minus 0, plus 10 percent in some
+documents). The duration at level is the controller's counter, typed
+for the run, since a PSD does not hold how long it ran. Every number
+may carry its source: the laboratory, the customer, or derived, with
+its owner.
+
+**The decision rule** is the plan's choice:
+
+| Rule | A miss is |
+|---|---|
+| `any_line` | any line outside its band |
+| `combined`, with `combine` N | a group of N adjacent lines outside its band, their powers added and judged at the degrees of freedom of the sum ([Lines outside by chance](comparison-chance.md)) |
+
+At 120 degrees of freedom about one line in 13 of a run held exactly
+on its reference reads outside plus or minus 1 dB by chance, so a
+tight band fails a one-line rule on a correct test; eight lines
+combined steady that scatter, and a real excursion across neighboring
+lines still shows. The rule is stated with the requirement and in the
+result.
+
+**In the report**, with the feature on, the requirement block draws:
+
+- the requirement in words: the document and its revision, the
+  tolerance clause, the strategy and channels, each band and
+  tolerance, the decision rule, and each number's source, with
+  "supplied by the customer; the laboratory has not verified its
+  derivation" for a number the customer supplied;
+- the result table, a row per criterion: the composite (or the one
+  channel) against each range of its band, each control channel
+  against each range of its individual band, the overall rms, the
+  duration at level, the degrees of freedom (the fewest of the control
+  channels), the line spacing, and each cross-axis limit. A band row
+  gives each miss by its edges in hertz, its worst size in dB past the
+  band, and its line count, the worst first;
+- a note: how many criteria were met, the scale the run was compared
+  at, a dead channel, units not declared.
+
+With skeleton sections on, the words fall under 3. Requirement and the
+table opens 8. Results.
+
+**The pass/fail box** reads from the requirement bound to its run (or
+the one requirement of a report that holds one): MET, NOT MET or NOT
+JUDGED, how many criteria were met against which document, the
+criteria not met and not judged, and the decision rule. Only every
+criterion met is drawn in the pass color. A box with no requirement
+keeps its octave-band reading and is labeled **Screening (Visual
+Dynamics default rule)**, not a statement of conformity.
+
+A criterion that judged nothing says why and is never met: a band the
+specification does not reach, a channel of another quantity, a
+measurement that does not carry its degrees of freedom, a duration not
+stated. A band row with a line that is not a finite density is not
+judged unless it has a miss, and says how many lines were. Cross-axis
+limits are listed with the requirement and read "not judged" until a
+report reads the cross-axis response, so a result with a limit stated
+is never met unread. Refused before anything changes: a requirement
+with no document or no control band, bands that overlap or do not lie
+about the reference, a multi-point strategy without individual bands
+or with weights that do not fit its channels, a single strategy with
+more than one candidate channel, and a duration without its tolerance.
+The statement of conformity in the conclusion stays the author's.
+
 ## Responses against prediction
 
 **Responses against prediction** (group Results) reads each response
@@ -773,7 +867,6 @@ and are grayed out until each is built:
 
 | Feature | Group | What it will add |
 |---|---|---|
-| Requirement and results | Results | the requirement in words and a met or not met row per criterion; the pass/fail box labeled a screening without one |
 | Cross-axis and limit channels | Results | cross-axis against its limit, and where limit channels held the control down |
 | Control-channel uncertainty | Results | each control channel's uncertainty against one third of the tolerance |
 | Flash report | Issue control | a one-page preliminary report from the day's analysis |

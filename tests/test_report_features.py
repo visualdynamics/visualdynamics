@@ -24,20 +24,24 @@ from visualdynamics.core.report import Report
 from visualdynamics.report import features as rf
 from visualdynamics.report import page, plot_conventions, render_html
 
-LIVE = ('skeleton_sections', 'run_sections', 'findings', 'check_blocks',
-        'prediction', 'data_index', 'calibration_in_date', 'report_identity',
-        'record_captions', 'plot_conventions', 'shared_decades')
+LIVE = ('skeleton_sections', 'run_sections', 'test_requirement', 'findings',
+        'check_blocks', 'prediction', 'data_index', 'calibration_in_date',
+        'report_identity', 'record_captions', 'plot_conventions',
+        'shared_decades')
 #: the built features the test report preset names (responses against
 #: prediction is built but in no preset)
-PRESET_LIVE = ('skeleton_sections', 'run_sections', 'findings',
-               'check_blocks', 'data_index', 'calibration_in_date',
+PRESET_LIVE = ('skeleton_sections', 'run_sections', 'test_requirement',
+               'findings', 'check_blocks', 'data_index', 'calibration_in_date',
                'report_identity', 'record_captions', 'plot_conventions',
                'shared_decades')
-#: a feature not yet built that waits on no other feature, read off the
-#: registry so the tests of a refusal do not change each time one is built
+#: the first feature not yet built, read off the registry so the tests
+#: of a refusal do not change each time one is built; with the features
+#: it waits on enabled (`UNBUILT_NEEDS`), being unbuilt is all that
+#: stands in its way
 UNBUILT = next(key for key, feature in rf.FEATURES.items()
-               if not feature.available
-               and not any(need in rf.FEATURES for need in feature.requires))
+               if not feature.available)
+UNBUILT_NEEDS = tuple(need for need in rf.FEATURES[UNBUILT].requires
+                      if need in rf.FEATURES)
 UNBUILT_TITLE = rf.FEATURES[UNBUILT].title
 #: the plot conventions and their option
 CONVENTIONS = ('plot_conventions', 'shared_decades')
@@ -147,7 +151,7 @@ def test_a_feature_not_yet_built_is_refused_and_says_so():
     with pytest.raises(ValueError,
                        match=f'{re.escape(UNBUILT_TITLE)}.*not yet available'):
         rf.configure(report, enable=[UNBUILT])
-    assert rf.reason(UNBUILT) == 'not yet available'
+    assert rf.reason(UNBUILT, UNBUILT_NEEDS) == 'not yet available'
     # and an unbuilt feature names what it will wait on
     assert rf.reason('cross_axis') == (
         'not yet available; waits on Requirement and results')
@@ -212,13 +216,11 @@ def test_the_presets_enable_what_they_can_and_say_what_they_skipped():
     assert selection.enabled == PRESET_LIVE
     skipped = [key for key in rf.PRESETS['test_report'].features
                if key not in LIVE]
-    assert len(selection.notes) == len(skipped) == 1
-    assert selection.notes[0] == ('Test report: Requirement and results '
-                                  'skipped, not yet available')
+    assert len(selection.notes) == len(skipped) == 0
     flash = rf.configure(report, preset='flash_report')
-    assert flash.enabled == ('report_identity',)
-    assert report.features == ['report_identity']
-    assert len(flash.notes) == 3
+    assert flash.enabled == ('test_requirement', 'report_identity')
+    assert report.features == ['test_requirement', 'report_identity']
+    assert len(flash.notes) == 2
     assert ('Flash report: Findings register skipped, needs Skeleton '
             'sections') in flash.notes
     assert rf.configure(report, preset='default') == rf.FeatureSelection((), ())
@@ -742,11 +744,13 @@ def test_the_preset_selector_applies_and_lists_what_it_skipped(editing):
     panel.preset_box.setCurrentIndex(panel.preset_box.findData('test_report'))
     assert report.features == list(PRESET_LIVE)
     assert panel.boxes['plot_conventions'].isChecked()
-    assert ('Requirement and results skipped, not yet available'
-            in panel.notes.text())
+    assert panel.notes.text() == '', 'every feature it names is built'
     assert panel.preset_box.currentData() == 'test_report'
     panel.boxes['shared_decades'].setChecked(False)
     assert panel.preset_box.currentText() == 'Custom', 'a set no preset names'
+    panel.preset_box.setCurrentIndex(panel.preset_box.findData('flash_report'))
+    assert ('Findings register skipped, needs Skeleton sections'
+            in panel.notes.text())
     panel.preset_box.setCurrentIndex(panel.preset_box.findData('default'))
     assert report.features == []
 

@@ -107,6 +107,15 @@ class Report:
         a figure per channel and a table of peaks; drawn only while the
         report feature `prediction` is on:
         `visualdynamics.report.prediction`)
+      {'kind': 'text', 'text': '', 'requirement': dict,
+                       'source': Specification-name, 'measured': Psd-name,
+                       'duration_run': float, 'caption': str}
+        (a test requirement bound to a run, its values as
+        `core.requirement.TestRequirement.as_record` gives them: the
+        requirement in words and a result table, and the pass/fail box
+        for the same pair read from it; drawn only while the report
+        feature `test_requirement` is on:
+        `visualdynamics.report.requirement`)
 
     'select' filters a curves plot to the records the GUI's own filters
     would pick: 'drive' is the response==reference diagonal of an FRF,

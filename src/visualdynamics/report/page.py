@@ -3008,6 +3008,65 @@ div.finding p { margin: .2rem 0; }
 .finding-none, .findings-summary { white-space: normal; }
 """
 
+#: the pass/fail box read from the requirement, or labeled a screening
+#: (feature `test_requirement`). A box with a requirement says MET, NOT
+#: MET or NOT JUDGED in place of PASS or FAIL, so it reads in a
+#: monochrome copy; one without says it is the program's screening.
+_REQUIREMENT_SPLICES = (
+    ("  row.appendChild(s);\n  s.className = 'verdict ' + (block.passed",
+     ("  row.appendChild(s);\n"
+      "  if (block.requirement) { requirementVerdict(s, block.requirement);"
+      " return; }\n"
+      "  s.className = 'verdict ' + (block.passed")),
+    ("  word.textContent = block.passed ? 'PASS' : 'FAIL';\n",
+     ("  if (block.screening) { const label = document.createElement('div');\n"
+      "    label.className = 'screening'; label.textContent = block.screening;\n"
+      "    s.appendChild(label); }\n"
+      "  word.textContent = block.passed ? 'PASS' : 'FAIL';\n")),
+    ("  how.textContent = 'Read off the octave-band comparison.';\n",
+     ("  how.textContent = 'Read off the octave-band comparison.'\n"
+      "    + (block.screening ? ' No requirement is bound, so this is not a'\n"
+      "       + ' statement of conformity.' : '');\n")),
+)
+
+_REQUIREMENT_JS = r"""
+/* ---- the requirement's verdict ---------------------------------------
+   The box read from the result table: the result in words, how many
+   criteria were met against which document, those not met and not
+   judged, and the decision rule. Only every criterion met is drawn in
+   the pass color. */
+function requirementVerdict(s, r) {
+  s.className = 'verdict ' + (r.state === 'met' ? 'pass' : 'fail');
+  const word = document.createElement('div'); word.className = 'word';
+  word.textContent = r.state.toUpperCase();
+  s.appendChild(word);
+  const said = document.createElement('div');
+  said.textContent = r.met + ' of ' + r.rows + ' criteria met'
+    + (r.document ? ' against ' + r.document : '');
+  s.appendChild(said);
+  [['Not met: ', r.missed], ['Not judged: ', r.unjudged]].forEach(pair => {
+    if (!pair[1].length) return;
+    const d = document.createElement('div');
+    d.textContent = pair[0] + pair[1].join('; ') + '.';
+    s.appendChild(d);
+  });
+  if (r.rule) {
+    const how = document.createElement('div'); how.className = 'hint';
+    how.textContent = 'Decision rule: ' + r.rule + '.';
+    s.appendChild(how);
+  }
+}
+"""
+
+#: the result table's result cells: not met in bold, not judged in
+#: italics, so each reads in a monochrome copy; the screening label
+_REQUIREMENT_CSS = """
+td.mark-notmet { font-weight: 700; color: #c0392b; }
+td.mark-notjudged { font-style: italic; color: var(--faint); }
+.verdict .screening { font-size: .8rem; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--faint); }
+"""
+
 #: page code by feature: (splices into `_JS`, functions added, CSS added)
 FEATURE_PAGE = {
     'skeleton_sections': ((), '', _SKELETON_CSS),
@@ -3016,6 +3075,8 @@ FEATURE_PAGE = {
     'report_identity': (_PRINT_SPLICES, _PRINT_JS, _IDENTITY_CSS),
     'run_sections': ((), '', _RUNS_CSS),
     'findings': ((), '', _FINDINGS_CSS),
+    'test_requirement': (_REQUIREMENT_SPLICES, _REQUIREMENT_JS,
+                         _REQUIREMENT_CSS),
     'plot_conventions': (_STYLE_SPLICES, _STYLE_JS, _STYLE_CSS),
     'shared_decades': (_WINDOW_SPLICES, _WINDOW_JS, ''),
 }

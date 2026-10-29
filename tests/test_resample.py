@@ -440,7 +440,9 @@ def test_a_record_with_nothing_above_the_new_nyquist_folds_nothing():
                          np.zeros((1, 16 * 4096)), response_dof=['1Z+'],
                          ordinate_dim=['acceleration'])
     assert read_resample(silent, RATE).folds == ()
-    assert read_resample(silent, RATE).describe().endswith('lines kept.')
+    assert read_resample(silent, RATE).describe().endswith(
+        'lines kept. 1Z+ is zero throughout, so no level is read where '
+        'anything folds.')
 
 
 def test_the_reading_reads_the_channel_asked_for():
@@ -846,3 +848,98 @@ def test_apply_resample_makes_the_record_at_the_panels_settings(window, pump):
     assert added == [f'Record at {FINE / 8:g} Hz']
     assert window.project.provenance[added[0]]['verb'] == 'resample'
     assert window.project[added[0]].sample_rate == pytest.approx(FINE / 8)
+
+
+# ---- dead, not finite, empty, and the edges -------------------------------
+
+
+def test_a_sample_not_finite_is_refused_by_its_cause():
+    """The filter runs forward and backward, so one sample that is not
+    finite would make every sample of its channel so: refused, naming
+    the channel and the count. Kept as it is when no filter runs."""
+    noisy = record(noise=0.001)
+    noisy.ordinate[0, 1000] = np.nan
+    with pytest.raises(ValueError, match=r'1Z\+ holds 1 sample that is not '
+                       'finite; the anti-alias filter would carry'):
+        resample(noisy, RATE)
+    with pytest.raises(ValueError, match='1 sample that is not finite'):
+        read_resample(noisy, RATE)
+    with pytest.warns(AliasWarning):
+        bare = resample(noisy, RATE, anti_alias=False)
+    assert int(np.sum(~np.isfinite(bare.ordinate))) == 0, \
+        'sample 1000 is not one of every 16th'
+
+
+def test_the_verb_refuses_a_sample_not_finite_and_adds_nothing():
+    """`Project.resample` makes the record through `resample`, so the
+    refusal is the verb's too, and no record is added beside it."""
+    import visualdynamics
+
+    noisy = record(noise=0.001)
+    noisy.ordinate[0, 1000] = np.nan
+    project = visualdynamics.Project()
+    project.add('Record', noisy)
+    with pytest.raises(ValueError, match='1 sample that is not finite'):
+        project.resample('Record', RATE)
+    assert list(project) == ['Record']
+
+
+def test_a_dead_channel_reads_no_level_and_says_why():
+    silent = TimeHistory(np.arange(16 * 4096) / FINE,
+                         np.zeros((1, 16 * 4096)), response_dof=['1Z+'],
+                         ordinate_dim=['acceleration'])
+    reading = read_resample(silent, RATE, frequencies=[4600.0])
+    fold, = reading.folds
+    assert np.isnan(fold.filtered_db) and np.isnan(fold.after_db)
+    assert reading.notes == (('1Z+ is zero throughout, so no level is read '
+                              'where anything folds'),)
+
+
+def test_a_record_with_no_line_above_the_new_nyquist_says_so():
+    """A constant record holds nothing above 2,560 Hz but rounding, 300
+    dB under its one line: nothing is folded, and the reading says so."""
+    constant = TimeHistory(np.arange(16 * 4096) / FINE,
+                           np.ones((1, 16 * 4096)), response_dof=['1Z+'],
+                           ordinate_dim=['acceleration'])
+    reading = read_resample(constant, RATE)
+    assert reading.folds == ()
+    assert reading.notes == (('the record holds no line above 2560 Hz, so '
+                              'nothing folds'),)
+
+
+def test_an_empty_record_is_refused():
+    empty = TimeHistory(np.zeros(0), np.zeros((1, 0)), response_dof=['1Z+'])
+    with pytest.raises(ValueError, match='two time samples'):
+        resample(empty, RATE)
+
+
+def test_a_fold_on_the_span_s_edge_is_inside_it():
+    """5,120 + 2,000 Hz folds onto the span's top line, the last line
+    an analyzer keeps: inside the span, at the edge."""
+    reading = read_resample(record(((7120.0, 1.0),), noise=0.001), RATE,
+                            frequencies=[7120.0])
+    fold, = reading.folds
+    assert fold.alias == pytest.approx(2000.0) and fold.in_span
+    assert fold.filtered_db < -50.0
+
+
+def test_a_long_channel_is_read_on_the_worker(window, pump, monkeypatch):
+    """Past `RESAMPLE_INLINE_SAMPLES` the reading runs through
+    `_run_long` with the bar up and is drawn as an inline one is."""
+    from visualdynamics.gui import main_window as module
+
+    ran = []
+    original = window._run_long
+
+    def spy(status, verb, *args, **kwargs):
+        ran.append(status)
+        return original(status, verb, *args, **kwargs)
+
+    monkeypatch.setattr(window, '_run_long', spy)
+    pane = _resample_reading(window, pump)
+    assert ran == []
+    monkeypatch.setattr(module, 'RESAMPLE_INLINE_SAMPLES', 1000)
+    pane.resample_panel.factor_box.setValue(8)
+    pump()
+    assert ran and ran[-1] == 'Reading the resampling of 1Z+…'
+    assert pane.resample_panel.values['rate'].text() == '10240 Hz'

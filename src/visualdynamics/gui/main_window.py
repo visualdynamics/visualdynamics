@@ -229,6 +229,13 @@ OVERLOAD_INLINE_SAMPLES = 300_000
 #: event loop before the rest waits for the next: under the tenth of a
 #: second past which the window is felt to stop
 MATRIX_SLICE = 0.08
+
+#: the most samples of a channel the Resample reading reads on the
+#: window's own thread. Filtering it at the full rate and taking its
+#: four spectra takes about 0.12 s for half a million samples (10 s at
+#: 51,200 a second) and 0.8 s for six times that, so past this it runs
+#: on the worker with the bar up (`_run_long`), as a long verb does
+RESAMPLE_INLINE_SAMPLES = 400_000
 from ..core.report import OTHER_SIDE
 from ..names import display_name
 from ..project import TYPE_ORDER, Project, describe, type_rank
@@ -21843,20 +21850,40 @@ class MainWindow(QMainWindow):
         channel = records[0] if records else 0
         self._settle_on_record(name, history, records, channel)
         settings = panel.settings()
+        self._resample_serial = serial = getattr(
+            self, '_resample_serial', 0) + 1
+        from ..core.progress import Cancelled
+
         try:
             rate = history.sample_rate / settings['factor']
             frame = settings['frame_length']
             if frame * settings['factor'] > len(history.abscissa):
                 frame = None
-            reading = read_resample(history, rate, channel,
-                                    frequencies=settings['frequencies'],
-                                    order=settings['order'],
-                                    frame_length=frame)
+
+            def read(progress=None):
+                return read_resample(history, rate, channel,
+                                     frequencies=settings['frequencies'],
+                                     order=settings['order'],
+                                     frame_length=frame)
+
+            if len(history.abscissa) > RESAMPLE_INLINE_SAMPLES:
+                reading = self._run_long(
+                    f'Reading the resampling of {history.record_label(channel)}…',
+                    read)
+            else:
+                reading = read()
+        except Cancelled:
+            panel.show_reading(None)
+            return 'The resample reading was cancelled'
         except ValueError as error:
             # uneven sampling, or a factor that leaves too few samples:
             # the reason, and no readout that would read as a verdict
             panel.show_reading(None)
             return str(error)
+        if serial != self._resample_serial:
+            # the plot was redrawn while the worker read: that drawing
+            # read its own, and this one belongs to nothing
+            return None
         build_resample(self.data_pane.graphics, reading,
                        unit_system=self.unit_system, theme=self.theme_name)
         panel.show_reading(reading)

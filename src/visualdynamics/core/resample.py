@@ -237,7 +237,7 @@ def _filtered_every(sos: Any, rows: np.ndarray, factor: int) -> np.ndarray:
 
     Filtering the whole record and then decimating holds the record
     filtered at the full rate beside it, twice the record at the peak
-    (2.06 times, Brandon, 2026-10-23). Here only the rows being filtered
+    (2.06 times). Here only the rows being filtered
     are held at the full rate: `scipy.signal.sosfiltfilt` takes about
     three rows of working space for each, and the rows run on the
     filter threads (`filters.threaded_sosfiltfilt`) a few at a time, at
@@ -313,8 +313,10 @@ def resample(data: TimeHistory, rate: float, *, anti_alias: bool = True,
     Raises
     ------
     ValueError
-        If the record is not evenly sampled, or `rate` is not a whole
-        division of its sample rate.
+        If the record is not evenly sampled, `rate` is not a whole
+        division of its sample rate, or, with the filter, a channel
+        holds a sample that is not finite: a zero-phase filter run
+        forward and backward carries it over the whole channel.
     """
     from .data import TimeHistory
 
@@ -323,6 +325,7 @@ def resample(data: TimeHistory, rate: float, *, anti_alias: bool = True,
     new_rate = source / factor
     rows = np.real(np.asarray(data.ordinate))
     if anti_alias:
+        _refuse_not_finite(data, rows)
         sos = design(anti_alias_filter(new_rate, order), source)
         kept = _filtered_every(sos, rows, factor)
     else:
@@ -340,6 +343,24 @@ def resample(data: TimeHistory, rate: float, *, anti_alias: bool = True,
     # tuple, as `filters.carrying_marks` copies them
     result.shocks = tuple(data.shocks) if data.shocks else data.shocks
     return result
+
+
+def _refuse_not_finite(data: TimeHistory, rows: np.ndarray) -> None:
+    """ValueError naming the channels holding samples that are not
+    finite and how many: the anti-alias filter's recursion carries one
+    such sample forward and backward over its whole channel, so every
+    sample of the result would be one."""
+    bad = ~np.isfinite(rows)
+    if not bad.any():
+        return
+    channels = [data.record_label(i) for i in np.flatnonzero(bad.any(axis=1))]
+    count = int(bad.sum())
+    raise ValueError(
+        f'{", ".join(channels)} {"holds" if len(channels) == 1 else "hold"} '
+        f'{count} sample{"" if count == 1 else "s"} that '
+        f'{"is" if count == 1 else "are"} not finite; the anti-alias filter '
+        'would carry each over its whole channel, so the record is not '
+        'resampled')
 
 
 @dataclass(frozen=True)
@@ -428,7 +449,10 @@ class ResampleReading:
     'after' (decimated, then low-passed through the same filter); the
     densities are in SI with the dimension `density_dim`. `unfolded`
     holds the frequencies asked for that are at or below the new Nyquist
-    frequency, which do not fold, and `notes` names them in words.
+    frequency, which do not fold, and `notes` names them in words, with
+    `findings`: what the channel held that left nothing to read (a
+    channel of zeros, or no line above the new Nyquist frequency to
+    fold).
     """
 
     record: int
@@ -446,6 +470,7 @@ class ResampleReading:
     spectra: dict[str, tuple[np.ndarray, np.ndarray]] = field(
         compare=False, repr=False)
     unfolded: tuple[float, ...] = ()
+    findings: tuple[str, ...] = ()
 
     @property
     def nyquist(self) -> float:
@@ -493,13 +518,15 @@ class ResampleReading:
     def notes(self) -> tuple[str, ...]:
         """Each frequency asked for that does not fold, in words: a
         frequency typed at or below the new Nyquist frequency is said to
-        be there rather than dropped without a word."""
+        be there rather than dropped without a word; then the
+        `findings`."""
         def where(f: float) -> str:
             at = abs(f - self.nyquist) <= RATE_TOLERANCE * self.nyquist
             return 'at' if at else 'below'
 
         return tuple(f'{f:g} Hz is {where(f)} the new Nyquist frequency '
-                     'and does not fold' for f in self.unfolded)
+                     'and does not fold' for f in self.unfolded) \
+            + self.findings
 
     def describe(self) -> str:
         """The reading in words, as the plot's title and the status line
@@ -666,11 +693,21 @@ def read_resample(data: TimeHistory, rate: float, record: int = 0, *,
         spectra[name] = (f, g)
 
     nyquist = new_rate / 2.0
+    findings = []
+    if not np.any(np.asarray(one.ordinate)):
+        findings.append(f'{data.record_label(record)} is zero throughout, '
+                        'so no level is read where anything folds')
     if frequencies is None:
         f, g = spectra['source']
         above = f > nyquist
+        # a line above that is rounding, fifteen decades under the
+        # record's tallest, is nothing to fold
+        floor = 1e-15 * float(np.max(g)) if g.size else 0.0
         wanted = ([float(f[above][np.argmax(g[above])])]
-                  if above.any() and np.max(g[above]) > 0.0 else [])
+                  if above.any() and np.max(g[above]) > floor else [])
+        if not wanted and not findings:
+            findings.append(f'the record holds no line above '
+                            f'{nyquist:g} Hz, so nothing folds')
     else:
         wanted = [float(x) for x in np.atleast_1d(
             np.asarray(frequencies, dtype=float))]
@@ -695,4 +732,5 @@ def read_resample(data: TimeHistory, rate: float, record: int = 0, *,
         source_rate=source_rate, rate=new_rate, factor=factor,
         order=int(order), frame_length=frame, lines=lines, kept=kept,
         dropped=dropped, folds=tuple(folds), density_dim=density_dim,
-        spectra=spectra, unfolded=tuple(unfolded))
+        spectra=spectra, unfolded=tuple(unfolded),
+        findings=tuple(findings))

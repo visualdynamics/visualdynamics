@@ -49,7 +49,10 @@ shock windows, which are in seconds from the record's start. It does
 not carry the averaging, since an averaging counts its frame in
 samples, which spans another time at the new rate. The channels are
 filtered and decimated one at a time, so the record filtered at the
-full rate is never held whole beside it.
+full rate is never held whole beside it. A channel holding a sample
+that is not finite is refused, naming the channel and the count: the
+filter's recursion runs forward and backward, so one such sample would
+make every sample of its channel so.
 
 The filter's corner is at 1.2 times the span (`CORNER`), 2,400 Hz at
 5,120 Hz, among the dropped lines and below the new Nyquist frequency.
@@ -146,7 +149,10 @@ frequencies to fold, the record's tallest line above the new Nyquist
 frequency when the field is empty. Under them it reads out the rates,
 the span, the lines kept and dropped, the resolution, and the filter's
 gain at the span and at the lowest frequency that folds into it, and
-under those each fold in words. Every edit redraws at once, the
+under those each fold in words, with a note where there is nothing to
+read: a channel of zeros, or a record with no line above the new
+Nyquist frequency. A channel of more than 400,000 samples is read with
+the progress bar up. Every edit redraws at once, the
 settings are kept when another record is selected, and the reading is
 journaled as its `plot_resample` call. The reading shows what a
 resampling would do; `history.resample(rate)` makes the record.

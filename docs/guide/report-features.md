@@ -661,9 +661,8 @@ specification does not reach, a channel of another quantity, a
 measurement that does not carry its degrees of freedom, a duration not
 stated. A band row with a line that is not a finite density is not
 judged unless it has a miss, and says how many lines were. Cross-axis
-limits are listed with the requirement and read "not judged" until a
-report reads the cross-axis response, so a result with a limit stated
-is never met unread. Refused before anything changes: a requirement
+limits read "not judged" until cross-axis channels are named and read
+(see below), so a result with a limit stated is never met unread. Refused before anything changes: a requirement
 with no document or no control band, bands that overlap or do not lie
 about the reference, a multi-point strategy without individual bands
 or with weights that do not fit its channels, a single strategy with
@@ -706,6 +705,85 @@ does not change the result table or the pass/fail box. Refused: a
 contribution that is not a percentage above 0 and under 100, a coverage
 factor that is not above 0, a contribution named twice for a channel,
 and contributions for a channel the requirement does not name.
+
+### Cross-axis and limit channels
+
+**Cross-axis and limit channels** (group Results, needs Requirement and
+results) reads the channels the requirement names for each role, into
+rows of the result table. The roles are typed with the requirement,
+since a triaxial channel that is cross-axis in one axis's run is
+in-axis in the next:
+
+```python
+project.report_requirement(
+    'Report', 'Specification', 'Time History PSDs', 'Test plan TP-12',
+    [(None, 500, -3, 3), (500, None, -6, 6)], channels=['101Z+'],
+    cross_axis=[(None, 500, 50), (500, None, 100)],
+    cross_axis_channels={'101X+': '101Z+', '101Y+': '101Z+'},
+    limit_channels=[('113Z+', 'Limit profiles', [(400, 480)])],
+    sources={'limit_channels': ('customer', 'Prime contractor')})
+```
+
+- **Cross-axis**: each cross-axis channel's ASD as a percentage of its
+  in-axis control channel's, line by line over each limit's band (a
+  band open at an end reaches the end the specification writes): the
+  worst percentage and its frequency, how many lines were over, and
+  the degrees of freedom the two were read at, which must be the same.
+  A row per limit and channel, met when no line is over.
+- **Limit channels**: for each response channel held under a limit
+  profile (an autospectrum at its DOF in the object named, or the
+  specification's own record there when none is named, as
+  [limit prediction](limit-prediction.md) reads them), the as-run
+  notch: the band over which the limit channel was within 1 dB of its
+  profile while the control (the composite, under a multi-point
+  strategy) was more than 1 dB under the reference, and how far under
+  it went at worst. A notch narrower than three lines is not read, as
+  a controller cuts none that narrow. Each notch is held against the
+  notches the plan names for the channel: a notch outside all of them
+  is a departure from the plan, and its row is not met; whether it was
+  approved stays the engineer's. The row also says how close the limit
+  channel came to its profile, without judging it.
+
+With the feature off, a requirement that names cross-axis or limit
+channels still lists them, and their rows read not judged, so a result
+with a role stated is never met unread. A row judged nothing when a
+channel is not in the measurement, reads zero (a dead sensor), is of
+another quantity than its partner or profile, or has no limit profile
+to read; a cross-axis line where either density is not a finite
+number is counted not judged. At 120 degrees of freedom a limit channel
+sitting on its profile across the band while the control holds its
+reference reads a three-line notch by chance about once in 10,000
+lines. Refused: cross-axis channels without cross-axis limits, a
+channel named as its own in-axis channel, an in-axis channel that is
+not a control channel, a limit channel named twice or that is a
+control channel, and a planned notch without both edges in order. The
+cross-axis is not drawn on the in-axis comparison figure: that figure
+draws the measurement against its specification and has no place for
+a ratio against a percentage limit.
+
+**A finding from a row.** A notch the plan does not name, and a
+cross-axis channel over its limit, are departures from the plan, so
+with the [findings register](#findings-register) on their rows offer
+a finding its fact: the channel, the band, and the depth of the notch
+or the worst percentage and the lines over, with the record it was
+read off. The draft reaches the finding as a comparison's does, and
+fills nothing until the author accepts it, edits it or discards it:
+
+```python
+project.report_finding('Report', kind='deviation')    # 'D-1'
+project.draft_finding_from_requirement(
+    'Report', 'D-1', 'Time History PSDs', 'Specification',
+    'Limit channel 113Z+')
+# '113Z+ held its limit profile in a notch the plan does not name:
+#  from 400 to 480 Hz (17 lines), the control up to 3 dB under the
+#  reference; PSD 'Time History PSDs', from 'Run 3'.'
+```
+
+The row is named by its name, or by its number in the table from 1
+where two rows share a name. The table then carries a Finding column,
+giving each such row the number of the finding its fact went to, or
+"none entered"; a row that offers no finding is refused, and no
+column is added while none does.
 
 ## Responses against prediction
 
@@ -916,7 +994,6 @@ and are grayed out until each is built:
 
 | Feature | Group | What it will add |
 |---|---|---|
-| Cross-axis and limit channels | Results | cross-axis against its limit, and where limit channels held the control down |
 | Flash report | Issue control | a one-page preliminary report from the day's analysis |
 
 What stays the engineer's to write (the cause and effect of a finding,

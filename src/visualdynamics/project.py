@@ -5745,6 +5745,60 @@ class Project(dict):
             self._report(name), number, self, measured, specification,
             channel, band=band, pair=limits, provenance=self.provenance).text
 
+    def draft_finding_from_requirement(self, name: str, number: str,
+                                       measured: str, specification: str,
+                                       criterion: int | str) -> str:
+        """Offer a finding a draft of its fact, read off a row of a
+        requirement's result table.
+
+        A row offers a fact where the run departed from the plan: a
+        limit channel's notch the plan does not name (its band, its
+        line count and how far the control fell under the reference),
+        and a cross-axis channel over its limit (its worst percentage,
+        the lines over and their reach). The draft names the channel
+        and the record and the time history it was computed from, and
+        reaches the finding as `draft_finding_fact`'s does, through the
+        register's one entry point for drafts
+        (`visualdynamics.report.findings.offer`): it fills nothing
+        until the author accepts it, edits it or discards it
+        (`report_finding(..., accept=True)`).
+
+        Parameters
+        ----------
+        name : str
+            The report, with the features `test_requirement` and
+            `findings` on.
+        number : str
+            The finding.
+        measured, specification : str
+            The run and the specification the requirement is bound to
+            (`report_requirement`).
+        criterion : int or str
+            The row: its number in the result table from 1, or its name,
+            such as 'Limit channel 3Z+'.
+
+        Returns
+        -------
+        str
+            The draft offered.
+
+        Raises
+        ------
+        ValueError
+            When the report does not have both features enabled; for an
+            unknown finding, no requirement bound to the pair, one that
+            cannot be read, a row number out of range, a name no row has,
+            a name two offering rows share, and a row that offers no
+            finding. Nothing is changed.
+        TypeError
+            When `name` is not a report.
+        """
+        from .report import requirement
+
+        return requirement.draft_finding(
+            self._report(name), number, self, measured, specification,
+            criterion, self.object_groups, provenance=self.provenance).text
+
     def report_test_date(self, name: str, start: str | None,
                          end: str | None = None) -> None:
         """Set the dates of the test a report covers, which its sensors'
@@ -6008,6 +6062,8 @@ class Project(dict):
                            min_dof: float | None = None,
                            max_line_spacing: float | None = None,
                            cross_axis: Sequence[Any] = (),
+                           cross_axis_channels: Mapping[str, str] | None = None,
+                           limit_channels: Sequence[Any] = (),
                            rule: str = 'any_line', combine: int = 1,
                            sources: Mapping[str, Any] | None = None,
                            uncertainty: Mapping[str, Any] | None = None,
@@ -6066,6 +6122,15 @@ class Project(dict):
             The widest line spacing the control may have, Hz.
         cross_axis : sequence, optional
             The cross-axis limits, each (low, high, percent).
+        cross_axis_channels : mapping, optional
+            Each cross-axis channel's response DOF, to the in-axis
+            control channel it is read against as a percentage.
+        limit_channels : sequence, optional
+            The response channels held under a limit profile, each
+            (channel, profile, notches): the name of the object holding
+            its profile ('' for the specification's own record at the
+            channel) and the notches the plan names for it, each
+            (low, high) Hz.
         rule : str, default 'any_line'
             The decision rule: 'any_line' or 'combined'.
         combine : int, default 1
@@ -6128,10 +6193,17 @@ class Project(dict):
             duration_tolerance=(None if duration_tolerance is None
                                 else tuple(duration_tolerance)),
             min_dof=min_dof, max_line_spacing=max_line_spacing,
-            cross_axis=tuple(cross_axis), rule=rule, combine=combine,
+            cross_axis=tuple(cross_axis),
+            cross_axis_channels=dict(cross_axis_channels or {}),
+            limit_channels=tuple(limit_channels), rule=rule, combine=combine,
             sources=dict(sources or {}), uncertainty=dict(uncertainty or {}))
         evaluate(requirement, self[spec_held], self[run_held],
-                 table=channel_table(self), duration_run=duration_run)
+                 table=channel_table(self), duration_run=duration_run,
+                 profiles={c.profile: self[resolve_binding(
+                     c.profile, self, self.object_groups)]
+                     for c in requirement.limit_channels
+                     if resolve_binding(c.profile, self,
+                                        self.object_groups) in self})
         return add(report, requirement, source=specification_name,
                    measured=measured_name, duration_run=duration_run,
                    caption=caption)
@@ -8360,7 +8432,7 @@ _JOURNALED_VERBS = (
     'set_run_identity', 'report_runs', 'report_chronology',
     'accept_chronology',
     'report_finding', 'draft_finding_fact',
-    'report_requirement',
+    'report_requirement', 'draft_finding_from_requirement',
     'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:

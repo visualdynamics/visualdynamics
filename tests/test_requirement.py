@@ -1005,3 +1005,458 @@ def test_an_uncertainty_is_stored_said_and_read_back():
     assert held.uncertainty['1Z+'][1].text == (
         'conditioner and converter 0.5 % (k = 2)')
     assert held.uncertainty['1Z+'][0].standard == 1.0
+
+
+# ---- cross-axis -----------------------------------------------------------------
+
+
+#: a cross-axis channel at a fifth of its in-axis channel's ASD
+FIFTH = 0.2
+
+
+def crossed(**kwargs):
+    """A single-channel requirement on 1Z+ with 2Z+ its cross-axis."""
+    kwargs.setdefault('cross_axis', [(None, 500, 50), (500, None, 100)])
+    kwargs.setdefault('cross_axis_channels', {'2Z+': '1Z+'})
+    return single(channels=('1Z+',), **kwargs)
+
+
+def test_cross_axis_is_a_percentage_of_the_in_axis_asd_per_band():
+    measured = run(1.0, FIFTH, hot=[(1, 440, 460, 3.0)])
+    results = rq.evaluate(crossed(), reference(('1Z+', '2Z+')), measured)
+    low, high = rows(results, 'cross_axis')
+    assert low.name == 'Cross-axis 2Z+ (in-axis 1Z+)'
+    assert (low.required, low.state) == ('50 % of in-axis up to 500 Hz',
+                                         rq.NOT_MET)
+    assert low.measured == 'worst 60 % at 440 Hz, 5 of 97 lines over'
+    assert low.band == (20.0, 500.0), 'open below: from where the spec starts'
+    assert low.channel == '2Z+'
+    assert low.finding == rq.Offer(
+        '2Z+ read up to 60 % of 1Z+ at 440 Hz, over its 50 % cross-axis '
+        'limit on 5 of 97 lines from 440 to 460 Hz', '2Z+', (440.0, 460.0)), \
+        'the lines over, offered to a findings register'
+    assert (high.state, high.measured) == (rq.MET, 'worst 20 % at 500 Hz')
+    assert high.finding is None, 'a row met offers no finding'
+    assert high.band == (500.0, 2000.0)
+    assert results.state == rq.NOT_MET
+
+
+def test_cross_axis_on_its_limit_exactly_is_met():
+    results = rq.evaluate(crossed(cross_axis=[(None, None, 20)]),
+                          reference(('1Z+', '2Z+')), run(1.0, FIFTH))
+    (row,) = rows(results, 'cross_axis')
+    assert row.state == rq.MET
+
+
+def test_lines_on_the_cross_axis_limit_are_not_in_the_reach_offered():
+    measured = run(1.0, FIFTH, hot=[(1, 440, 460, 3.0)])
+    (row,) = rows(rq.evaluate(crossed(cross_axis=[(None, None, 20)]),
+                              reference(('1Z+', '2Z+')), measured),
+                  'cross_axis')
+    assert row.state == rq.NOT_MET
+    assert row.finding.band == (440.0, 460.0), 'a line on the limit is met'
+
+
+def test_one_line_over_is_counted_and_offered_in_the_singular():
+    measured = run(1.0, FIFTH, hot=[(1, 440, 440, 3.0)])
+    (row,) = rows(rq.evaluate(crossed(cross_axis=[(438, 442, 50)]),
+                              reference(('1Z+', '2Z+')), measured),
+                  'cross_axis')
+    assert row.measured == 'worst 60 % at 440 Hz, 1 of 1 line over'
+    assert row.finding.text == (
+        '2Z+ read up to 60 % of 1Z+ at 440 Hz, over its 50 % cross-axis '
+        'limit on 1 of 1 line from 440 to 440 Hz')
+
+
+def test_cross_axis_names_the_degrees_of_freedom_and_refuses_unlike_ones():
+    measured = run(1.0, FIFTH)
+    measured.statistical_dof = np.array([120.0, 120.0])
+    (row, _high) = rows(rq.evaluate(crossed(), reference(('1Z+', '2Z+')),
+                                    measured), 'cross_axis')
+    assert row.measured == 'worst 20 % at 20 Hz, at 120 degrees of freedom'
+    measured.statistical_dof = np.array([120.0, 120.0 * (1.0 + 1e-11)])
+    (row, _high) = rows(rq.evaluate(crossed(), reference(('1Z+', '2Z+')),
+                                    measured), 'cross_axis')
+    assert row.state == rq.MET, 'the same but for rounding'
+    measured.statistical_dof = np.array([120.0, 60.0])
+    (row, _high) = rows(rq.evaluate(crossed(), reference(('1Z+', '2Z+')),
+                                    measured), 'cross_axis')
+    assert row.state == rq.NOT_JUDGED
+    assert row.measured == ('not judged: the two are read at different '
+                            'degrees of freedom (60 and 120), so their ratio '
+                            'is not of like estimates')
+
+
+def test_a_dead_cross_axis_channel_is_not_judged_never_met():
+    (row, _high) = rows(rq.evaluate(crossed(), reference(('1Z+', '2Z+')),
+                                    run(1.0, 0.0)), 'cross_axis')
+    assert row.state == rq.NOT_JUDGED
+    assert row.measured == ('not judged: 2Z+ reads zero over the band, as a '
+                            'dead or disconnected sensor does')
+
+
+def test_a_cross_axis_line_not_read_leaves_its_row_not_judged_unless_over():
+    measured = run(1.0, FIFTH, nan_at=(1, 30))
+    (row, _high) = rows(rq.evaluate(crossed(), reference(('1Z+', '2Z+')),
+                                    measured), 'cross_axis')
+    assert row.state == rq.NOT_JUDGED
+    assert row.measured == 'worst 20 % at 20 Hz; 1 line not judged'
+    measured = run(1.0, FIFTH, nan_at=(0, 30), hot=[(1, 440, 460, 3.0)])
+    (row, _high) = rows(rq.evaluate(crossed(), reference(('1Z+', '2Z+')),
+                                    measured), 'cross_axis')
+    assert row.state == rq.NOT_MET
+    assert row.measured.endswith('5 of 96 lines over; 1 line not judged')
+    zero = run(0.0, FIFTH)
+    (row, _high) = rows(rq.evaluate(
+        crossed(), reference(('1Z+', '2Z+')), zero, scale_db=0.0),
+        'cross_axis')
+    assert row.measured == ('not judged: no line of the band has both '
+                            'densities finite and the in-axis one above '
+                            'zero')
+
+
+def test_a_cross_axis_channel_not_measured_or_of_another_quantity_says_why():
+    (row, _high) = rows(rq.evaluate(
+        crossed(cross_axis_channels={'7Z+': '1Z+'}),
+        reference(('1Z+', '2Z+')), run(1.0, FIFTH)), 'cross_axis')
+    assert row.measured == ('not judged: the measurement has no '
+                            'autospectrum at 7Z+')
+    other = run(1.0, FIFTH, dims=[PSD_DIM, 'velocity**2/frequency'])
+    (row, _high) = rows(rq.evaluate(crossed(), reference(('1Z+', '2Z+')),
+                                    other), 'cross_axis')
+    assert row.state == rq.NOT_JUDGED
+    assert 'velocity' in row.measured
+
+
+def test_a_cross_axis_band_the_run_does_not_reach_is_not_judged():
+    (row,) = rows(rq.evaluate(crossed(cross_axis=[(3000, 4000, 50)]),
+                              reference(('1Z+', '2Z+')), run(1.0, FIFTH)),
+                  'cross_axis')
+    assert row.measured == ('not judged: the measurement has no line from '
+                            '3000 to 4000 Hz')
+
+
+def test_cross_axis_limits_with_no_channel_named_are_not_judged():
+    (row,) = rows(rq.evaluate(single(cross_axis=[(None, 500, 50)]),
+                              reference(), run(1.0)), 'cross_axis')
+    assert row.measured == 'not judged: no cross-axis channel is named'
+    assert row.state == rq.NOT_JUDGED
+
+
+@pytest.mark.parametrize(('kwargs', 'error', 'said'), [
+    ({'cross_axis': ()}, ValueError, 'state them'),
+    ({'cross_axis_channels': {'1Z+': '1Z+'}}, ValueError,
+     'its own in-axis channel'),
+    ({'cross_axis_channels': {'2Z+': '3Z+'}}, ValueError,
+     'not a control channel of the requirement'),
+    ({'cross_axis_channels': {'1Z+': '9Z+'}}, ValueError,
+     'not a control channel of the requirement'),
+    ({'cross_axis_channels': {'2Z+': ' '}}, ValueError, 'response DOF'),
+    ({'cross_axis_channels': [('2Z+', '1Z+')]}, TypeError, 'a mapping'),
+])
+def test_cross_axis_channels_the_plan_cannot_mean_are_refused(kwargs, error,
+                                                              said):
+    with pytest.raises(error, match=said):
+        crossed(**kwargs)
+
+
+def test_a_control_channel_is_not_a_cross_axis_one():
+    with pytest.raises(ValueError, match='is a control channel, not a '
+                                         'cross-axis one'):
+        average(cross_axis=[(None, None, 50)],
+                cross_axis_channels={'2Z+': '1Z+'})
+
+
+# ---- limit channels, the as-run notch -------------------------------------------
+
+
+def notched(*, limit=1.0, elsewhere=0.25, control=0.5, band=(400, 480)):
+    """1Z+ the control, under its reference by `control` over `band`;
+    2Z+ the limit channel, `limit` of its profile (the specification's
+    record there) over `band` and `elsewhere` of it everywhere else."""
+    low, high = band
+    return run(1.0, elsewhere, hot=[(0, low, high, control),
+                                    (1, low, high, limit / elsewhere)])
+
+
+def limited(*channels, **kwargs):
+    return single(channels=('1Z+',), limit_channels=list(channels),
+                  **kwargs)
+
+
+def test_a_limit_channel_on_its_profile_while_the_control_dips_is_a_notch():
+    results = rq.evaluate(limited('2Z+'), reference(('1Z+', '2Z+')),
+                          notched())
+    (row,) = rows(results, 'limit')
+    assert row.name == 'Limit channel 2Z+'
+    assert row.required == ('held at or under its limit profile in the '
+                            'specification; no notch planned')
+    (notch,) = row.excursions
+    assert (notch.side, notch.low, notch.high, notch.lines) == (
+        'below', 400.0, 480.0, 17)
+    assert notch.worst_db == pytest.approx(10 * math.log10(2))
+    assert row.measured == ('held its limit from 400 to 480 Hz (17 lines) '
+                            'while the control fell up to 3 dB under the '
+                            'reference, a notch the plan does not name; +0 '
+                            'dB from its limit profile at its closest, '
+                            '400 Hz')
+    assert row.state == rq.NOT_MET
+    assert row.band == (400.0, 480.0)
+    assert row.finding == rq.Offer(
+        '2Z+ held its limit profile in a notch the plan does not name: from '
+        '400 to 480 Hz (17 lines), the control up to 3 dB under the '
+        'reference', '2Z+', (400.0, 480.0)), 'offered to a findings register'
+    assert results.state == rq.NOT_MET
+
+
+def test_a_notch_the_plan_names_is_met_and_one_beyond_it_is_not():
+    spec = reference(('1Z+', '2Z+'))
+    (row,) = rows(rq.evaluate(limited(('2Z+', '', [(380, 500)])), spec,
+                              notched()), 'limit')
+    assert row.state == rq.MET
+    assert row.required.endswith('notches planned 380 to 500 Hz')
+    assert 'does not name' not in row.measured
+    assert row.finding is None, 'a planned notch offers no finding'
+    (row,) = rows(rq.evaluate(limited(('2Z+', '', [(420, 460)])), spec,
+                              notched()), 'limit')
+    assert row.state == rq.NOT_MET
+    assert row.finding.band == (400.0, 480.0)
+    for planned in ((380, 460), (420, 500)):
+        (row,) = rows(rq.evaluate(limited(('2Z+', '', [planned])), spec,
+                                  notched()), 'limit')
+        assert row.state == rq.NOT_MET, f'running out of {planned}'
+    (row,) = rows(rq.evaluate(limited(('2Z+', '', [(400, 480)])), spec,
+                              notched()), 'limit')
+    assert row.state == rq.MET, 'a notch on the planned edges is inside'
+
+
+def test_a_limit_channel_under_its_profile_cuts_no_notch():
+    (row,) = rows(rq.evaluate(limited('2Z+'), reference(('1Z+', '2Z+')),
+                              notched(limit=0.25)), 'limit')
+    assert row.state == rq.MET
+    assert row.excursions == ()
+    assert row.measured == ('no notch; -6 dB from its limit profile at its '
+                            'closest, 20 Hz')
+
+
+def test_the_control_on_its_reference_cuts_no_notch_whatever_the_limit():
+    (row,) = rows(rq.evaluate(limited('2Z+'), reference(('1Z+', '2Z+')),
+                              notched(control=1.0, limit=2.0)), 'limit')
+    assert row.excursions == ()
+    assert row.measured.startswith('no notch; +3 dB from its limit profile')
+
+
+def test_a_dip_of_two_lines_is_not_a_notch_nor_a_dip_within_a_decibel():
+    spec = reference(('1Z+', '2Z+'))
+    (row,) = rows(rq.evaluate(limited('2Z+'), spec,
+                              notched(band=(400, 405))), 'limit')
+    assert row.excursions == (), 'narrower than a controller cuts'
+    (row,) = rows(rq.evaluate(limited('2Z+'), spec,
+                              notched(band=(400, 410))), 'limit')
+    assert row.excursions[0].lines == 3, 'three lines is the narrowest'
+    (row,) = rows(rq.evaluate(limited('2Z+'), spec,
+                              notched(control=0.85)), 'limit')
+    assert row.excursions == (), 'under a decibel is the scatter'
+    (row,) = rows(rq.evaluate(limited('2Z+'), spec,
+                              notched(limit=0.85)), 'limit')
+    assert len(row.excursions) == 1, 'within a decibel of its profile holds'
+    (row,) = rows(rq.evaluate(limited('2Z+'), spec,
+                              notched(limit=0.75)), 'limit')
+    assert row.excursions == (), 'more than a decibel under it does not'
+
+
+def _scattered_pair(seed, limit_db):
+    """The control on its reference and the limit channel `limit_db`
+    from its profile, each line a chi-square at 120 DOF about its true
+    level."""
+    control, limit = _scatter(120, seed), _scatter(120, seed + 100)
+    both = Psd(control.abscissa,
+               np.vstack([control.ordinate,
+                          limit.ordinate * 10.0 ** (limit_db / 10.0)]),
+               response_dof=['1Z+', '2Z+'], ordinate_dim=[PSD_DIM] * 2)
+    both.scale_db = 0
+    return both
+
+
+def test_scatter_alone_cuts_no_notch():
+    """A correct run with no notch: the control on its reference and the
+    limit channel 3 dB under its profile, at 120 DOF. The control dips
+    a decibel at about one line in 20 by chance, but the limit channel
+    is almost never within a decibel of its profile at the same three
+    adjacent lines, so no notch is read in 20 runs of 4000 lines."""
+    spec = reference(('1Z+', '2Z+'), upper=20000.0)
+    found = 0
+    for seed in range(20):
+        (row,) = rows(rq.evaluate(limited('2Z+'), spec,
+                                  _scattered_pair(seed, -3.0)), 'limit')
+        found += len(row.excursions)
+    assert found == 0
+
+
+def test_a_limit_channel_on_its_profile_throughout_reads_a_rare_notch():
+    """The edge the guide states: a limit channel sitting on its profile
+    across the band while the control holds its reference, at 120 DOF,
+    reads a three-line notch by chance about once in 10,000 lines."""
+    spec = reference(('1Z+', '2Z+'), upper=20000.0)
+    found = lines = 0
+    for seed in range(20):
+        both = _scattered_pair(seed, 0.0)
+        (row,) = rows(rq.evaluate(limited('2Z+'), spec, both), 'limit')
+        found += len(row.excursions)
+        lines += int(((both.abscissa >= 20) & (both.abscissa <= 20000)).sum())
+    assert 0 < found / lines < 3e-4
+
+
+def test_the_control_under_a_multi_point_strategy_is_the_composite():
+    measured = run(1.0, 1.0, 0.25, hot=[(0, 400, 480, 0.5), (1, 400, 480, 0.5),
+                                        (2, 400, 480, 4.0)])
+    requirement = rq.TestRequirement(
+        'TP', [(None, None, -3, 3)], strategy='average',
+        channels=('1Z+', '2Z+'), individual_bands=[(None, None, -6, 6)],
+        limit_channels=['3Z+'])
+    (row,) = rows(rq.evaluate(requirement, reference(('1Z+', '2Z+', '3Z+')),
+                              measured), 'limit')
+    assert row.excursions[0].low == 400.0
+    assert row.excursions[0].worst_db == pytest.approx(10 * math.log10(2))
+
+
+def test_the_comparison_s_scale_applies_to_the_limit_channel_and_control():
+    quarter = notched()
+    quarter.ordinate[:] = quarter.ordinate / 4.0
+    quarter.scale_db = None
+    (row,) = rows(rq.evaluate(limited('2Z+'), reference(('1Z+', '2Z+')),
+                              quarter, scale_db=10 * math.log10(4)), 'limit')
+    assert (row.excursions[0].low, row.excursions[0].lines) == (400.0, 17)
+
+
+def test_a_limit_profile_from_another_object_is_read_by_its_name():
+    spec = reference(('1Z+',))
+    profile = Psd(LINES, np.full((1, LINES.size), LEVEL),
+                  response_dof=['2Z+'], ordinate_dim=[PSD_DIM])
+    (row,) = rows(rq.evaluate(limited(('2Z+', 'Limits')), spec, notched(),
+                              profiles={'Limits': profile}), 'limit')
+    assert row.required.startswith('held at or under its limit profile in '
+                                   'Limits')
+    assert len(row.excursions) == 1
+    (row,) = rows(rq.evaluate(limited(('2Z+', 'Limits')), spec, notched()),
+                  'limit')
+    assert row.measured == ("not judged: its limit profile 'Limits' is not "
+                            'there to read')
+    (row,) = rows(rq.evaluate(limited('2Z+'), spec, notched()), 'limit')
+    assert row.measured == 'not judged: no limit profile is written at 2Z+'
+    velocity = Psd(LINES, np.full((1, LINES.size), LEVEL),
+                   response_dof=['2Z+'],
+                   ordinate_dim=['velocity**2/frequency'])
+    (row,) = rows(rq.evaluate(limited(('2Z+', 'Limits')), spec, notched(),
+                              profiles={'Limits': velocity}), 'limit')
+    assert row.state == rq.NOT_JUDGED and 'velocity' in row.measured
+
+
+def test_a_limit_channel_dead_missing_or_unread_is_not_judged():
+    spec = reference(('1Z+', '2Z+'))
+    (row,) = rows(rq.evaluate(limited('2Z+'), spec, run(1.0, 0.0)), 'limit')
+    assert row.measured == ('not judged: 2Z+ reads zero, as a dead or '
+                            'disconnected sensor does')
+    assert row.state == rq.NOT_JUDGED
+    (row,) = rows(rq.evaluate(limited('5Z+'), spec, run(1.0, 1.0)), 'limit')
+    assert row.measured == ('not judged: the measurement has no '
+                            'autospectrum at 5Z+')
+    unread = run(1.0, 1.0)
+    unread.ordinate[1] = np.nan
+    (row,) = rows(rq.evaluate(limited('2Z+'), spec, unread), 'limit')
+    assert row.measured == ('not judged: no line has the limit channel, its '
+                            'profile, the control and the reference all '
+                            'read')
+
+
+def test_one_line_not_read_splits_no_notch_it_is_not_in():
+    measured = notched()
+    measured.ordinate[1, 10] = np.nan
+    (row,) = rows(rq.evaluate(limited('2Z+'), reference(('1Z+', '2Z+')),
+                              measured), 'limit')
+    assert (row.excursions[0].low, row.excursions[0].lines) == (400.0, 17)
+
+
+@pytest.mark.parametrize(('channels', 'error', 'said'), [
+    ([' '], ValueError, 'named by its response DOF'),
+    (['1Z+'], ValueError, 'is a control channel'),
+    (['2Z+', '2Z+'], ValueError, 'named twice'),
+    ([('2Z+', '', [(500, 400)])], ValueError, 'low edge is below'),
+    ([('2Z+', '', [(300, 500), (400, 600)])], ValueError, 'overlap'),
+    ([('2Z+', '', [(None, 500)])], ValueError, 'both its edges'),
+    ([('2Z+', '', [(400,)])], ValueError, r'is \(low, high\)'),
+    ([('2Z+', '', 'notch')], TypeError, 'are a list'),
+    ([('2Z+', 7)], TypeError, 'named by text'),
+    ([('2Z+', '', (), 'extra')], ValueError, 'each limit channel is'),
+    ('2Z+', TypeError, 'the limit channels are a list'),
+])
+def test_limit_channels_the_plan_cannot_mean_are_refused(channels, error,
+                                                        said):
+    with pytest.raises(error, match=said):
+        single(channels=('1Z+',), limit_channels=channels)
+
+
+def test_roles_are_stored_said_and_read_back():
+    held = crossed(limit_channels=[('3Z+', 'Limits', [(400, 480)]), '4Z+'],
+                   sources={'limit_channels': ('customer', 'Analyst')})
+    record = json.loads(json.dumps(held.as_record()))
+    assert record['cross_axis_channels'] == {'2Z+': '1Z+'}
+    assert record['limit_channels'] == [['3Z+', 'Limits', [[400.0, 480.0]]],
+                                        ['4Z+', '', []]]
+    assert rq.TestRequirement.from_record(record) == held
+    said = held.describe()
+    assert 'Cross-axis channels: 2Z+ against 1Z+.' in said
+    assert next(line for line in said if line.startswith('Limit')) == (
+        'Limit channels: 3Z+, held at or under its limit profile in Limits; '
+        'notches planned 400 to 480 Hz; 4Z+, held at or under its limit '
+        'profile in the specification; no notch planned, supplied by the '
+        'customer (Analyst); the laboratory has not verified its '
+        'derivation.')
+
+
+def test_the_cross_axis_rows_read_against_the_first_record_by_default():
+    rows_read = rq.cross_axis_rows(crossed(), reference(('1Z+', '2Z+')),
+                                   run(1.0, FIFTH))
+    assert [row.state for row in rows_read] == [rq.MET, rq.MET]
+    one = reference(('1Z+',))
+    assert rq.cross_axis_rows(crossed(), one, run(1.0, FIFTH))[0].band == (
+        20.0, 500.0)
+
+
+def test_two_autospectra_at_a_role_s_dof_are_refused_by_name():
+    measured = run(1.0, FIFTH, FIFTH,
+                   dims=[PSD_DIM, PSD_DIM, 'velocity**2/frequency'])
+    measured.response_dof = np.array(['1Z+', '2Z+', '2Z+'])
+    (row, _high) = rows(rq.evaluate(crossed(), reference(('1Z+', '2Z+')),
+                                    measured), 'cross_axis')
+    assert row.measured == ('not judged: the measurement holds 2 autospectra '
+                            'at 2Z+; which is meant cannot be told')
+    (row,) = rows(rq.evaluate(limited('2Z+'), reference(('1Z+', '2Z+')),
+                              measured), 'limit')
+    assert row.state == rq.NOT_JUDGED and '2 autospectra' in row.measured
+
+
+def test_a_notch_is_as_deep_as_its_deepest_line():
+    measured = notched()
+    x = measured.abscissa
+    for at in (400.0, 480.0):
+        deeper = measured.ordinate.copy()
+        deeper[0, x == at] *= 0.5
+        dipped = Psd(x, deeper, response_dof=['1Z+', '2Z+'],
+                     ordinate_dim=[PSD_DIM] * 2)
+        dipped.scale_db = 0
+        (row,) = rows(rq.evaluate(limited('2Z+'), reference(('1Z+', '2Z+')),
+                                  dipped), 'limit')
+        assert row.excursions[0].worst_db == pytest.approx(
+            10 * math.log10(4)), f'the deepest line at {at:g} Hz'
+    # the control far under its reference just past the notch, where the
+    # limit channel is not on its profile, is no part of it
+    beyond = measured.ordinate.copy()
+    beyond[0, x == 485.0] *= 0.1
+    past = Psd(x, beyond, response_dof=['1Z+', '2Z+'],
+               ordinate_dim=[PSD_DIM] * 2)
+    past.scale_db = 0
+    (row,) = rows(rq.evaluate(limited('2Z+'), reference(('1Z+', '2Z+')),
+                              past), 'limit')
+    assert (row.excursions[0].high, row.excursions[0].worst_db) == (
+        480.0, pytest.approx(10 * math.log10(2)))

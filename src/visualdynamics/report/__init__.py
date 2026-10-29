@@ -242,11 +242,15 @@ def _report_payload(report, objects, unit_system=None, edit=False,
             # Requirement and Results
             if not required:
                 continue
+            from .findings import register as findings_register
             from .requirement import build as build_requirement
 
             made = build_requirement(
                 block, objects, object_groups,
-                uncertainty_on='control_uncertainty' in active)
+                uncertainty_on='control_uncertainty' in active,
+                roles_on='cross_axis' in active,
+                register=(findings_register(report)
+                          if 'findings' in active else None))
             if made is None:
                 continue
             if edit:

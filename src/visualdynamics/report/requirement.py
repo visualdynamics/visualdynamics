@@ -23,8 +23,18 @@ With the feature on it draws two things:
 - the result table: a row per criterion with what was required, what
   was measured (each miss with its band, its worst size in dB and its
   line count) and the result, worded met, not met or not judged, and a
-  note beneath with what the rows cannot say. With skeleton sections
-  on, it falls under Results.
+  note beneath with what the rows cannot say. Its cross-axis rows read
+  each cross-axis channel against its in-axis channel, and its
+  limit-channel rows give each notch a limit channel cut, the as-run
+  notch, against the notches the plan names. A row with a notch the
+  plan does not name, and a cross-axis row over its limit, offers its
+  fact to the findings register (`core.requirement.Criterion.finding`):
+  `draft_finding` builds the fact draft, naming the record, and hands
+  it to the register's one entry point for drafts
+  (`report.findings.offer`), as a comparison's draft is handed. With
+  the feature `findings` on, a Finding column gives each such row the
+  number of the finding its fact went to, or says none is entered. With
+  skeleton sections on, the table falls under Results.
 
 The pass/fail box reads from a requirement bound to the same
 specification and run: MET, NOT MET or NOT JUDGED, how many criteria
@@ -60,11 +70,21 @@ FEATURE = 'test_requirement'
 #: the table's caption when the block gives none
 CAPTION = 'Results against the requirement'
 
+#: the feature that reads the cross-axis and limit channels
+ROLES = 'cross_axis'
+
+#: what a role's row says while that feature is off
+ROLES_OFF = ('not judged: read with the report feature Cross-axis and limit '
+             'channels on')
+
 #: the uncertainty table's caption
 UNCERTAINTY = 'Control-channel uncertainty against one third of the tolerance'
 
 #: what a box with no requirement bound is labeled
 SCREENING = 'Screening (Visual Dynamics default rule)'
+
+#: the Finding cell of a row whose offered fact no finding holds yet
+UNENTERED = 'none entered'
 
 #: the result cell's mark, by state, for the page's style
 MARKS = {'not met': 'notmet', 'not judged': 'notjudged'}
@@ -170,17 +190,45 @@ CANCELED = 'the reading was canceled; it is made when the report is drawn again'
 
 
 def _key(block: Mapping[str, Any], read_from: Mapping[str, Any],
-         duration: float | None) -> tuple:
+         duration: float | None, roles: bool = True) -> tuple:
     """What identifies one reading: the requirement's values, the
-    duration, and each object read as `check_blocks` identifies it."""
+    duration, whether the roles are read, and each object read as
+    `check_blocks` identifies it."""
     import json
 
     from .check_blocks import _state
 
     return ('requirement', json.dumps(block.get('requirement'),
                                       sort_keys=True, default=repr),
-            duration,
+            duration, bool(roles),
             tuple((name, _state(obj)) for name, obj in read_from.items()))
+
+
+def roles_on(report: Any) -> bool:
+    """Whether `report` reads the cross-axis and limit channels (the
+    feature `cross_axis`)."""
+    from .features import enabled
+
+    return ROLES in enabled(report)
+
+
+def _unread_roles(requirement: Any, results: Any) -> Any:
+    """`results` of the requirement read without its roles, with a row
+    for each role saying it was not read: each cross-axis limit's row,
+    and one per limit channel, so a result with a role stated is never
+    met unread."""
+    from dataclasses import replace
+
+    from ..core.requirement import NOT_JUDGED, Criterion
+
+    rows = [replace(row, measured=ROLES_OFF, state=NOT_JUDGED)
+            if row.key == 'cross_axis' and requirement.cross_axis_channels
+            else row for row in results.rows]
+    rows += [Criterion('limit', f'Limit channel {channel.channel}',
+                       channel.text, ROLES_OFF, NOT_JUDGED,
+                       channel=channel.channel)
+             for channel in requirement.limit_channels]
+    return replace(results, rows=tuple(rows))
 
 
 def _objects(block: Mapping[str, Any], objects: Mapping[str, Any],
@@ -199,20 +247,43 @@ def _objects(block: Mapping[str, Any], objects: Mapping[str, Any],
     table = channel_table(objects)
     if table is not None:
         out['table'] = table
+    # the objects the limit channels name for their profiles, kept by
+    # the name the requirement gives them
+    for name in _profile_names(block):
+        held = resolve_binding(name, objects, object_groups)
+        if held in objects:
+            out[f'profile:{name}'] = objects[held]
     return out
 
 
+def _profile_names(block: Mapping[str, Any]) -> list[str]:
+    """The profile names of the block's limit channels, as stored; none
+    for values the requirement would refuse, which it says when read."""
+    stored = (block.get('requirement') or {}).get('limit_channels') or []
+    names = []
+    for item in stored if isinstance(stored, list) else []:
+        if isinstance(item, (list, tuple)) and len(item) > 1 \
+                and isinstance(item[1], str) and item[1]:
+            names.append(item[1])
+    return names
+
+
 def read(block: Mapping[str, Any], objects: Mapping[str, Any],
-         object_groups: Sequence[Mapping[str, Any]] | None = None) -> Any:
+         object_groups: Sequence[Mapping[str, Any]] | None = None, *,
+         roles: bool = True) -> Any:
     """The block's `core.requirement.Results`, or None while a binding
     does not resolve. Refusals raise `ValueError` as
-    `core.requirement.evaluate` raises them.
+    `core.requirement.evaluate` raises them. With `roles` False (the
+    report's feature `cross_axis` off) the cross-axis and limit channels
+    are not read, and their rows say so.
 
     Made once and kept while the requirement, the duration and the
     objects it read stay the same (in `check_blocks`'s store of
     readings), since a reading of several control channels takes longer
     than the GUI thread may wait; the app makes it on its worker first
     (`prepare`)."""
+    from dataclasses import replace
+
     from ..core.requirement import evaluate
     from .check_blocks import _keep, _kept
 
@@ -220,15 +291,22 @@ def read(block: Mapping[str, Any], objects: Mapping[str, Any],
     if read_from is None:
         return None
     duration = run_duration(block, objects, object_groups)
-    key = _key(block, read_from, duration)
+    key = _key(block, read_from, duration, roles)
     kept = _kept(key, read_from)
     if kept is None:
         try:
             requirement, specification, measured, _s, _n = inputs(
                 block, objects, object_groups)
-            kept = evaluate(requirement, specification, measured,
+            held = requirement if roles else replace(
+                requirement, cross_axis_channels={}, limit_channels=())
+            kept = evaluate(held, specification, measured,
                             table=read_from.get('table'),
-                            duration_run=duration)
+                            duration_run=duration,
+                            profiles={name.removeprefix('profile:'): obj
+                                      for name, obj in read_from.items()
+                                      if name.startswith('profile:')})
+            if not roles:
+                kept = _unread_roles(requirement, kept)
         except (TypeError, ValueError) as refusal:
             kept = type(refusal)(str(refusal))
         _keep(key, read_from, kept)
@@ -256,7 +334,7 @@ def pending(report: Any, objects: Mapping[str, Any],
         if read_from is None:
             continue
         kept = _kept(_key(block, read_from, run_duration(
-            block, objects, object_groups)), read_from)
+            block, objects, object_groups), roles_on(report)), read_from)
         if kept is None or str(kept) == CANCELED:
             out.append(block)
     return out
@@ -278,7 +356,7 @@ def prepare(report: Any, objects: Mapping[str, Any],
     def key_of(block):
         read_from = _objects(block, objects, object_groups)
         return read_from, _key(block, read_from, run_duration(
-            block, objects, object_groups))
+            block, objects, object_groups), roles_on(report))
 
     for done, block in enumerate(waiting):
         try:
@@ -291,7 +369,7 @@ def prepare(report: Any, objects: Mapping[str, Any],
             raise
         _KEPT.pop(key_of(block)[1], None)
         try:
-            read(block, objects, object_groups)
+            read(block, objects, object_groups, roles=roles_on(report))
         except (TypeError, ValueError):
             pass        # kept, and said on the page
     if progress is not None:
@@ -301,13 +379,18 @@ def prepare(report: Any, objects: Mapping[str, Any],
 
 def build(block: Mapping[str, Any], objects: Mapping[str, Any],
           object_groups: Sequence[Mapping[str, Any]] | None = None, *,
-          uncertainty_on: bool = False) -> Made | None:
+          uncertainty_on: bool = False, roles_on: bool = False,
+          register: Sequence[Mapping[str, Any]] | None = None
+          ) -> Made | None:
     """The page blocks of one requirement block, or None while a binding
     does not resolve. A requirement that cannot be read against its run
     at all draws its words and, for the results, one paragraph saying
     why, since a reading that judged nothing says so. `uncertainty_on`
     (the feature `control_uncertainty`) adds the control channels'
-    uncertainty under the words."""
+    uncertainty under the words, `roles_on` (the feature
+    `cross_axis`) reads the cross-axis and limit channels, and
+    `register` (the findings entered, with the feature `findings` on)
+    gives a row that offers a finding its Finding cell."""
     from ..core.requirement import TestRequirement
 
     try:
@@ -318,7 +401,7 @@ def build(block: Mapping[str, Any], objects: Mapping[str, Any],
                           f'{refusal}.'}])
     words = [{'kind': 'text', 'text': _words(requirement)}]
     try:
-        found = read(block, objects, object_groups)
+        found = read(block, objects, object_groups, roles=roles_on)
     except (TypeError, ValueError) as refusal:
         if uncertainty_on:
             words += uncertainty(requirement)
@@ -329,7 +412,8 @@ def build(block: Mapping[str, Any], objects: Mapping[str, Any],
     if uncertainty_on:
         words += uncertainty(requirement, found.channels)
     name = str(block.get('measured') or '')
-    return Made(words, [table(found, name, str(block.get('caption') or '')),
+    return Made(words, [table(found, name, str(block.get('caption') or ''),
+                              register),
                         {'kind': 'text', 'text': _note(found)}])
 
 
@@ -417,10 +501,16 @@ def _words(requirement: Any) -> str:
         f'- {line}' for line in requirement.describe())
 
 
-def table(results: Any, name: str = '', caption: str = '') -> dict[str, Any]:
+def table(results: Any, name: str = '', caption: str = '',
+          register: Sequence[Mapping[str, Any]] | None = None
+          ) -> dict[str, Any]:
     """The result table: a row per criterion, its result cell marked by
-    state. A Finding column is added when any row leads to a finding."""
-    findings = any(row.finding for row in results.rows)
+    state. With a findings `register` (the feature `findings` on), a
+    Finding column is added when any row offers a finding
+    (`Criterion.finding`): the numbers of the findings its fact went
+    to, or `UNENTERED`; blank on a row that offers none."""
+    findings = register is not None and any(
+        row.finding is not None for row in results.rows)
     headers = ['Criterion', 'Requirement', 'Measured', 'Result']
     if findings:
         headers.append('Finding')
@@ -429,7 +519,7 @@ def table(results: Any, name: str = '', caption: str = '') -> dict[str, Any]:
         cells = [row.name, row.required, row.measured, row.state]
         mark = ['', '', '', MARKS.get(row.state, '')]
         if findings:
-            cells.append(row.finding)
+            cells.append(_finding_cell(row.finding, register))
             mark.append('')
         rows.append(cells)
         marks.append(mark)
@@ -442,6 +532,119 @@ def table(results: Any, name: str = '', caption: str = '') -> dict[str, Any]:
     if any(any(mark) for mark in marks):
         built['marks'] = marks
     return built
+
+
+def _finding_cell(offer: Any, register: Sequence[Mapping[str, Any]]) -> str:
+    """The Finding cell of a row: blank for a row that offers no
+    finding, else the numbers of the findings its fact went to (an
+    accepted fact keeps the draft's channel and band, a waiting draft
+    carries them), else `UNENTERED`."""
+    if offer is None:
+        return ''
+    held = (offer.channel, list(offer.band))
+    numbers = [entry['number'] for entry in register
+               if (entry['channel'], entry['band']) == held
+               or (entry['draft'] is not None
+                   and (entry['draft']['channel'],
+                        entry['draft']['band']) == held)]
+    return ', '.join(numbers) or UNENTERED
+
+
+def fact_draft(row: Any, results: Any, measured: str, specification: str,
+               provenance: Mapping[str, Mapping[str, Any]] | None = None
+               ) -> Any:
+    """The `report.findings.FactDraft` a row of the result table offers:
+    its fact (`Criterion.finding`), the record it was read off and the
+    time history that record came from where `provenance` (the
+    project's) says, and the scale the run was compared at. The time
+    history, or else the record, is the run; the channel and band are
+    the offer's.
+
+    Raises `ValueError` for a row that offers no finding."""
+    from .findings import FactDraft
+
+    offer = row.finding
+    if offer is None:
+        raise ValueError(f'{row.name} offers no finding: only a notch the '
+                         'plan does not name and a cross-axis channel over '
+                         'its limit do')
+    source = ((provenance or {}).get(measured) or {}).get('source')
+    record = (f'PSD {measured!r}, from {source!r}' if source
+              else f'PSD {measured!r}')
+    text = f'{offer.text}; {record}'
+    if results.scale_db:
+        text += f'; compared at {results.scale_db:+g} dB'
+    return FactDraft(
+        text=text + '.',
+        source=(f'{measured} against {specification}, '
+                f'{results.requirement.document_text}, {row.name}'),
+        run=str(source or measured), channel=offer.channel,
+        band=tuple(offer.band))
+
+
+def draft_finding(report: Any, number: str, objects: Mapping[str, Any],
+                  measured: str, specification: str, criterion: int | str,
+                  object_groups: Sequence[Mapping[str, Any]] | None = None,
+                  *, provenance: Mapping[str, Mapping[str, Any]]
+                  | None = None) -> Any:
+    """Offer finding `number` the fact a row of a result table offers,
+    and return the draft (`fact_draft`).
+
+    The row is of the requirement bound to `specification` and
+    `measured`, read as the page reads it, and is named by `criterion`:
+    its number in the table from 1, or its name. The draft goes to the
+    finding through the register's one entry point for drafts
+    (`report.findings.offer`), so it fills nothing until the author
+    accepts it.
+
+    Raises
+    ------
+    ValueError
+        When the report does not have the features `test_requirement`
+        and `findings` enabled; for an unknown finding, no requirement
+        bound to the pair, one that cannot be read, a row number out of
+        range, a name no row has, a name two offering rows share, and a
+        row that offers no finding. Nothing is changed.
+    """
+    from ..core.report import resolve_binding
+    from . import findings
+    from .features import enabled
+
+    if FEATURE not in enabled(report):
+        raise ValueError(f'report {getattr(report, "title", "")!r} does not '
+                         'have Requirement and results enabled')
+    findings.find(report, number)
+    pair = (resolve_binding(specification, objects, object_groups),
+            resolve_binding(measured, objects, object_groups))
+    bound = [block for block in report.blocks if 'requirement' in block
+             and tuple(resolve_binding(block.get(key), objects,
+                                       object_groups)
+                       for key in ('source', 'measured')) == pair]
+    if not bound:
+        raise ValueError(f'no requirement is bound to {specification!r} '
+                         f'and {measured!r}')
+    results = read(bound[0], objects, object_groups, roles=roles_on(report))
+    if results is None:
+        raise ValueError(f'the requirement bound to {specification!r} and '
+                         f'{measured!r} cannot be read: a binding does not '
+                         'resolve')
+    if isinstance(criterion, int) and not isinstance(criterion, bool):
+        if not 1 <= criterion <= len(results.rows):
+            raise ValueError(f'the result table has rows 1 to '
+                             f'{len(results.rows)}, not {criterion}')
+        row = results.rows[criterion - 1]
+    else:
+        named = [row for row in results.rows if row.name == criterion]
+        if not named:
+            raise ValueError(f'the result table has no row {criterion!r}')
+        offering = [row for row in named if row.finding is not None]
+        if len(offering) > 1:
+            raise ValueError(f'{len(offering)} rows {criterion!r} offer a '
+                             'finding; name the row by its number')
+        row = offering[0] if offering else named[0]
+    draft = fact_draft(row, results, pair[1], pair[0], provenance)
+    findings.offer(report, number, draft)
+    return draft
 
 
 def _note(results: Any) -> str:
@@ -496,7 +699,8 @@ def verdict(built: dict[str, Any] | None, block: Mapping[str, Any],
     bound = matching(report, block, objects, object_groups)
     if bound is not None:
         try:
-            found = read(bound, objects, object_groups)
+            found = read(bound, objects, object_groups,
+                         roles=roles_on(report))
         except (TypeError, ValueError) as refusal:
             return {**built, 'requirement': {
                 'state': 'not judged', 'met': 0, 'rows': 0,

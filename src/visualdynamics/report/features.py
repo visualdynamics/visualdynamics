@@ -45,7 +45,8 @@ from typing import Any
 # P17 (the requirement and its result table, `report/requirement.py`)
 # prints under the skeleton's Requirement and Results, and P30 (the
 # control channels' uncertainty, drawn by the same module) under its
-# Requirement.
+# Requirement; P26 (cross-axis and limit channels) adds rows to P17's
+# result table.
 
 #: the groups the selection tool lays the features out in, in order
 GROUPS = ('Structure', 'Results', 'Records', 'Issue control', 'Figures')
@@ -120,9 +121,10 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 #: every report feature, in the order the selection tool shows them
 #: within their groups. `skeleton_sections`, `run_sections`,
 #: `test_requirement`, `findings`, `check_blocks`, `prediction`,
-#: `control_uncertainty`, `data_index`, `calibration_in_date`,
-#: `report_identity`, `record_captions`, `plot_conventions` and its
-#: option `shared_decades` are built; the rest are the road map.
+#: `cross_axis`, `control_uncertainty`, `data_index`,
+#: `calibration_in_date`, `report_identity`, `record_captions`,
+#: `plot_conventions` and its option `shared_decades` are built; the
+#: rest are the road map.
 FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'skeleton_sections', 'Skeleton sections', 'Structure',
@@ -174,8 +176,10 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         'cross_axis', 'Cross-axis and limit channels', 'Results',
         'Cross-axis response against its limit, and the band and depth '
         'over which each limit channel held the control below its '
-        'reference.',
-        requires=('test_requirement',), available=False),
+        'reference, as rows of the result table; a notch the plan does '
+        'not name is not met, and it and a cross-axis channel over its '
+        'limit offer the findings register a fact.',
+        requires=('test_requirement',)),
     ReportFeature(
         'control_uncertainty', 'Control-channel uncertainty', 'Results',
         "Each control channel's measurement uncertainty, from its "

@@ -38,10 +38,16 @@ each worded met, not met or not judged.
 - **The degrees of freedom** carried by the control channels' PSDs, the
   fewest of them, and the **line spacing**, each against the
   requirement.
-- **Cross-axis limits** are held with the requirement and listed as
-  rows; reading the cross-axis response is a separate reading, and
-  until a report makes it the rows say they were not judged
-  (`cross_axis_rows`).
+- **Cross-axis** (`cross_axis_rows`): each cross-axis channel named,
+  with the in-axis control channel it is read against, as a percentage
+  of that channel's ASD line by line over each limit's band, at the
+  same degrees of freedom, the worst percentage and its frequency
+  against the limit.
+- **Limit channels** (`limit_rows`): for each response channel held
+  under a limit profile, the band and depth over which it held its
+  limit while the control fell below the reference, the as-run notch,
+  each notch against the notches the plan names. A notch the plan does
+  not name is a departure from it, and its row is not met.
 
 **The measurement's own uncertainty** is held with the requirement too,
 since the tolerance it is read against is the requirement's: each
@@ -94,7 +100,8 @@ ORIGINS = ('laboratory', 'customer', 'derived')
 
 #: the numbers a source can be stated for, by the requirement's field
 NUMBERS = ('composite_bands', 'individual_bands', 'grms_percent', 'duration',
-           'min_dof', 'max_line_spacing', 'cross_axis', 'rule', 'uncertainty')
+           'min_dof', 'max_line_spacing', 'cross_axis', 'rule', 'uncertainty',
+           'limit_channels')
 
 #: a row's result, in the words the table prints
 MET = 'met'
@@ -115,6 +122,13 @@ COVERAGE = 2.0
 
 #: the share of the tolerance the measurement's uncertainty may take
 SHARE = 1.0 / 3.0
+
+#: how near its profile, in dB, a limit channel counts as holding its
+#: limit, and how far under the reference the control must fall for a
+#: line to count as notched: about twice the scatter of an estimate at
+#: 120 degrees of freedom, so a line of scatter alone is rarely read as
+#: either
+HELD_DB = 1.0
 
 #: how far apart two cells may be and still touch, as a fraction of the
 #: frequency (the edges of neighboring bins are worked out separately)
@@ -434,6 +448,133 @@ def _limits(value: Any) -> tuple[CrossAxisLimit, ...]:
 
 
 @dataclass(frozen=True)
+class LimitChannel:
+    """A limit channel: the response at `channel` (its response DOF)
+    held under its limit profile, an autospectrum at that DOF in the
+    object named `profile` ('' for the specification's own record
+    there), and the notches the plan names for it (`notches`, each
+    (low, high) Hz)."""
+
+    channel: str
+    profile: str = ''
+    notches: tuple[tuple[float, float], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.channel, str) or not self.channel.strip():
+            raise ValueError('a limit channel is named by its response DOF, '
+                             f'not {self.channel!r}')
+        if not isinstance(self.profile, str):
+            raise TypeError("a limit channel's profile is named by text, "
+                            f'not {self.profile!r}')
+        what = f'a planned notch of {self.channel.strip()}'
+        if isinstance(self.notches, str) or not isinstance(self.notches,
+                                                           Sequence):
+            raise TypeError(f'the planned notches of {self.channel.strip()} '
+                            'are a list, each (low, high)')
+        held = []
+        for notch in self.notches:
+            try:
+                low, high = notch
+            except (TypeError, ValueError):
+                raise ValueError(f'{what} is (low, high), not '
+                                 f'{notch!r}') from None
+            low = _edge(low, f"{what}'s low edge")
+            high = _edge(high, f"{what}'s high edge")
+            if low is None or high is None:
+                raise ValueError(f'{what} states both its edges')
+            _reach(low, high, what)
+            held.append(_Span(low, high))
+        _overlap(held, f'planned notches of {self.channel.strip()}')
+        object.__setattr__(self, 'channel', self.channel.strip())
+        object.__setattr__(self, 'notches',
+                           tuple((span.low, span.high) for span in held))
+
+    def planned(self, notch: Excursion) -> bool:
+        """Whether `notch` lies inside a notch the plan names."""
+        return any(low * (1.0 - _TOUCHING) <= notch.low
+                   and notch.high <= high * (1.0 + _TOUCHING)
+                   for low, high in self.notches)
+
+    @property
+    def text(self) -> str:
+        """What the row requires, in words."""
+        profile = (f'its limit profile in {self.profile}' if self.profile
+                   else "its limit profile in the specification")
+        if self.notches:
+            planned = ('notches planned ' + ', '.join(
+                f'{_hz(low)} to {_hz(high)} Hz' for low, high in self.notches))
+        else:
+            planned = 'no notch planned'
+        return f'held at or under {profile}; {planned}'
+
+    def as_record(self) -> list[Any]:
+        return [self.channel, self.profile,
+                [list(notch) for notch in self.notches]]
+
+
+@dataclass(frozen=True)
+class _Span:
+    low: float
+    high: float
+
+
+def _cross_channels(value: Any, channels: tuple[str, ...]
+                    ) -> dict[str, str]:
+    """The cross-axis channels, each with its in-axis control channel."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError('the cross-axis channels are a mapping of each '
+                        'cross-axis DOF to its in-axis control channel')
+    out = {}
+    for cross, in_axis in value.items():
+        cross, in_axis = str(cross).strip(), str(in_axis).strip()
+        if not cross or not in_axis:
+            raise ValueError('a cross-axis channel and its in-axis channel '
+                             'are each named by a response DOF')
+        if cross == in_axis:
+            raise ValueError(f'{cross} is named as its own in-axis channel')
+        if channels and in_axis not in channels:
+            raise ValueError(f'the in-axis channel of {cross} is {in_axis}, '
+                             'which is not a control channel of the '
+                             f'requirement ({", ".join(channels)})')
+        if cross in channels:
+            raise ValueError(f'{cross} is a control channel, not a '
+                             'cross-axis one')
+        out[cross] = in_axis
+    return out
+
+
+def _limit_channels(value: Any, channels: tuple[str, ...]
+                    ) -> tuple[LimitChannel, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, LimitChannel)) or not isinstance(value,
+                                                                Sequence):
+        raise TypeError('the limit channels are a list, each (channel, '
+                        'profile, notches)')
+    out = []
+    for item in value:
+        if not isinstance(item, LimitChannel):
+            if isinstance(item, str):
+                item = (item,)
+            if not isinstance(item, Sequence) or not 1 <= len(item) <= 3:
+                raise ValueError('each limit channel is (channel, profile, '
+                                 f'notches), not {item!r}')
+            item = LimitChannel(*item)
+        if item.channel in channels:
+            raise ValueError(f'{item.channel} is a control channel; a limit '
+                             'channel is a response held under a profile')
+        out.append(item)
+    names = [item.channel for item in out]
+    twice = sorted({name for name in names if names.count(name) > 1})
+    if twice:
+        raise ValueError(f'the limit channel {", ".join(twice)} is named '
+                         'twice')
+    return tuple(out)
+
+
+@dataclass(frozen=True)
 class TestRequirement:
     """What a random test's run is accepted on, as the plan states it.
 
@@ -474,6 +615,13 @@ class TestRequirement:
         The widest the control's line spacing may be, Hz.
     cross_axis : sequence of CrossAxisLimit or (low, high, percent)
         The cross-axis limits by band.
+    cross_axis_channels : mapping of str to str
+        Each cross-axis channel's response DOF, to the in-axis control
+        channel it is read against.
+    limit_channels : sequence of LimitChannel or (channel, profile, notches)
+        The response channels held under a limit profile, each with the
+        object its profile is in ('' for the specification) and the
+        notches the plan names for it.
     rule : str, default 'any_line'
         One of `RULES`.
     combine : int, default 1
@@ -500,7 +648,10 @@ class TestRequirement:
         requirement does not hold, and an uncertainty contribution that
         is not a percentage above 0 and under 100, is named twice for a
         channel, or is entered for a channel the requirement does not
-        name.
+        name; cross-axis channels without cross-axis limits, or with an
+        in-axis channel that is not a control channel; and a limit
+        channel named twice, that is a control channel, or whose planned
+        notches do not each run from a low edge to a higher one.
     """
 
     document: str
@@ -522,6 +673,8 @@ class TestRequirement:
     sources: Mapping[str, Source] = field(default_factory=dict)
     uncertainty: Mapping[str, tuple[Contribution, ...]] = field(
         default_factory=dict)
+    cross_axis_channels: Mapping[str, str] = field(default_factory=dict)
+    limit_channels: tuple[LimitChannel, ...] = ()
 
     def __post_init__(self) -> None:
         put = object.__setattr__
@@ -608,6 +761,13 @@ class TestRequirement:
         elif self.duration_tolerance is not None:
             raise ValueError('a duration tolerance needs the duration')
         put(self, 'cross_axis', _limits(self.cross_axis))
+        put(self, 'cross_axis_channels',
+            _cross_channels(self.cross_axis_channels, channels))
+        if self.cross_axis_channels and not self.cross_axis:
+            raise ValueError('cross-axis channels are read against the '
+                             'cross-axis limits; state them')
+        put(self, 'limit_channels',
+            _limit_channels(self.limit_channels, channels))
         if self.rule not in RULES:
             raise ValueError(f'the decision rule is one of {", ".join(RULES)}, '
                              f'not {self.rule!r}')
@@ -676,7 +836,9 @@ class TestRequirement:
             'sources': {name: [s.origin, s.owner]
                         for name, s in self.sources.items()},
             'uncertainty': {channel: [c.as_record() for c in held]
-                            for channel, held in self.uncertainty.items()}}
+                            for channel, held in self.uncertainty.items()},
+            'cross_axis_channels': dict(self.cross_axis_channels),
+            'limit_channels': [c.as_record() for c in self.limit_channels]}
 
     @classmethod
     def from_record(cls, record: Mapping[str, Any]) -> TestRequirement:
@@ -741,6 +903,14 @@ class TestRequirement:
             lines.append('Cross-axis: at most '
                          + '; '.join(c.text for c in self.cross_axis)
                          + self._from('cross_axis') + '.')
+        if self.cross_axis_channels:
+            lines.append('Cross-axis channels: ' + ', '.join(
+                f'{cross} against {in_axis}'
+                for cross, in_axis in self.cross_axis_channels.items()) + '.')
+        if self.limit_channels:
+            lines.append('Limit channels: ' + '; '.join(
+                f'{c.channel}, {c.text}' for c in self.limit_channels)
+                + self._from('limit_channels') + '.')
         lines.append(f'Decision rule: {self.rule_text}{self._from("rule")}.')
         if self.uncertainty:
             lines.append('Measurement uncertainty: entered for '
@@ -796,11 +966,32 @@ class Excursion:
 
 
 @dataclass(frozen=True)
+class Offer:
+    """The fact a row of the result table offers a findings register:
+    what was measured, in words, and the channel and band it concerns.
+
+    A row offers one where the run departed from the plan: a notch the
+    plan does not name, and a cross-axis channel over its limit. The
+    report builds a fact draft from it, naming the record, and it
+    reaches a finding only through the register's one entry point for
+    drafts (`report.findings.offer`), which leaves it for the author to
+    accept, edit or discard.
+    """
+
+    #: the fact, without the record it was read off
+    text: str
+    #: the channel it concerns
+    channel: str
+    #: the band it concerns, Hz
+    band: tuple[float, float]
+
+
+@dataclass(frozen=True)
 class Criterion:
     """One row of the result table."""
 
     #: what the row judges: 'composite', 'channel', 'grms', 'duration',
-    #: 'dof', 'line_spacing' or 'cross_axis'
+    #: 'dof', 'line_spacing', 'cross_axis' or 'limit'
     key: str
     #: the row's name ('Composite (average of 1X+, 2X+)', 'Channel 2X+')
     name: str
@@ -816,9 +1007,10 @@ class Criterion:
     channel: str = ''
     #: the frequency range the row judged, Hz, None for a row of no band
     band: tuple[float, float] | None = None
-    #: the finding the row leads to, filled where a findings register
-    #: numbers one; '' until then
-    finding: str = ''
+    #: the fact the row offers a findings register (`Offer`): on an
+    #: unplanned notch and on a cross-axis channel over its limit, None
+    #: on every other row
+    finding: Offer | None = None
 
 
 @dataclass(frozen=True)
@@ -856,7 +1048,8 @@ def evaluate(requirement: TestRequirement, specification: Specification,
              measured: Psd, *, table: Any = None,
              duration_run: float | None = None,
              spec_record: int | None = None,
-             scale_db: float | None = None) -> Results:
+             scale_db: float | None = None,
+             profiles: Mapping[str, Any] | None = None) -> Results:
     """Read a run against its requirement, one row per criterion.
 
     The control channels are the requirement's, else the channel
@@ -885,6 +1078,8 @@ def evaluate(requirement: TestRequirement, specification: Specification,
         The reference record.
     scale_db : float, optional
         The comparison's scale; resolved as above when omitted.
+    profiles : mapping of str to Psd, optional
+        The objects the limit channels name for their profiles, by name.
 
     Returns
     -------
@@ -976,7 +1171,9 @@ def evaluate(requirement: TestRequirement, specification: Specification,
     if requirement.max_line_spacing is not None:
         rows.append(_spacing_row(requirement, measured))
     rows.extend(cross_axis_rows(requirement, specification, measured, table,
-                                scale_db))
+                                scale_db, spec_record=j))
+    rows.extend(limit_rows(requirement, specification, j, target,
+                           target_record, measured, scale_db, profiles))
     if requirement.strategy == 'single':
         # a multi-point reading names a dead channel itself (above)
         zero = sum(e.lines for row in rows if row.key == 'composite'
@@ -991,19 +1188,292 @@ def evaluate(requirement: TestRequirement, specification: Specification,
 
 def cross_axis_rows(requirement: TestRequirement,
                     specification: Specification, measured: Psd,
-                    table: Any = None, scale_db: float = 0.0
-                    ) -> list[Criterion]:
-    """The rows of the requirement's cross-axis limits.
+                    table: Any = None, scale_db: float = 0.0, *,
+                    spec_record: int = 0) -> list[Criterion]:
+    """The rows of the requirement's cross-axis limits: one per limit
+    and cross-axis channel.
 
-    A cross-axis response is read as a percentage of its in-axis
-    channel's, which is a reading of its own; until it is made the rows
-    say each limit was not judged, so the results are never met with a
-    limit stated and unread. This is the one place the rows are made, so
-    the cross-axis reading feeds the result table here.
+    Each cross-axis channel's autospectrum is read as a percentage of
+    its in-axis control channel's, line by line (a ratio of two
+    densities, so the comparison's scale cancels), over the limit's
+    band, which a limit left open at an end takes to the end the
+    specification writes. The row gives the worst percentage and its
+    frequency, how many lines were over the limit, and the degrees of
+    freedom the two were read at, which must be the same for the ratio
+    to be of like estimates. Met when no judged line is over. A line
+    where either density is not a finite number, or the in-axis one is
+    zero, is not judged; a row with such lines and none over is not
+    judged, as a band row is, and so is a cross-axis channel that
+    reads zero at every line, as a dead sensor does. A row with lines
+    over offers their reach to a findings register (`Criterion.finding`).
+    With no cross-axis channel named, each limit is one row saying so.
+    This is the one place the rows are made.
     """
-    return [Criterion('cross_axis', 'Cross-axis', limit.text, '—',
-                      NOT_JUDGED, band=_band_of(limit))
-            for limit in requirement.cross_axis]
+    rows = []
+    if not requirement.cross_axis_channels:
+        return [Criterion('cross_axis', 'Cross-axis', limit.text,
+                          'not judged: no cross-axis channel is named',
+                          NOT_JUDGED, band=_band_of(limit))
+                for limit in requirement.cross_axis]
+    for limit in requirement.cross_axis:
+        for cross, in_axis in requirement.cross_axis_channels.items():
+            rows.append(_cross_axis_row(limit, cross, in_axis,
+                                        specification, spec_record,
+                                        measured))
+    return rows
+
+
+def _autospectrum(measured: Psd, dof: str) -> int | None:
+    """The one autospectrum of `measured` at `dof`, None for none;
+    `ValueError` for two (of two quantities at one DOF), since which
+    was meant cannot be told."""
+    found = [i for i in range(measured.num_records)
+             if str(measured.response_dof[i]) == dof
+             and measured.is_autospectrum(i)]
+    if len(found) > 1:
+        raise ValueError(f'the measurement holds {len(found)} autospectra '
+                         f'at {dof}; which is meant cannot be told')
+    return found[0] if found else None
+
+
+def _cross_axis_row(limit: CrossAxisLimit, cross: str, in_axis: str,
+                    specification: Specification, j: int, measured: Psd
+                    ) -> Criterion:
+    from .compliance import coverage, units_check
+
+    name = f'Cross-axis {cross} (in-axis {in_axis})'
+    reach = _band_of(limit)
+
+    def unjudged(why: str) -> Criterion:
+        return Criterion('cross_axis', name, limit.text,
+                         f'not judged: {why}', NOT_JUDGED, channel=cross,
+                         band=reach)
+
+    try:
+        records = [_autospectrum(measured, dof) for dof in (cross, in_axis)]
+    except ValueError as refusal:
+        return unjudged(str(refusal))
+    for dof, record in zip((cross, in_axis), records, strict=True):
+        if record is None:
+            return unjudged(f'the measurement has no autospectrum at {dof}')
+    c, i = records
+    refused, _raw = units_check(str(measured.ordinate_dim[i]),
+                                str(measured.ordinate_dim[c]),
+                                wanted_name=f'the in-axis record {in_axis}',
+                                held_name=f'the cross-axis record {cross}')
+    if refused is not None:
+        return unjudged(refused)
+    dofs = _dofs(measured, [c]), _dofs(measured, [i])
+    if None not in dofs and abs(dofs[0] - dofs[1]) > 1e-9 * dofs[1]:
+        return unjudged(f'the two are read at different degrees of freedom '
+                        f'({dofs[0]:.4g} and {dofs[1]:.4g}), so their ratio '
+                        'is not of like estimates')
+    # a limit open at an end reaches the end the specification writes
+    written = coverage(specification, j)
+    low = (min(a for a, _b in written) if limit.low is None and written
+           else limit.low or 0.0)
+    high = (max(b for _a, b in written) if limit.high is None and written
+            else limit.high or math.inf)
+    x = np.asarray(measured.abscissa, dtype=float)
+    inside = (x >= low) & (x <= high)
+    if not inside.any():
+        return unjudged(f'the measurement has no line {_range_text(low, high)}')
+    held = np.real(np.asarray(measured.ordinate[c], dtype=float))[inside]
+    under = np.real(np.asarray(measured.ordinate[i], dtype=float))[inside]
+    with np.errstate(divide='ignore', invalid='ignore'):
+        read = (np.isfinite(held) & (held >= 0.0) & np.isfinite(under)
+                & (under > 0.0))
+        percent = np.where(read, 100.0 * held / under, np.nan)
+    count = int(read.sum())
+    gaps = int(inside.sum()) - count
+    if not count:
+        return unjudged('no line of the band has both densities finite and '
+                        'the in-axis one above zero')
+    if not (held[read] > 0.0).any():
+        return unjudged(f'{cross} reads zero over the band, as a dead or '
+                        'disconnected sensor does')
+    k = int(np.nanargmax(percent))
+    worst, at = float(percent[k]), float(x[inside][k])
+    over = int((percent[read] > limit.percent * (1.0 + 1e-12)).sum())
+    words = f'worst {worst:.3g} % at {_hz(at)} Hz'
+    if over:
+        words += f', {over} of {count} line{"s" * (count != 1)} over'
+    if None not in dofs:
+        words += f', at {dofs[0]:.4g} degrees of freedom'
+    if gaps:
+        words += f'; {gaps} line{"s" * (gaps != 1)} not judged'
+    state = NOT_MET if over else (NOT_JUDGED if gaps else MET)
+    offer = None
+    if over:
+        # a cross-axis channel over its limit is a departure from the
+        # plan, so the row offers it to a findings register (`finding`)
+        lines = x[inside][read][percent[read] > limit.percent
+                                * (1.0 + 1e-12)]
+        first, last = float(lines[0]), float(lines[-1])
+        offer = Offer(
+            f'{cross} read up to {worst:.3g} % of {in_axis} at {_hz(at)} '
+            f'Hz, over its {limit.percent:g} % cross-axis limit on {over} '
+            f'of {count} line{"s" * (count != 1)} from {_hz(first)} to '
+            f'{_hz(last)} Hz', cross, (first, last))
+    return Criterion('cross_axis', name, limit.text, words, state,
+                     channel=cross, band=(low, high), finding=offer)
+
+
+def limit_rows(requirement: TestRequirement, specification: Specification,
+               j: int, target: Psd, target_record: int, measured: Psd,
+               scale_db: float, profiles: Mapping[str, Any] | None = None
+               ) -> list[Criterion]:
+    """The rows of the requirement's limit channels: for each, the
+    notches it cut, the as-run notch.
+
+    A controller holds its control to the reference except where that
+    would put a limit channel over its profile; there it lowers the drive
+    until the limit channel sits on its profile, and the control falls
+    below the reference. So a line is notched where the limit channel is
+    at its profile (no more than `HELD_DB` under it) while the control is
+    more than `HELD_DB` under the reference, every curve read over the
+    measurement's lines the way `core.limit_prediction` reads them
+    (`limit_prediction._density`) and the measurement at the comparison's
+    scale. A run of at least `limit_prediction.NARROW_LINES` adjacent
+    notched lines is a notch, since a controller cuts no narrower and a
+    line or two of scatter is not one; it is given by its band, how far
+    under the reference the control went at worst, and its line count
+    (an `Excursion` below). The row is not met when a notch lies outside
+    every notch the plan names, and offers those notches to a findings
+    register (`Criterion.finding`); its words say how close the limit
+    channel came to its profile. A limit channel, profile or reference
+    not read, and a limit channel reading zero, are a row saying so.
+
+    `profiles` holds the objects a limit channel names for its profile,
+    by name; a limit channel naming none takes the specification's own
+    record at its DOF, as `core.limit_prediction.predict_limits` does.
+    """
+    from .limit_prediction import _density
+
+    rows = []
+    if not requirement.limit_channels:
+        return rows
+    left, right = target.bin_bounds()
+    reference = _density(specification, j, left, right)
+    factor = 10.0 ** (scale_db / 10.0)
+    control = factor * np.real(np.asarray(target.ordinate[target_record],
+                                          dtype=float))
+    for channel in requirement.limit_channels:
+        rows.append(_limit_row(channel, specification, measured, reference,
+                               control, factor, left, right,
+                               dict(profiles or {})))
+    return rows
+
+
+def _limit_row(channel: LimitChannel, specification: Specification,
+               measured: Psd, reference: np.ndarray, control: np.ndarray,
+               factor: float, left: np.ndarray, right: np.ndarray,
+               profiles: Mapping[str, Any]) -> Criterion:
+    from .compliance import units_check
+    from .data import channel_quantities
+    from .limit_prediction import NARROW_LINES, _density, _record_at, _runs
+
+    dof = channel.channel
+    name = f'Limit channel {dof}'
+    required = channel.text
+
+    def unjudged(why: str) -> Criterion:
+        return Criterion('limit', name, required, f'not judged: {why}',
+                         NOT_JUDGED, channel=dof)
+
+    try:
+        record = _autospectrum(measured, dof)
+    except ValueError as refusal:
+        return unjudged(str(refusal))
+    if record is None:
+        return unjudged(f'the measurement has no autospectrum at {dof}')
+    quantity = channel_quantities(str(measured.ordinate_dim[record]))[0]
+    source = specification if not channel.profile else \
+        profiles.get(channel.profile)
+    if source is None:
+        return unjudged(f'its limit profile {channel.profile!r} is not '
+                        'there to read')
+    found = _record_at(source, dof, quantity)
+    if found is None:
+        return unjudged(f'no limit profile is written at {dof}')
+    refused, _raw = units_check(
+        channel_quantities(str(source.ordinate_dim[found]))[0], quantity,
+        wanted_name=f'the limit profile at {dof}',
+        held_name='the limit channel')
+    if refused is not None:
+        return unjudged(refused)
+    profile = _density(source, found, left, right)
+    limited = factor * np.real(np.asarray(measured.ordinate[record],
+                                          dtype=float))
+    read = (np.isfinite(reference) & np.isfinite(profile)
+            & np.isfinite(limited) & (limited >= 0.0) & np.isfinite(control))
+    if not read.any():
+        return unjudged('no line has the limit channel, its profile, the '
+                        'control and the reference all read')
+    if not (limited[read] > 0.0).any():
+        return unjudged(f'{dof} reads zero, as a dead or disconnected sensor '
+                        'does')
+    slack = 10.0 ** (-HELD_DB / 10.0)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        held = read & (limited >= profile * slack)
+        below = read & (control < reference * slack)
+        depth = 10.0 * np.log10(reference / control)
+        closest = np.where(read, 10.0 * np.log10(limited / profile), np.nan)
+    x = np.asarray(measured.abscissa, dtype=float)
+    notches = []
+    for first, last in _runs(held & below):
+        if last - first + 1 < NARROW_LINES:
+            continue
+        notches.append(Excursion('below', float(x[first]), float(x[last]),
+                                 float(np.max(depth[first:last + 1])),
+                                 last - first + 1))
+    unplanned = [notch for notch in notches if not channel.planned(notch)]
+    k = int(np.nanargmax(closest))
+    near = (f'{float(closest[k]):+.2g} dB from its limit profile at its '
+            f'closest, {_hz(float(x[k]))} Hz')
+    if not notches:
+        return Criterion('limit', name, required, f'no notch; {near}', MET,
+                         channel=dof)
+    said = []
+    for notch in notches:
+        said.append(f'held its limit from {_hz(notch.low)} to '
+                    f'{_hz(notch.high)} Hz ({notch.lines} lines) while the '
+                    f'control fell up to {notch.worst_db:.2g} dB under the '
+                    'reference'
+                    + ('' if channel.planned(notch) else
+                       ', a notch the plan does not name'))
+    # an unplanned notch is a departure from the plan, so the row
+    # offers it to a findings register (`finding`)
+    return Criterion('limit', name, required, '; '.join(said) + f'; {near}',
+                     NOT_MET if unplanned else MET, tuple(notches),
+                     channel=dof,
+                     band=(notches[0].low, notches[-1].high),
+                     finding=_notch_offer(dof, unplanned))
+
+
+def _depth(db: float) -> str:
+    """How far a notch took the control under the reference, in words:
+    two figures under 10 dB, whole decibels above, as `Excursion.text`."""
+    if math.isinf(db):
+        return 'to zero'
+    return f'up to {db:.2g} dB' if db < 10 else f'up to {db:.0f} dB'
+
+
+def _notch_offer(dof: str, unplanned: Sequence[Excursion]) -> Offer | None:
+    """The fact the notches the plan does not name offer a findings
+    register: the channel, each notch's band, line count and depth, and
+    their reach as the band. None when every notch is planned."""
+    if not unplanned:
+        return None
+    each = [f'from {_hz(notch.low)} to {_hz(notch.high)} Hz '
+            f'({notch.lines} line{"s" * (notch.lines != 1)}), the control '
+            f'{_depth(notch.worst_db)} under the reference'
+            for notch in unplanned]
+    count = ('a notch' if len(unplanned) == 1
+             else f'{len(unplanned)} notches')
+    return Offer(f'{dof} held its limit profile in {count} the plan does '
+                 f'not name: ' + '; '.join(each), dof,
+                 (unplanned[0].low, unplanned[-1].high))
 
 
 def _band_of(item: Any) -> tuple[float, float] | None:

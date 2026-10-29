@@ -577,3 +577,254 @@ def test_the_verb_takes_the_uncertainty_and_the_skeleton_places_it(bound):
     assert [row[0] for row in table['rows']] == list(found.channels)
     assert table['rows'][0][-1] == 'met'
     del report.blocks[at]
+
+
+# ---- cross-axis and limit channels ---------------------------------------------
+
+
+def test_the_cross_axis_and_limit_rows_are_in_the_table_with_the_profile():
+    import numpy as np
+    from test_requirement import LEVEL, LINES, PSD_DIM, notched
+
+    from visualdynamics.core.data import Psd
+
+    profile = Psd(LINES, np.full((1, LINES.size), LEVEL), response_dof=['2Z+'],
+                  ordinate_dim=[PSD_DIM])
+    objects = {'Ref': reference(('1Z+',)), 'Run': notched(),
+               'Limits': profile}
+    report = Report()
+    rr.add(report, single(channels=('1Z+',), cross_axis=[(None, None, 50)],
+                          cross_axis_channels={'2Z+': '1Z+'},
+                          limit_channels=[('2Z+', 'Limits', [(380, 500)])]),
+           source='Ref', measured='Run')
+    off, _note = rr.build(report.blocks[0], objects).results
+    assert [row[2] for row in off['rows'][-2:]] == [rr.ROLES_OFF] * 2, \
+        'the feature off, each role read not judged'
+    assert [row[0] for row in off['rows'][-2:]] == [
+        'Cross-axis', 'Limit channel 2Z+']
+    table, _note = rr.build(report.blocks[0], objects, roles_on=True).results
+    assert off['rows'][0] == table['rows'][0], \
+        'a band row is read whatever the roles'
+    names = [row[0] for row in table['rows']]
+    assert names[-2:] == ['Cross-axis 2Z+ (in-axis 1Z+)', 'Limit channel 2Z+']
+    limit = table['rows'][-1]
+    assert limit[3] == 'met'
+    assert limit[2].startswith('held its limit from 400 to 480 Hz')
+    cross = table['rows'][-2]
+    assert cross[3] == 'not met', 'the limit channel is the cross-axis here'
+    assert 'Finding' not in table['headers']
+    words = rr.build(report.blocks[0], objects,
+                     roles_on=True).words[0]['text']
+    assert 'Limit channels: 2Z+, held at or under its limit profile in ' \
+        'Limits' in words
+    del objects['Limits']
+    kept = rr.read(report.blocks[0], objects, roles=True)
+    assert kept.rows[-1].measured == ("not judged: its limit profile "
+                                      "'Limits' is not there to read"), \
+        'the profile gone is a reading of its own, not the one kept'
+
+
+def _offering(planned=()):
+    """A report with the requirement, the roles and the findings on, its
+    limit channel 2Z+ cutting a notch from 400 to 480 Hz, the notches
+    `planned` named, and finding D-1 entered."""
+    from test_requirement import notched
+
+    from visualdynamics.report import findings
+
+    objects = {'Ref': reference(('1Z+', '2Z+')), 'Run': notched()}
+    report = Report('R', [], features=['skeleton_sections', 'test_requirement',
+                                       'findings', 'cross_axis'])
+    rr.add(report, single(channels=('1Z+',),
+                          limit_channels=[('2Z+', '', list(planned))]),
+           source='Ref', measured='Run')
+    findings.add(report, 'deviation')
+    return report, objects
+
+
+def test_an_unplanned_notch_offers_its_fact_through_the_register():
+    from visualdynamics.report import findings
+
+    report, objects = _offering()
+    (entry,) = findings.register(report)
+    assert entry['draft'] is None
+    draft = rr.draft_finding(report, 'D-1', objects, 'Run', 'Ref',
+                             'Limit channel 2Z+',
+                             provenance={'Run': {'source': 'Run 3'}})
+    assert draft.text == (
+        '2Z+ held its limit profile in a notch the plan does not name: from '
+        '400 to 480 Hz (17 lines), the control up to 3 dB under the '
+        "reference; PSD 'Run', from 'Run 3'.")
+    assert (draft.channel, draft.band, draft.run) == ('2Z+', (400.0, 480.0),
+                                                      'Run 3')
+    assert draft.source == 'Run against Ref, Test plan TP-12, Limit channel 2Z+'
+    (entry,) = findings.register(report)
+    assert entry['draft']['text'] == draft.text, 'offered, through offer'
+    assert entry['fact'] == '', 'a draft fills nothing'
+    table, _note = rr.build(report.blocks[0], objects, roles_on=True,
+                            register=findings.register(report)).results
+    assert table['headers'][-1] == 'Finding'
+    assert table['rows'][-1][-1] == 'D-1', 'the finding its fact went to'
+    assert {row[-1] for row in table['rows'][:-1]} == {''}
+    findings.accept(report, 'D-1')
+    table, _note = rr.build(report.blocks[0], objects, roles_on=True,
+                            register=findings.register(report)).results
+    assert table['rows'][-1][-1] == 'D-1', 'and keeps it once accepted'
+
+
+def test_a_planned_notch_offers_nothing_and_adds_no_column():
+    from visualdynamics.report import findings
+
+    report, objects = _offering(planned=[(380, 500)])
+    with pytest.raises(ValueError, match='offers no finding'):
+        rr.draft_finding(report, 'D-1', objects, 'Run', 'Ref', 'Limit channel 2Z+')
+    assert findings.register(report)[0]['draft'] is None, 'nothing changed'
+    table, _note = rr.build(report.blocks[0], objects, roles_on=True,
+                            register=findings.register(report)).results
+    assert 'Finding' not in table['headers'], 'no row carries one'
+
+
+def test_an_offer_with_no_finding_entered_says_so_and_the_row_is_found():
+    from visualdynamics.report import findings
+
+    report, objects = _offering()
+    table, _note = rr.build(report.blocks[0], objects, roles_on=True,
+                            register=findings.register(report)).results
+    assert table['rows'][-1][-1] == rr.UNENTERED
+    without, _note = rr.build(report.blocks[0], objects, roles_on=True).results
+    assert 'Finding' not in without['headers'], 'no register, no column'
+    count = len(table['rows'])
+    draft = rr.draft_finding(report, 'D-1', objects, 'Run', 'Ref', count)
+    assert draft.channel == '2Z+', 'a row named by its number'
+    for criterion, said in ((count + 1, f'rows 1 to {count}'),
+                            ('Limit channel 9Z+', 'no row'),
+                            (1, 'offers no finding')):
+        with pytest.raises(ValueError, match=said):
+            rr.draft_finding(report, 'D-1', objects, 'Run', 'Ref', criterion)
+    with pytest.raises(ValueError, match='no requirement is bound'):
+        rr.draft_finding(report, 'D-1', objects, 'Ref', 'Run', count)
+    report.features = ['test_requirement', 'cross_axis']
+    with pytest.raises(ValueError, match='does not have'):
+        rr.draft_finding(report, 'D-1', objects, 'Run', 'Ref', count)
+
+
+def test_a_name_two_rows_share_finds_the_one_that_offers():
+    from visualdynamics.report import findings
+
+    # 2Z+ against two cross-axis limits: one row per limit, both named
+    # for the channel, the one below 500 Hz over its limit
+    objects = {'Ref': reference(('1Z+', '2Z+')),
+               'Run': run(1.0, 0.2, hot=[(1, 440, 460, 3.0)])}
+    report = Report('R', [], features=['skeleton_sections', 'test_requirement',
+                                       'findings', 'cross_axis'])
+    rr.add(report, single(channels=('1Z+',),
+                          cross_axis=[(None, 500, 50), (500, None, 100)],
+                          cross_axis_channels={'2Z+': '1Z+'}),
+           source='Ref', measured='Run')
+    findings.add(report, 'deviation')
+    name = 'Cross-axis 2Z+ (in-axis 1Z+)'
+    draft = rr.draft_finding(report, 'D-1', objects, 'Run', 'Ref', name)
+    assert draft.band == (440.0, 460.0)
+    objects['Run'] = run(1.0, 0.2, hot=[(1, 440, 460, 3.0),
+                                        (1, 600, 620, 6.0)])
+    with pytest.raises(ValueError, match='2 rows .* offer a finding'):
+        rr.draft_finding(report, 'D-1', objects, 'Run', 'Ref', name)
+
+
+def test_the_verb_is_journaled_and_drafts_through_the_register(bound):
+    from visualdynamics.report import findings
+
+    project, name, _index = bound
+    report = project[name]
+    project.report_features(name, enable=['skeleton_sections', 'findings',
+                                          'test_requirement', 'cross_axis'])
+    del report.blocks[_index]
+    at_block = project.report_requirement(
+        name, 'Specification', 'Time History PSDs', 'TP', STEPPED,
+        strategy='average', individual_bands=[(None, None, -6, 6)],
+        cross_axis=[(None, None, 1)],
+        cross_axis_channels={'113Z+': '104Z+'})
+    number = project.report_finding(name, kind='anomaly')
+    before = list(project.journal)
+    with pytest.raises(ValueError, match='offers no finding'):
+        project.draft_finding_from_requirement(
+            name, number, 'Time History PSDs', 'Specification', 1)
+    assert project.journal == before, 'a refusal is not journaled'
+    rows_ = rr.read(report.blocks[at_block], project,
+                    project.object_groups).rows
+    at = next(k for k, row in enumerate(rows_, 1)
+              if row.key == 'cross_axis')
+    text = project.draft_finding_from_requirement(
+        name, number, 'Time History PSDs', 'Specification', at)
+    assert text.startswith('113Z+ read up to ')
+    assert 'over its 1 % cross-axis limit' in text
+    assert project.journal[-1] == (
+        f'project.draft_finding_from_requirement({name!r}, {number!r}, '
+        f"'Time History PSDs', 'Specification', {at})")
+    assert findings.find(report, number)['draft']['text'] == text
+
+
+def test_the_verb_takes_the_roles_and_reads_a_named_profile(bound):
+    project, name, _index = bound
+    report = project[name]
+    # DOFs the plate's spectra hold once each
+    at = project.report_requirement(
+        name, 'Specification', 'Time History PSDs', 'TP', STEPPED,
+        strategy='average', individual_bands=[(None, None, -6, 6)],
+        cross_axis=[(None, None, 50)],
+        cross_axis_channels={'113Z+': '104Z+'},
+        limit_channels=[('1301Z+', '@basis:Psd')])
+    stored = report.blocks[at]['requirement']
+    assert stored['cross_axis_channels'] == {'113Z+': '104Z+'}
+    assert stored['limit_channels'] == [['1301Z+', '@basis:Psd', []]]
+    results = rr.read(report.blocks[at], project, project.object_groups)
+    limit = next(row for row in results.rows if row.key == 'limit')
+    assert limit.channel == '1301Z+'
+    assert not limit.measured.startswith('not judged'), \
+        'the symbolic profile resolves to the project object'
+    cross = next(row for row in results.rows if row.key == 'cross_axis')
+    assert cross.channel == '113Z+'
+    assert cross.measured.startswith('worst ')
+
+
+def test_the_roles_are_read_on_the_worker_as_the_page_reads_them():
+    from test_requirement import notched
+
+    objects = {'Ref': reference(('1Z+', '2Z+')), 'Run': notched()}
+    report = Report(features=['test_requirement', 'cross_axis'])
+    rr.add(report, single(channels=('1Z+',), limit_channels=['2Z+']),
+           source='Ref', measured='Run')
+    assert rr.roles_on(report)
+    assert rr.prepare(report, objects) == 1
+    assert rr.pending(report, objects) == [], 'kept under the key the page reads'
+    found = rr.read(report.blocks[0], objects, roles=True)
+    assert found.rows[-1].key == 'limit' and found.rows[-1].excursions
+    report.features = ['test_requirement']
+    assert not rr.roles_on(report)
+    assert rr.pending(report, objects) == report.blocks, \
+        'read again with the feature off'
+    rr.prepare(report, objects)
+    assert rr.read(report.blocks[0], objects,
+                   roles=False).rows[-1].measured == rr.ROLES_OFF
+
+
+def test_a_stored_limit_channel_of_one_or_two_values_reads_its_profile():
+    import numpy as np
+    from test_requirement import LEVEL, LINES, PSD_DIM, notched
+
+    from visualdynamics.core.data import Psd
+
+    profile = Psd(LINES, np.full((1, LINES.size), LEVEL), response_dof=['2Z+'],
+                  ordinate_dim=[PSD_DIM])
+    objects = {'Ref': reference(('1Z+',)), 'Run': notched(),
+               'Limits': profile}
+    report = Report()
+    rr.add(report, single(channels=('1Z+',)), source='Ref', measured='Run')
+    block = report.blocks[0]
+    block['requirement']['limit_channels'] = [['2Z+', 'Limits']]
+    found = rr.read(block, objects, roles=True)
+    assert found.rows[-1].excursions, 'two values: the channel and profile'
+    block['requirement']['limit_channels'] = [['2Z+']]
+    found = rr.read(block, objects, roles=True)
+    assert found.rows[-1].measured == ('not judged: no limit profile is '
+                                       'written at 2Z+')

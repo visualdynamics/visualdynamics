@@ -25,9 +25,9 @@ from visualdynamics.report import features as rf
 from visualdynamics.report import page, plot_conventions, render_html
 
 LIVE = ('skeleton_sections', 'run_sections', 'test_requirement', 'findings',
-        'check_blocks', 'prediction', 'control_uncertainty', 'data_index',
-        'calibration_in_date', 'report_identity', 'record_captions',
-        'plot_conventions', 'shared_decades')
+        'check_blocks', 'prediction', 'cross_axis', 'control_uncertainty',
+        'data_index', 'calibration_in_date', 'report_identity',
+        'record_captions', 'plot_conventions', 'shared_decades')
 #: the built features the test report preset names (responses against
 #: prediction is built but in no preset)
 PRESET_LIVE = ('skeleton_sections', 'run_sections', 'test_requirement',
@@ -153,8 +153,9 @@ def test_a_feature_not_yet_built_is_refused_and_says_so():
         rf.configure(report, enable=[UNBUILT])
     assert rf.reason(UNBUILT, UNBUILT_NEEDS) == 'not yet available'
     # and an unbuilt feature names what it will wait on
-    assert rf.reason('cross_axis') == (
-        'not yet available; waits on Requirement and results')
+    assert rf.reason('flash_report') == (
+        'not yet available; waits on Requirement and results, Identity and '
+        'issue, Findings register')
 
 
 def test_an_unmet_requirement_is_refused_and_named():

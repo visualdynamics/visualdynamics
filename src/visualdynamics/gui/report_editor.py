@@ -762,7 +762,7 @@ class ReportEditor(QWidget):
         requirement is set from a script (`Project.report_requirement`);
         Remove takes the block."""
         from ..core.requirement import TestRequirement, uncertainty_budget
-        from ..report.requirement import read, requirement_lines
+        from ..report.requirement import read, requirement_lines, roles_on
 
         form.addRow(QLabel('<b>Test requirement</b> \u2014 requirement and '
                            'results'))
@@ -775,7 +775,9 @@ class ReportEditor(QWidget):
         object_groups = self.object_groups() if self.object_groups else None
         try:
             lines = requirement_lines(block)
-            found = read(block, objects, object_groups)
+            found = read(block, objects, object_groups,
+                         roles=self.report is not None
+                         and roles_on(self.report))
         except (TypeError, ValueError) as refusal:
             lines, found = [f'Not read: {refusal}.'], None
         if found is not None:

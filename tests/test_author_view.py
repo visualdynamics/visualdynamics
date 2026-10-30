@@ -155,11 +155,15 @@ def test_opening_on_a_table_makes_one_object_in_its_group(window, pump):
     assert 'Channels Specification (2)' not in window.project
     made = window.project['Channels Specification']
     assert 'Channels Specification' in window.project.object_groups[0]['members']
-    # the table selected again carries on at the object it made, not a
-    # second one
+    # the table selected again is the end of the edit: the table, not
+    # the sheet put back on what it made (Brandon, 2026-10-30), and no
+    # second object
     _select(window, pump, 'Channels')
     pump()
-    assert window._author_door[:2] == ('spec', 'Channels Specification')
+    pump()
+    assert window._author_door is None
+    assert not window.data_pane.author_panel.isVisible()
+    assert window._sole_selected_name() == 'Channels', 'not sent back'
     assert _rows_named(window, 'Channels Specification') == 1
     window.tree.clearSelection()
     item = window._item_for_object('Channels Specification')
@@ -240,8 +244,11 @@ def test_a_typed_level_lands_in_si_and_an_untouched_one_stays_exact(window,
         'the typed level is in the object already'
     _select(window, pump, 'Plate')
     assert not panel.isVisible()
+    # another object clicked ended the edit (Brandon, 2026-10-30): back
+    # on the specification it is drawn, one Edit away from the sheet
     _select(window, pump, 'Channels Specification')
-    assert window.author_data_action.isChecked() and panel.isVisible()
+    assert not window.author_data_action.isChecked() and not panel.isVisible()
+    panel = _open(window, pump, on_plot=True)
     assert _text(panel.points, 0, 1) == '0.04'
 
 
@@ -649,6 +656,43 @@ def test_the_sheets_grids_are_the_applications_tables(window, pump):
     panel.pairs.clear_cells()
     pump()
     assert window._drafts[key].pairs[(0, 1)] is None
+
+
+def test_a_pasted_block_lands_whole(window, pump):
+    """Two cells copied and pasted onto two others landed one (Brandon,
+    2026-10-30): the first cell's edit re-rendered the window, which put
+    fresh models on the grids, and the second went into the model just
+    taken down. Every cell of a paste lands, and on the object."""
+    from PySide6.QtCore import QItemSelectionModel
+
+    _populate(window, pump)
+    _select(window, pump, 'Channels')
+    panel = _open(window, pump)
+    key = window._author_door[1]
+    assert _type(panel.points, 0, 1, '0.5') and _type(panel.points, 0, 2, '0.25')
+    pump()
+    model = panel.points.model()
+    selection = panel.points.selectionModel()
+    for column in (1, 2):
+        selection.select(model.index(0, column),
+                         QItemSelectionModel.SelectionFlag.Select)
+    panel.points.copy()
+    panel.points.clearSelection()
+    selection.select(model.index(1, 1), QItemSelectionModel.SelectionFlag.Select)
+    applied, rejected = panel.points.paste()
+    pump()
+    assert (applied, rejected) == (2, 0)
+    draft = window._drafts[key]
+    assert draft.levels[0][1] == pytest.approx(draft.levels[0][0])
+    assert draft.levels[1][1] == pytest.approx(draft.levels[1][0]), \
+        'the second cell of the block landed too'
+    assert _text(panel.points, 1, 2) == '0.25'
+    made = window.project['Channels Specification']
+    for k, dof in enumerate(CONTROLS[:2]):
+        record = next(i for i in range(made.num_records)
+                      if made.response_dof[i] == dof == made.reference_dof[i])
+        assert np.real(made.ordinate[record][1]) == \
+            pytest.approx(draft.levels[k][1]), f'{dof} on the object'
 
 
 def test_scale_selected_scales_what_is_selected(window, pump):

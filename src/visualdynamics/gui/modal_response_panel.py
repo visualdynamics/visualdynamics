@@ -2,11 +2,12 @@
 each mode to keep, what it is computed from, a preview, and the button
 that computes it.
 
-It opens on a time history with force channels selected together with a
-shape set: the whole set for every mode, or the modes picked in its
-grid. The plot previews the modal responses over the start of the
-record; Compute runs the project's `compute_modal_responses`, which
-puts them in a new time history linked beside the forces (principle 13:
+It opens on a time history with force channels, or a CPSD of forces,
+selected together with a shape set: the whole set for every mode, or
+the modes picked in its grid. The plot previews the modal responses
+over the start of the record, or each mode's response autospectrum for
+a CPSD; Compute runs the project's `compute_modal_responses`, which
+puts them in a new object linked beside the forces (principle 13:
 select, see, set, apply).
 """
 
@@ -53,8 +54,8 @@ class ModalResponsePanel(QWidget):
         grid.addWidget(self.note, 7, 0, 1, 2)
         self.apply_button: QPushButton = QPushButton('Compute')
         self.apply_button.setToolTip(
-            'Append the modal responses to the time history, replacing '
-            'any computed earlier through this set')
+            'Compute the modal responses as an object of their own, '
+            'beside the forces')
         self.apply_button.clicked.connect(
             lambda: self.apply_asked.emit(self.quantity()))
         grid.addWidget(self.apply_button, 8, 0, 1, 2)
@@ -75,8 +76,11 @@ class ModalResponsePanel(QWidget):
 
     def show_reading(self, *, modes: str = '—', forces: str = '—',
                      samples: str = '—', highest: str = '—',
-                     note: str = '') -> None:
-        """The rows under the setting, and the note under them."""
+                     note: str = '', lines: bool = False) -> None:
+        """The rows under the setting, and the note under them; `lines`
+        when the forces are a density, whose length is in frequency
+        lines rather than samples."""
+        self._derived['samples'][0].setText('Lines' if lines else 'Samples')
         for key, value in (('modes', modes), ('forces', forces),
                            ('samples', samples), ('highest', highest)):
             self._derived[key][1].setText(value)

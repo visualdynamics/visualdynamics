@@ -229,6 +229,9 @@ def expands(data: DataArray, shapes: ShapeSet) -> bool:
     reads as modal, or it holds modal records beside physical ones
     (`modal_records`).
 
+    Modal forces do not expand (many force distributions give one
+    modal force), so a record holding only those is not expandable.
+
     Parameters
     ----------
     data : DataArray
@@ -241,8 +244,24 @@ def expands(data: DataArray, shapes: ShapeSet) -> bool:
     bool
         True when there is something modal to expand.
     """
-    return (reads_as(data, shapes) == 'modal'
-            or bool(modal_records(data, shapes)))
+    # a modal force CPSD from Transform was offered Expand and refused
+    # it when pressed (Brandon, 2026-10-30): principle 1
+    records = (range(data.num_records) if reads_as(data, shapes) == 'modal'
+               else modal_records(data, shapes))
+    return any(_expands(data, i) for i in records)
+
+
+def _expands(data, i):
+    """Whether record i is a motion the expansion carries: a modal
+    force, or a quantity that never came through a transform, is not.
+    An FRF's records are expanded as a matrix, so each counts."""
+    from .data import Frf, Psd, channel_quantities
+
+    if isinstance(data, Frf):
+        return True
+    dim = data.known_dim(i)
+    quantities = channel_quantities(dim) if isinstance(data, Psd) else (dim,)
+    return all(_physical_quantity(q) in MOTIONS for q in quantities)
 
 
 @dataclass

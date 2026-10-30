@@ -36,7 +36,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -326,6 +326,16 @@ class AuthorPanel(QWidget):
         self._unit_system = None
         self._sheet: Sheet | None = None
         self._loading = False
+        # a cell's edit is handed on a tick later, so a paste, a fill or
+        # a Batch Edit is handed on once, after its last cell. Handed on
+        # at once, the first cell's edit re-rendered the window, which
+        # put fresh models on the grids, and the rest of a pasted block
+        # went into the model just taken down: two cells pasted, one
+        # landed (Brandon, 2026-10-30)
+        self._settle: QTimer = QTimer(self)
+        self._settle.setSingleShot(True)
+        self._settle.setInterval(0)
+        self._settle.timeout.connect(self._edits_settled)
 
         grid = QGridLayout(self)
         grid.setContentsMargins(8, 8, 8, 8)
@@ -615,8 +625,10 @@ class AuthorPanel(QWidget):
             self._loading = False
 
     def _model_changed(self, *_args) -> None:
-        if self._loading:
-            return
+        if not self._loading:
+            self._settle.start()
+
+    def _edits_settled(self) -> None:
         if self._sheet is not None and (self._sheet.reordered
                                         or self._sheet.spread):
             # a frequency typed between two others moved its row, or an

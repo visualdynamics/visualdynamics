@@ -231,18 +231,34 @@ def test_the_panes_two_numbers_solve_and_show_the_modes(window, pump):
     window.add_object('Skin', _plate_geometry())
     select_objects(window, pump, 'Skin')
     panel = _modes(window, pump)
-    panel.top_box.setValue(800.0)
+    assert panel.count_box.value() == 30
+    panel.count_box.setValue(11)
     panel.damping_box.setValue(1.5)
     panel.solve_button.click()
     pump()
     shapes = window.project['Skin Modes']
-    assert shapes.frequency.max() <= 800.0
+    assert shapes.num_shapes == 11
     assert np.allclose(shapes.damping, 0.015), 'percent in, fraction stored'
     assert window.current_object() is shapes
     message = window.statusBar().currentMessage()
-    assert message.startswith('Skin Modes: ') and '6 rigid' in message
-    assert ("project.solve_modes('Skin', maximum_frequency=800.0, "
+    assert message.startswith('Skin Modes: 11 modes to ') and '6 rigid' in message
+    assert f'{shapes.frequency.max():.4g} Hz' in message
+    assert ("project.solve_modes('Skin', num_modes=11, "
             'damping=0.015)') in window.project.journal
+
+
+def test_the_pane_asks_for_a_count_and_no_frequency(window, pump):
+    """The highest frequency came off the pane (Brandon, 2026-10-30):
+    reaching it took the sparse solve several passes, and a count is
+    one. The count includes the rigid-body modes."""
+    from PySide6.QtWidgets import QLabel
+
+    window.add_object('Skin', _plate_geometry())
+    select_objects(window, pump, 'Skin')
+    panel = _modes(window, pump)
+    names = [label.text() for label in panel.fem_section.findChildren(QLabel)]
+    assert 'Modes' in names and 'Highest frequency' not in names
+    assert 'rigid-body' in panel.count_box.toolTip()
 
 
 def test_a_group_without_properties_is_named_before_the_solve(window, pump):
@@ -751,7 +767,7 @@ def test_the_act_moves_the_strip_bar_and_puts_it_away(window, pump, monkeypatch)
 
     window.add_object('Skin', _plate_geometry())
     select_objects(window, pump, 'Skin')
-    _modes(window, pump).top_box.setValue(800.0)
+    _modes(window, pump).count_box.setValue(12)
     seen = []
     real = window._strip_tick
 

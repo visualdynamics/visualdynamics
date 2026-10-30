@@ -225,6 +225,10 @@ def has_phase(values: ArrayLike) -> bool:
     values = np.asarray(values)
     if not np.iscomplexobj(values):
         return False
+    # the finite values only: one nan line (a rigid mode's displacement
+    # at 0 Hz) made both maxima nan, the comparison False, and a CPSD
+    # built with it lost the phase of every cross term (2026-10-30)
+    values = values[np.isfinite(values)]
     real = np.abs(values.real).max(initial=0.0)
     return bool(np.abs(values.imag).max(initial=0.0) > REAL_FLOOR * real)
 

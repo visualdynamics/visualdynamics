@@ -102,11 +102,20 @@ class DrawerTab(QAbstractButton):
         # the fill and never removed it. Source mode writes the
         # transparent pixels rather than blending them, which would do
         # nothing.
-        painter.setCompositionMode(
-            QPainter.CompositionMode.CompositionMode_Source)
-        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
-        painter.setCompositionMode(
-            QPainter.CompositionMode.CompositionMode_SourceOver)
+        #
+        # Only while the tab is native, though. Since the launcher keeps
+        # native windows to the 3-D views (AA_DontCreateNativeWidget-
+        # Siblings, 2026-10-14) the tab is an ordinary widget: Qt paints
+        # what is under it first, and the erase wiped that out of the
+        # native ancestor's surface. Windows shows those pixels as
+        # black, so the tab sat in a black box in light mode (Brandon,
+        # 2026-10-30).
+        if self.internalWinId():
+            painter.setCompositionMode(
+                QPainter.CompositionMode.CompositionMode_Source)
+            painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+            painter.setCompositionMode(
+                QPainter.CompositionMode.CompositionMode_SourceOver)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         palette = self.palette()
         role = QPalette.ColorRole.Button

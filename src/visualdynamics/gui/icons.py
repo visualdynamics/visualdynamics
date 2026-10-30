@@ -1329,24 +1329,6 @@ def _spectrum(dy=0.0):
                    for i in range(49)])
 
 
-def _draw_as_specification(painter, color):
-    """The spectrum between two dashed limits: read this PSD as the
-    requirement it is."""
-    painter.setPen(_pen(color, 5))
-    painter.drawPath(_spectrum())
-    dashed = QPen(QColor(color), 3)
-    dashed.setStyle(Qt.PenStyle.DashLine)
-    painter.setPen(dashed)
-    painter.drawPath(_spectrum(-9))
-    painter.drawPath(_spectrum(9))
-
-
-def _draw_as_psd(painter, color):
-    """The spectrum alone: read this specification as a plain PSD."""
-    painter.setPen(_pen(color, 5))
-    painter.drawPath(_spectrum())
-
-
 def _draw_map(painter, color):
     """Banded rows: every channel at once, coherence as color."""
     painter.setPen(Qt.PenStyle.NoPen)
@@ -2725,8 +2707,10 @@ def control_icon(name: str) -> QIcon:
      'sine': _draw_sine,
      'refresh': _draw_refresh,
      'copy': _draw_copy, 'movie': _draw_movie,
-     'as_specification': _draw_as_specification,
-     'as_psd': _draw_as_psd}.get(
+     # a conversion wears what it makes: the object's own glyph, in the
+     # control gray (Brandon, 2026-10-30)
+     'as_specification': _draw_specification,
+     'as_psd': _draw_psd}.get(
          name, _draw_default)(painter, CONTROL_COLOR)
     painter.end()
     icon = QIcon(pixmap)

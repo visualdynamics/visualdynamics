@@ -25,6 +25,11 @@ transient, and a rigid-body mode (ωᵣ = 0, whose displacement under a
 net force grows without bound, as it does) are all answered as they are.
 The record starts at rest.
 
+A force CPSD is answered the same way, line by line in frequency:
+each mode's frequency response H_r carries the modal force density to
+the modal response density, every mode against every other
+(`modal_response_density`).
+
 The response is a displacement, a velocity or an acceleration of each
 modal coordinate, `M1` … `Mn` named as everywhere in the package (the
 mode's 1-based index in its set). Through a mass-normalized set the
@@ -49,9 +54,9 @@ from collections.abc import Sequence
 import numpy as np
 
 from ..units import UNKNOWN
-from .data import TimeHistory
+from .data import Psd, TimeHistory, channel_quantities
 from .shapes import ShapeSet
-from .transform import MODAL, modal_dofs, reads_as, to_modal
+from .transform import MODAL, _hermitian_block, modal_dofs, reads_as, to_modal
 
 #: what each response is, by the name a user picks
 QUANTITIES: dict[str, str] = {'displacement': 'length',
@@ -230,6 +235,172 @@ def modal_responses(history: TimeHistory, shapes: ShapeSet, *,
     return TimeHistory(t, rows, response_dof=[names[k] for k in chosen],
                        ordinate_dim=dim, dimension_hint=hint,
                        comment=comments)
+
+
+# ---- a force CPSD: the same responses, line by line ----------------------
+
+#: (iw)^p for each quantity, the power `ShapeSet.modal_frf` takes
+POWERS: dict[str, int] = {'displacement': 0, 'velocity': 1,
+                          'acceleration': 2}
+
+
+def modal_force_density(density: Psd, shapes: ShapeSet,
+                        records: Sequence[int] | None = None) -> Psd:
+    """The modal force CPSD the density's forces put on the set,
+    S_pp = Φᵀ S_ff Φ, every mode against every mode.
+
+    It is `transform.to_modal` on the force records alone (the matrix
+    needs every cross term between the drives, and a density of
+    autospectra alone is refused there); a density whose records are
+    already the set's modal forces is used as it is, as a time history's
+    are in `modal_forces`.
+
+    Raises
+    ------
+    ValueError
+        If the set is complex or has no modes, no picked record is a
+        force density, or as `transform.to_modal`.
+    """
+    if shapes.num_shapes == 0:
+        raise ValueError('the set has no modes')
+    if shapes.is_complex:
+        raise ValueError('the set is complex: a real force cannot drive a '
+                         'complex modal coordinate here')
+    picked = (list(range(density.num_records)) if records is None
+              else sorted({int(i) for i in records}))
+    wanted = f'{MODAL_FORCE}**2/frequency'
+    if reads_as(density, shapes, picked) == 'modal':
+        modal = [i for i in picked if density.known_dim(i) == wanted]
+        if not modal:
+            raise ValueError('no modal force density picked: the modal '
+                             'response is the answer to forces')
+        return _subset(density, modal)
+    forces = [i for i in picked
+              if channel_quantities(density.known_dim(i)) == ('force', 'force')]
+    if not forces:
+        raise ValueError('no force density picked: the modal response is '
+                         'the answer to forces, and the density holds none '
+                         'between the DOFs picked')
+    projected, _report = to_modal(density, shapes, records=forces)
+    return projected
+
+
+def _subset(density, records):
+    out = copy.copy(density)
+    for attribute in ('response_dof', 'reference_dof', 'ordinate_dim',
+                      'dimension_hint'):
+        values = getattr(density, attribute)
+        if values is not None:
+            setattr(out, attribute, [values[i] for i in records])
+    out.ordinate = np.asarray(density.ordinate)[records]
+    return out
+
+
+def modal_response_density(density: Psd, shapes: ShapeSet, *,
+                           modes: Sequence[int] | None = None,
+                           quantity: str = 'acceleration',
+                           records: Sequence[int] | None = None,
+                           cross: bool = True) -> Psd:
+    """Each picked mode's response to a force CPSD, as the modal
+    response CPSD: every picked mode against every other, `M1` … `Mn`.
+
+    The forces are made modal first, S_pp = Φᵀ S_ff Φ
+    (`modal_force_density`). Each mode answers its modal force through
+    its own frequency response H_r (`ShapeSet.modal_frf`), so with each
+    cross term stored as conj(Q_r)·Q_s, as `DataArray.compute_cpsds`
+    stores it,
+
+        S_qq,rs = conj(H_r) S_pp,rs H_s.
+
+    Expanding it through the shapes, Φ S_qq Φᵀ, gives conj(H) S_ff Hᵀ
+    with H the FRF matrix `ShapeSet.synthesize_frf` gives, so the
+    response density at the DOFs is the same as driving the synthesized
+    FRFs with the forces. A rigid mode's acceleration at 0 Hz is finite
+    (its (iω)² cancels its −ω² exactly); its displacement and velocity
+    there are nan.
+
+    Parameters
+    ----------
+    density : Psd
+        A force CPSD with every cross term between the drives (zero
+        terms, uncorrelated drives, are terms), or the set's modal force
+        CPSD.
+    shapes : ShapeSet
+        Real modes with frequency, damping and modal mass.
+    modes : sequence of int, optional
+        Which modes, by index in the set from zero; every mode when
+        omitted.
+    quantity : str, default 'acceleration'
+        'displacement', 'velocity' or 'acceleration' of each modal
+        coordinate.
+    records : sequence of int, optional
+        Which of the density's records are the forces; every force
+        record when omitted.
+    cross : bool, default True
+        Every pair of picked modes; with False, each mode's
+        autospectrum alone, as a preview draws them.
+
+    Returns
+    -------
+    Psd
+        One record per pair of picked modes (per mode without `cross`),
+        on the density's lines.
+
+    Raises
+    ------
+    ValueError
+        If the quantity is not one of `QUANTITIES`, a mode is not in the
+        set, the density is on proportional bands or written at
+        breakpoints (its `interpolation` not 'bin'), or as
+        `modal_force_density`.
+    """
+    if quantity not in QUANTITIES:
+        raise ValueError(f'{quantity!r} is not a response: one of '
+                         f'{", ".join(QUANTITIES)}')
+    chosen = (list(range(shapes.num_shapes)) if modes is None
+              else sorted({int(k) for k in modes}))
+    bad = [k for k in chosen if not 0 <= k < shapes.num_shapes]
+    if bad:
+        raise ValueError(f'no mode {bad[0] + 1}: the set has '
+                         f'{shapes.num_shapes}')
+    if not chosen:
+        raise ValueError('no mode picked')
+    if getattr(density, 'bandwidth', None) is not None:
+        # a mode's response varies across a band, so one H at its center
+        # would not be the band's response
+        raise ValueError('the density is on proportional bands: a mode '
+                         'answers line by line, and a band holds many')
+    if getattr(density, 'interpolation', 'bin') != 'bin':
+        # H at the breakpoints alone: four breakpoints gave four lines
+        # and every mode between them was missed, without a word
+        # (Brandon, 2026-10-30, on the BARC model)
+        raise ValueError('the density is written at breakpoints: a mode '
+                         'answers line by line, and the modes between '
+                         'breakpoints would be missed. Read it onto lines '
+                         'first, at a frequency spacing (the '
+                         "specification sheet's Interpolated form)")
+    forces = modal_force_density(density, shapes, records)
+    names = modal_dofs(shapes)
+    entries = {(forces.response_dof[i], forces.reference_dof[i]): i
+               for i in range(forces.num_records)}
+    block = _hermitian_block(entries, np.asarray(forces.ordinate),
+                             [names[k] for k in chosen], 'modal force density')
+    terms = shapes.modal_frf(density.abscissa, chosen, POWERS[quantity]).T
+    picked = [names[k] for k in chosen]
+    if cross:
+        response = (np.conj(terms)[:, :, None] * block * terms[:, None, :]
+                    ).reshape(len(density.abscissa), -1).T
+        rows = [k for k in picked for _l in picked]
+        columns = [l for _k in picked for l in picked]
+    else:
+        diagonal = np.diagonal(block, axis1=1, axis2=2)
+        response = (np.conj(terms) * diagonal * terms).T
+        rows = columns = picked
+    known = all(forces.ordinate_dim[i] != UNKNOWN for i in entries.values())
+    dim = f'{MODAL[QUANTITIES[quantity]]}**2/frequency'
+    return Psd(density.abscissa, response, response_dof=rows,
+               reference_dof=columns, ordinate_dim=dim if known else UNKNOWN,
+               dimension_hint=None if known else dim)
 
 
 #: the most samples a preview computes, so that it answers while the

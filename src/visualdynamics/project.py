@@ -3394,7 +3394,8 @@ class Project(dict):
                                 records: Sequence[int] | None = None,
                                 name: str | None = None) -> str:
         """Compute how each mode of a shape set answers the forces in a
-        time history, as a new time history (Compute Modal Responses).
+        time history or a force CPSD, as a new object (Compute Modal
+        Responses).
 
         The history's force channels are made modal through the set
         (pᵣ = Σ φₖᵣ fₖ; channels already holding the set's modal forces
@@ -3406,10 +3407,20 @@ class Project(dict):
         history's group, and the history itself is not changed; `merge`
         puts the forces and the responses back in one object.
 
+        A force CPSD is made modal the same way, S_pp = Φᵀ S_ff Φ, and
+        each mode answers it through its own frequency response, giving
+        the modal response CPSD with every picked mode against every
+        other (`core.modal_response.modal_response_density`). The CPSD
+        needs every cross term between the drives, as Transform does;
+        terms stored as zero, drives that are uncorrelated, are terms.
+        `expand` takes the result to the set's DOFs, where it is the
+        response density the synthesized FRFs give.
+
         Parameters
         ----------
         source : str or object
-            The time history, by name or as the object itself.
+            The time history or force CPSD, by name or as the object
+            itself.
         shapes : str or object
             The shape set: real modes with frequency, damping and modal
             mass, by name or as the object itself.
@@ -3420,10 +3431,10 @@ class Project(dict):
             Which modes, by index in the set from zero; all of them when
             omitted.
         records : sequence of int, optional
-            Which of the history's records are the forces; every force
-            channel when omitted.
+            Which of the source's records are the forces; every force
+            record when omitted.
         name : str, optional
-            What to call the result. Defaults to the history's name
+            What to call the result. Defaults to the source's name
             followed by 'Modal Responses'.
 
         Returns
@@ -3435,12 +3446,14 @@ class Project(dict):
         Raises
         ------
         TypeError
-            If `source` is not a time history or `shapes` not a shape
-            set.
+            If `source` is neither a time history nor a CPSD, or
+            `shapes` not a shape set.
         ValueError
             As `core.modal_response.modal_responses`: no force on a DOF
             the set covers, a complex set, a mode not in the set, uneven
-            sampling, or a quantity it does not know.
+            sampling, or a quantity it does not know; for a CPSD, also a
+            missing cross term between the drives or a density on
+            proportional bands.
         """
         # The responses were appended to the force history until Brandon
         # asked for an object of their own beside it, the way Transform
@@ -8602,16 +8615,30 @@ def _mergeable(project, objects):
 #: the verbs that act on a *combination* of objects, with what makes
 #: one — the bar's answer for a multi-selection (`selection_verbs`)
 def _forces_and_modes(objects: Sequence[Any]) -> bool:
-    """One time history holding a force channel and one real shape set
-    (`compute_modal_responses`)."""
-    histories = [o for o in objects if isinstance(o, TimeHistory)]
+    """One time history holding a force channel, or one CPSD holding a
+    force density, and one real shape set (`compute_modal_responses`)."""
+    sources = [o for o in objects if isinstance(o, (TimeHistory, Psd))]
     sets = [o for o in objects if isinstance(o, ShapeSet)]
-    if len(objects) != 2 or len(histories) != 1 or len(sets) != 1:
+    if len(objects) != 2 or len(sources) != 1 or len(sets) != 1:
         return False
     if sets[0].num_shapes == 0 or sets[0].is_complex:
         return False
-    return 'force' in histories[0].ordinate_dim or any(
-        dim == 'modal_force' for dim in histories[0].ordinate_dim)
+    return holds_forces(sources[0])
+
+
+def holds_forces(data: Any) -> bool:
+    """Whether a time history holds a force or modal force channel, or a
+    CPSD a force or modal force density: what Compute Modal Responses
+    answers."""
+    from .core.data import channel_quantities
+
+    if isinstance(data, Psd):
+        # the CPSD of forces (Brandon, 2026-10-30), answered line by line
+        return any(channel_quantities(data.known_dim(i))[0]
+                   in ('force', 'modal_force')
+                   for i in range(data.num_records))
+    return isinstance(data, TimeHistory) and any(
+        dim in ('force', 'modal_force') for dim in data.ordinate_dim)
 
 
 _SELECTION_APPLIES: tuple = (
@@ -8822,17 +8849,22 @@ def _answered(project, source, params):
     """The modal responses `compute_modal_responses` makes, from its
     recipe: computed first and when refreshed."""
     from .core.filters import carrying_marks
-    from .core.modal_response import modal_responses
+    from .core.modal_response import modal_response_density, modal_responses
 
     shapes = params.get('shapes')
     if shapes not in project:
         raise ValueError(f'{source!r} was answered through {shapes!r}, '
                          'which is gone')
     history, modal_set = project[source], project[shapes]
-    if not isinstance(history, TimeHistory):
-        raise TypeError(f'{source!r} is not a time history')
+    if not isinstance(history, (TimeHistory, Psd)):
+        raise TypeError(f'{source!r} is neither a time history nor a CPSD')
     if not isinstance(modal_set, ShapeSet):
         raise TypeError(f'{shapes!r} is not a shape set')
+    if isinstance(history, Psd):
+        return modal_response_density(
+            history, modal_set, modes=params.get('modes'),
+            quantity=params.get('quantity', 'acceleration'),
+            records=params.get('records'))
     responses = modal_responses(
         history, modal_set, modes=params.get('modes'),
         quantity=params.get('quantity', 'acceleration'),

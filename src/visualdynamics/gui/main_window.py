@@ -1518,12 +1518,16 @@ class MainWindow(QMainWindow):
         # pencil; Brandon, 2026-10-22: the channel table only, wearing
         # the specification's own glyph
         self.author_action: QAction = QAction(
-            control_icon('new_specification'), 'Specification', self)
+            control_icon('new_specification'), 'Create Specification', self)
         self.author_action.setCheckable(True)
+        # named for what it makes, not where (Brandon, 2026-10-30): it
+        # opens at picked rows as well as at the control channels. The
+        # bar shows icons only, so the name leads the tooltip, as it
+        # does on every act (`panes.offer_acts`)
         self.author_action.setToolTip(
-            "Write a specification at this channel table's control "
-            'channels — breakpoints, every cross term, the bands — and '
-            'make it')
+            'Create Specification — write one at the picked channels, '
+            'or at the control channels when none are picked: its '
+            'breakpoints, every cross term and the bands')
         self.author_action.triggered.connect(self._author_toggled)
         # a channel table's control loops (Brandon, 2026-10-28): which
         # environment's control channels the Control column shows, and
@@ -5028,6 +5032,13 @@ class MainWindow(QMainWindow):
                 return [(verb, label, icon, getattr(self, handler), applicable[verb])
                         for verb, label, icon, handler in self.ACTS
                         if verb == 'plan_instrumentation' and verb in applicable]
+            # rows picked in one channel table's grid: a signal at the
+            # picked reference channels (Brandon, 2026-10-30)
+            if not names and self._signal_source() is not None:
+                return [(verb, label, icon, getattr(self, handler),
+                         'Generate a signal at the picked reference channels')
+                        for verb, label, icon, handler in self.ACTS
+                        if verb == 'generate_signal']
         names = [name for name in names if name in self.objects]
         if not names:
             return []
@@ -5042,9 +5053,8 @@ class MainWindow(QMainWindow):
             # modes picked in a set's grid are not objects, so the pair
             # table never sees them; the act reads the picks itself
             acts += [(verb, label, icon, getattr(self, handler),
-                      ('Compute how each picked mode answers the forces '
-                       'in the time history, and append the modal '
-                       'responses'))
+                      ('Compute how each picked mode answers the forces, '
+                       'as modal responses of their own'))
                      for verb, label, icon, handler in self.ACTS
                      if verb == 'compute_modal_responses']
         cross = (len(names) == 1 and isinstance(self.objects[names[0]], Psd)
@@ -11252,20 +11262,29 @@ class MainWindow(QMainWindow):
         when it is open on it already. The pane previews the signal as
         its settings change, and its button makes it
         (`Project.generate_signal`)."""
-        from ..core.signals import kinds_for, suggested
+        from ..core.signals import suggested
 
-        name = self._sole_selected_name()
-        obj = self.objects.get(name) if name is not None else None
-        if obj is None or not kinds_for(obj):
+        source = self._signal_source()
+        if source is None:
             self._show_status('Select a spectrum, a sine specification, a '
                               'shock specification or a channel table to '
                               'generate a signal from')
             return
-        if self._signaling is not None and self._signaling['source'] == name:
+        name, dofs = source
+        obj = self.objects[name]
+        if (self._signaling is not None and self._signaling['source'] == name
+                and self._signaling['dofs'] == dofs):
             self.close_signal_pane()
             return
         self._author_wanted = False
         settings = self._signal_settings.get(name) or suggested(obj)
+        if isinstance(obj, ChannelTable):
+            # the picks, or every reference when the whole table is
+            # selected: settings remembered from a pick never narrow a
+            # later opening on the whole table
+            from dataclasses import replace
+
+            settings = replace(settings, dofs=dofs)
         if settings.kind == 'srs' and self.data_pane.stroke_settings:
             # the shaker the Stroke reading was last read against, so a
             # synthesis opens on the ratings already typed for a pulse
@@ -11275,8 +11294,40 @@ class MainWindow(QMainWindow):
             settings = replace(settings, **{
                 key: value for key, value in held.items()
                 if getattr(settings, key, None) is None})
-        self._signaling = {'source': name, 'settings': settings}
+        self._signaling = {'source': name, 'dofs': dofs, 'settings': settings}
         self.render_current()
+
+    def _signal_source(self) -> tuple[str, tuple[str, ...] | None] | None:
+        """What Generate Signal would be made from: `(name, dofs)` for
+        one object selected alone (`dofs` None), or for rows picked in
+        one channel table's grid, the DOFs of the picked rows that are
+        reference channels (Brandon, 2026-10-30: a sub-selection of the
+        table drives only those). None when neither, or when no picked
+        row is a reference with a DOF, since there is nothing to drive."""
+        from ..core.signals import kinds_for
+
+        references = self.selected_references()
+        tables = {name for kind, name, _obj, _detail in references
+                  if kind == 'channel'}
+        if (len(tables) == 1 and all(kind == 'channel'
+                                     for kind, *_rest in references)):
+            name = next(iter(tables))
+            table = self.objects.get(name)
+            if not isinstance(table, ChannelTable):
+                return None
+            rows = {detail for _kind, _name, _obj, detail in references}
+            if None in rows:
+                return None
+            names = table.dof_strings()
+            dofs = tuple(dict.fromkeys(
+                names[row] for row in table.chosen('reference')
+                if row in rows and names[row]))
+            return (name, dofs) if dofs else None
+        name = self._sole_selected_name()
+        obj = self.objects.get(name) if name is not None else None
+        if obj is None or not kinds_for(obj):
+            return None
+        return name, None
 
     def close_signal_pane(self) -> None:
         """Put the Generate Signal pane away, keeping what it showed."""
@@ -11297,7 +11348,8 @@ class MainWindow(QMainWindow):
         put away (it stands down when the selection moves on)."""
         if self._signaling is None:
             return None
-        if (self._sole_selected_name() != self._signaling['source']
+        if (self._signal_source() != (self._signaling['source'],
+                                      self._signaling['dofs'])
                 or self._signaling['source'] not in self.objects):
             self._signaling = None
             self._synthesis_settle.stop()
@@ -11584,12 +11636,16 @@ class MainWindow(QMainWindow):
 
     def _modal_candidates(self):
         """(history, set, modes, records) when the selection is one time
-        history with a force channel (whole, or its channels picked) and
-        one real shape set (whole for every mode, or modes picked in its
-        grid), a geometry allowed beside them; None otherwise."""
+        history with a force channel, or one CPSD with a force density
+        (whole, or its records picked), and one real shape set (whole
+        for every mode, or modes picked in its grid), a geometry allowed
+        beside them; None otherwise."""
+        from ..project import holds_forces
+
         histories, sets, modes, picks = [], [], {}, {}
         for kind, name, obj, detail in self.selected_references():
-            if isinstance(obj, TimeHistory) and kind in ('object', 'record'):
+            if (isinstance(obj, (TimeHistory, Psd))
+                    and kind in ('object', 'record')):
                 if name not in histories:
                     histories.append(name)
                 if kind == 'record':
@@ -11612,8 +11668,7 @@ class MainWindow(QMainWindow):
         history, shapes = self.objects[histories[0]], self.objects[sets[0]]
         if shapes.num_shapes == 0 or shapes.is_complex:
             return None
-        if not ('force' in history.ordinate_dim
-                or 'modal_force' in history.ordinate_dim):
+        if not holds_forces(history):
             return None
         picked_modes = modes.get(sets[0])
         records = picks.get(histories[0])
@@ -11622,14 +11677,16 @@ class MainWindow(QMainWindow):
                 None if records is None else sorted(set(records)))
 
     def modal_response_act(self) -> None:
-        """Open Compute Modal Responses on the selected time history and
-        shape set (its picked modes, or all), or put it away when it is
-        open on them. The pane previews the responses; Compute makes them
-        a time history of their own (`Project.compute_modal_responses`)."""
+        """Open Compute Modal Responses on the selected time history or
+        force CPSD and shape set (its picked modes, or all), or put it
+        away when it is open on them. The pane previews the responses;
+        Compute makes them an object of their own
+        (`Project.compute_modal_responses`)."""
         candidates = self._modal_candidates()
         if candidates is None:
-            self._show_status('Select a time history with force channels and '
-                              'a shape set (or some of its modes) together')
+            self._show_status('Select a time history with force channels, or '
+                              'a CPSD of forces, and a shape set (or some of '
+                              'its modes) together')
             return
         if self._modaling is not None and self._modaling['key'] == candidates:
             self.close_modal_pane()
@@ -11673,6 +11730,8 @@ class MainWindow(QMainWindow):
         panel = self.data_pane.modal_response_panel
         panel.show_settings(self._modal_quantity)
         panel.show()
+        if isinstance(history, Psd):
+            return self._render_modal_density(history, shapes, modes)
         forces = [i for i in (state['records'] or range(history.num_records))
                   if history.ordinate_dim[i] in ('force', 'modal_force')]
         top = float(np.max(shapes.frequency[modes]))
@@ -11704,6 +11763,43 @@ class MainWindow(QMainWindow):
         said = (f'{name} through {set_name}: modal {self._modal_quantity} of '
                 f'{len(modes)} mode{"s" * (len(modes) != 1)} from '
                 f'{len(forces)} force channel{"s" * (len(forces) != 1)}')
+        return said + (f' | {status}' if status else '')
+
+    def _render_modal_density(self, density, shapes, modes) -> str:
+        """The pane beside a preview for a force CPSD: each mode's
+        response autospectrum, on the density's lines."""
+        from ..core.data import channel_quantities
+        from ..core.modal_response import modal_response_density
+
+        state = self._modaling
+        name, set_name = state['history'], state['shapes']
+        panel = self.data_pane.modal_response_panel
+        picked = state['records'] or range(density.num_records)
+        drives = {density.response_dof[i] for i in picked
+                  if channel_quantities(density.known_dim(i))[0]
+                  in ('force', 'modal_force')}
+        try:
+            autos = modal_response_density(
+                density, shapes, modes=modes, quantity=self._modal_quantity,
+                records=state['records'], cross=False)
+        except ValueError as why:
+            panel.show_reading(note=f'Cannot compute: {why}', lines=True)
+            self.data_pane.clear()
+            return f'{name} through {set_name}: {why}'
+        top = float(np.max(shapes.frequency[modes]))
+        last = float(density.abscissa[-1])
+        above = int(np.sum(shapes.frequency[modes] > last))
+        panel.show_reading(
+            modes=f'{len(modes)} of {shapes.num_shapes}',
+            forces=str(len(drives)), samples=f'{len(density.abscissa):,}',
+            highest=f'{top:.4g} Hz', lines=True,
+            note=(f'{above} mode{"s" * (above != 1)} above the highest '
+                  f'line, {last:g} Hz' if above else ''))
+        status = self._render_series([(f'{name} modal {self._modal_quantity}',
+                                       autos, None)])
+        said = (f'{name} through {set_name}: modal {self._modal_quantity} '
+                f'density of {len(modes)} mode{"s" * (len(modes) != 1)} '
+                f'from {len(drives)} force channel{"s" * (len(drives) != 1)}')
         return said + (f' | {status}' if status else '')
 
     def _modal_quantity_chosen(self, quantity: str) -> None:
@@ -11804,14 +11900,22 @@ class MainWindow(QMainWindow):
         if door is not None and self._author_door is not None:
             was = set(self._door_names(self._author_door))
             now = set(self._door_names(door))
-            # the object a door made carries the sheet on (the set or
-            # table it was made from, and back): the same sheet, not
-            # another door
-            made = {self._author_made.get(name) for name in was | now}
-            made |= {self._author_made.get(self._author_door[1]),
-                     self._author_made.get(door[1])}
-            if not (was & now) and not ((was | now) & made):
+            # the object a door made carries the sheet on from the set
+            # or table it was made from: the same sheet, not another
+            # door. Forward only (Brandon, 2026-10-30): carried back as
+            # well, clicking the table while editing what it made
+            # showed the table for a moment and put the sheet back on
+            # the specification, since the table's door goes on to what
+            # it made. Another object clicked is the end of the edit
+            made = {self._author_made.get(name) for name in was}
+            made.add(self._author_made.get(self._author_door[1]))
+            if not (was & now) and not (now & made):
                 self._author_wanted = False
+        elif door is None and any(kind == 'object' for kind, *_rest
+                                  in self.selected_references()):
+            # an object that is no door at all ends the edit too, so
+            # coming back to the specification shows it, not the sheet
+            self._author_wanted = False
         wanted = door is not None and self._author_wanted
         if wanted:
             # a sheet that cannot be opened stands down, saying why,
@@ -19120,7 +19224,7 @@ class MainWindow(QMainWindow):
         element groups' properties, and add the mode set to the
         geometry's object group.
 
-        The highest frequency to solve to and the damping to give every
+        The number of modes to solve for and the damping to give every
         mode are the Modes pane's, finite element kind."""
         # The two numbers were asked in two dialogs until the pane took
         # them (Brandon, 2026-10-22).
@@ -19130,13 +19234,13 @@ class MainWindow(QMainWindow):
                               'properties (the Element Groups table) to solve')
             return
         panel = self.scene.modes_panel
-        top, percent = panel.maximum_frequency(), panel.damping() * 100.0
+        count, percent = panel.num_modes(), panel.damping() * 100.0
         acted = self._act_on(
             Geometry, 'Select a geometry to solve',
             lambda name, **options: self._run_long(
-                f'Solving modes to {top:g} Hz…', self.project.solve_modes,
+                f'Solving for {count} modes…', self.project.solve_modes,
                 name, **options),
-            maximum_frequency=top, damping=percent / 100.0)
+            num_modes=count, damping=percent / 100.0)
         if acted is None:
             return
         name, _geometry, added = acted
@@ -19145,8 +19249,9 @@ class MainWindow(QMainWindow):
         # after the show, which writes its own count to the status bar
         self.show_object(added)
         self._show_status(
-            f'{added}: {shapes.num_shapes} modes to {top:g} Hz, {rigid} '
-            f'rigid, {percent:g}% damping — linked to {name}')
+            f'{added}: {shapes.num_shapes} modes to '
+            f'{float(shapes.frequency.max()):.4g} Hz, {rigid} rigid, '
+            f'{percent:g}% damping — linked to {name}')
 
     def convert_to_specification_act(self) -> None:
         """The bar's Convert to Specification: the selected PSD or CPSD

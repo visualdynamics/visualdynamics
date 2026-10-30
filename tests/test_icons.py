@@ -145,3 +145,14 @@ def test_a_solid_icon_is_its_face_and_the_depth_behind_it(qt_app, solid, face, e
     assert (round((x0 + x1) / 2), round((y0 + y1) / 2)) in _ink(child_icon(solid), 64)
     extra = _ink(child_icon(solid), 16) - _ink(child_icon(face), 16)
     assert len(extra) >= 8, f'{solid} reads as {face} at tree size: {len(extra)} pixels apart'
+
+
+@pytest.mark.parametrize('act, made', [('as_specification', 'Specification'),
+                                       ('as_psd', 'Psd')])
+def test_a_conversion_wears_the_glyph_of_what_it_makes(qt_app, act, made):
+    """Convert to Specification and Convert to PSD (or CPSD) draw the
+    tree's icon for the object they make, in the control gray rather
+    than a glyph of their own (Brandon, 2026-10-30)."""
+    from visualdynamics.gui.icons import control_icon
+
+    assert _ink(control_icon(act), 64) == _ink(type_icon(made), 64)

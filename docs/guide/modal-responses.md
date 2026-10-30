@@ -100,6 +100,47 @@ The forces' time history and the shape set together also offer
 channels into modal forces and uses none of the set's frequencies,
 damping or masses.
 
+## From a force CPSD
+
+A CPSD of forces works the same way. Select it together with a shape
+set and press **Compute Modal Responses**. The forces are made modal as
+a matrix, S_pp = Φᵀ S_ff Φ, and each mode answers through its own
+frequency response,
+
+    Hᵣ(ω) = (iω)ᵖ / [mᵣ (ωᵣ² − ω² + 2i ζᵣ ωᵣ ω)],
+
+with p = 0, 1 or 2 for displacement, velocity or acceleration. The
+modal response CPSD is then
+
+    S_qq,rs = conj(Hᵣ) S_pp,rs Hₛ,
+
+every mode against every other, on the CPSD's own frequency lines. The
+(iω)ᵖ is inside the modal term, so a rigid-body mode's acceleration at
+0 Hz is finite (its displacement and velocity there are left blank). A
+modal force CPSD, as **Transform to Modal Coordinates** makes it, is
+used as it is.
+
+The CPSD needs every cross term between the drives, because the forces
+are combined as a matrix. Cross terms stored as zero are fine: that is
+the case of drives that are not correlated. A density that holds only
+autospectra at several drives is refused, as Transform refuses it. A
+density on octave bands is refused too, since a mode's response
+changes across a band, and so is a density written at breakpoints,
+since the modes between two breakpoints would be missed. Read a
+breakpoint specification onto lines first, at a frequency spacing (the
+specification sheet's *Interpolated* form).
+
+The pane shows the number of frequency lines instead of samples, and
+the plot previews each mode's response autospectrum. **Compute** makes
+a CPSD named for the forces followed by *Modal Responses*. **Expand to
+Physical Responses** on it and the shape set gives the response CPSD
+at every DOF the set covers, S_xx = Φ S_qq Φᵀ. This is the same as
+driving the FRFs synthesized from the set with the force CPSD, cross
+terms and phase included.
+
+A modal force CPSD is not offered **Expand to Physical Responses**,
+since many force distributions give the same modal force.
+
 ## Units
 
 Through a mass-normalized set (one with a mass unit) the modal
@@ -120,7 +161,8 @@ are left with an undeclared unit and a hint of what they are.
 returns the new object's name, `'Run 1 Modal Responses'`. `modes`
 counts from zero. The calculation is in `core.modal_response`:
 `modal_forces` for the projection and `modal_responses` for the
-responses as a time history.
+responses as a time history; `modal_force_density` and
+`modal_response_density` for a CPSD.
 
     project.expand(made, 'FE Modes')
 

@@ -11,7 +11,10 @@ object they were made from.
 ## What a signal is made from
 
 Select one object and press **Generate Signal** on the bar. The pane
-beside the plot offers only the kinds that object makes.
+beside the plot offers only the kinds that object makes. Rows picked in
+a channel table's grid also offer it, and the signal is made at the
+picked rows that are reference channels; a picked response row is
+left out.
 
 | Selected | Kinds | At |
 |---|---|---|

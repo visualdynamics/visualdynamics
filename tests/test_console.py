@@ -236,7 +236,10 @@ def test_the_tab_erases_what_was_under_it_before_it_paints(window, pump):
     from PySide6.QtCore import QPoint
     from PySide6.QtGui import QColor, QImage, QPainter
 
-    tab = window.console.tab
+    from visualdynamics.gui.drawer_tab import DrawerTab
+
+    tab = DrawerTab('Console')
+    tab.winId()                       # native, as it was under the VTK view
     tab.resize(tab.sizeHint())
     pump()
     image = QImage(tab.size() * 2, QImage.Format.Format_ARGB32_Premultiplied)
@@ -250,6 +253,38 @@ def test_the_tab_erases_what_was_under_it_before_it_paints(window, pump):
         assert image.pixelColor(*corner).alpha() == 0, (
             f'the corner {corner} kept the fill: {image.pixelColor(*corner).getRgb()}')
     assert image.pixelColor(w // 2, h // 2).alpha() == 255, 'the body is painted'
+
+
+def test_an_ordinary_tab_keeps_what_was_painted_under_it(qt_app, pump):
+    """The erase is for a native tab only. An ordinary one (the launcher
+    keeps native windows to the 3-D views) is painted after what is
+    under it, and erasing wiped that out: Windows showed the cleared
+    pixels as black, a black box round the tab in light mode (Brandon,
+    2026-10-30). Grabbed over a light parent, the corners outside the
+    flared outline must be the parent's color."""
+    from PySide6.QtGui import QColor, QPalette
+    from PySide6.QtWidgets import QWidget
+
+    from visualdynamics.gui.drawer_tab import DrawerTab
+
+    light = QColor(240, 240, 240)
+    host = QWidget()
+    palette = host.palette()
+    palette.setColor(QPalette.ColorRole.Window, light)
+    host.setPalette(palette)
+    host.setAutoFillBackground(True)
+    tab = DrawerTab('Console', host)
+    tab.resize(tab.sizeHint())
+    host.resize(tab.width() + 20, tab.height() + 20)
+    tab.move(10, 10)
+    assert not tab.internalWinId()
+    pump()
+    image = host.grab().toImage()
+    ratio = image.devicePixelRatio()
+    for x, y in ((12, 12), (10 + tab.width() - 3, 12)):
+        pixel = image.pixelColor(int(x * ratio), int(y * ratio))
+        assert pixel.getRgb()[:3] == light.getRgb()[:3] and \
+            pixel.alpha() == 255, f'the corner ({x}, {y}) is {pixel.getRgb()}'
 
 
 def test_a_huge_journal_line_is_shown_elided_and_kept_whole(window, pump):

@@ -239,9 +239,12 @@ saved in the `.vdyn` file. *Solve Modes* (`project.solve_modes`) then
 builds the model from the element groups (`fem.Model.from_geometry`)
 and adds its normal modes to the geometry's group. It is in the Modes
 pane: turn on *Modes* on the 3-D view's bar, choose *Finite element*
-(offered once the element groups have properties), and set the highest
-frequency wanted and the damping to give every mode (a script can ask
-for a number of modes instead). The pane counts the nodes, elements and
+(offered once the element groups have properties), and set the number
+of modes wanted, rigid-body modes included, and the damping to give
+every mode. The lowest modes are solved, in one pass, and the status
+bar says the highest frequency reached. A script can ask for every mode
+up to a frequency instead (`maximum_frequency=`); on a large model that
+takes several passes, so a count is faster. The pane counts the nodes, elements and
 DOFs to be solved, and names any element group still without
 properties. The model is free-free unless
 ground groups hold it, and a free-free solution has its six rigid-body
@@ -640,7 +643,7 @@ on the time history is not corrected on the table, or the reverse.
 ### Writing and editing a specification
 
 A specification can also be written in the app, on a sheet that opens
-two ways. *Specification* on the table bar of a single channel table
+two ways. *Create Specification* on the table bar of a single channel table
 starts one at the table's control channels: the channels with Control
 checked, or every motion channel when none is. With rows picked in the
 table's grid it starts at those rows instead, whatever their role, so a
@@ -673,7 +676,10 @@ low end under it, and reads both out under the breakpoints; both
 are offered on the breakpoints form
 ([Writing a random specification by slope](breakpoint-slopes.md)). While the sheet is
 open the plot is the 2-D one, since every editing gesture happens
-there, and the 3-D stage is off until the sheet closes.
+there, and the 3-D stage is off until the sheet closes. Selecting
+another object in the tree closes it, the channel table it was made
+from included; coming back to the specification shows it drawn, with
+*Edit* to open the sheet again.
 
 The warning and abort bands are not on the sheet: they are on the
 plot, as the shaded zones. While the sheet is open each edge of each

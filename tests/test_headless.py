@@ -351,6 +351,10 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_modal': ('core.modal_response.preview_responses, then '
                           'plot_series; Project.compute_modal_responses '
                           'makes them a time history of their own'),
+        '_render_modal_density': ('core.modal_response.modal_response_density'
+                                  '(cross=False), then plot_series; '
+                                  'Project.compute_modal_responses makes the '
+                                  'full CPSD'),
         '_render_author': ('core.author.ModalSpecificationDraft.preview, '
                            'then plot_data; its areas and running rms '
                            'plot_breakpoints'),

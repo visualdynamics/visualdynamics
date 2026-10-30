@@ -688,19 +688,63 @@ class ShapeSet:
                             / self.modal_mass[picked])
                 out[row] = residues @ ratio + np.conj(residues) @ mirror
             return out
+        terms = self.modal_frf(frequencies, picked, power)
+        for row, (response, reference) in enumerate(zip(response_dof,
+                                                        reference_dof)):
+            out[row] = (shape_at(response) * shape_at(reference)) @ terms
+        return out
+
+    def modal_frf(self, frequencies: ArrayLike,
+                  modes: Sequence[int] | None = None,
+                  power: int = 0) -> np.ndarray:
+        """Each real mode's own frequency response, one row per mode:
+
+            H_r(f) = (iw)^power / (m_r (w_r^2 - w^2 + 2i z_r w_r w))
+
+        with w = 2*pi*f. It is the modal coordinate's response to a unit
+        modal force, and the term `synthesize_frf` sums over the modes,
+        so a physical FRF is phi_jr phi_kr H_r summed over r. `power`
+        goes inside, as there: a rigid mode's accelerance at 0 Hz is
+        1/m_r, and its displacement and velocity there are nan.
+
+        Parameters
+        ----------
+        frequencies : array_like
+            The lines, in Hz.
+        modes : sequence of int, optional
+            Which modes, by index from zero, in increasing order; all of
+            them when omitted.
+        power : int, default 0
+            0 displacement, 1 velocity, 2 acceleration per modal force.
+
+        Returns
+        -------
+        numpy.ndarray
+            (modes, lines), complex.
+
+        Raises
+        ------
+        ValueError
+            If the set is complex: a complex mode has no second-order
+            modal coordinate.
+        """
+        if self.is_complex:
+            raise ValueError('the set is complex: its modes have no '
+                             'second-order modal response')
+        frequencies = np.asarray(frequencies, dtype=np.float64)
+        picked = (np.arange(self.num_shapes) if modes is None
+                  else np.asarray(sorted({int(m) for m in modes}), dtype=int))
+        omega = 2.0 * np.pi * frequencies
+        omega_r = 2.0 * np.pi * self.frequency[picked]
+        zeta = self.damping[picked]
         denominator = ((omega_r ** 2)[:, None] - (omega ** 2)[None, :]
                        + 2j * (zeta * omega_r)[:, None] * omega[None, :])
         with np.errstate(divide='ignore', invalid='ignore'):
-            ratio = numerator[None, :] / denominator
+            ratio = ((1j * omega) ** power)[None, :] / denominator
         rigid, still = omega_r == 0.0, omega == 0.0
         if rigid.any() and still.any():
             ratio[np.ix_(rigid, still)] = 1.0 if power == 2 else np.nan
-        for row, (response, reference) in enumerate(zip(response_dof,
-                                                        reference_dof)):
-            residues = (shape_at(response) * shape_at(reference)
-                        / self.modal_mass[picked])
-            out[row] = residues @ ratio
-        return out
+        return ratio / np.asarray(self.modal_mass[picked])[:, None]
 
     def delete_modes(self, indices: Sequence[int]) -> None:
         """Remove the given modes in place.

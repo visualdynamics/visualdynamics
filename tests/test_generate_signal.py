@@ -322,6 +322,75 @@ def test_a_channel_table_offers_an_impulse_and_previews_its_rolloff(window,
     assert panel._editors['level'].isVisibleTo(panel), 'a typed target'
 
 
+def _pick_rows(window, pump, name, rows):
+    window.tree.setCurrentItem(window._item_for_object(name))
+    window.tree.clearSelection()
+    grid = window.record_grids[name]
+    for row in rows:
+        grid.item(row, 0).setSelected(True)
+    pump()
+
+
+def _table_bar_acts(window):
+    # the bar's own actions: the act dict keeps the ones taken off it
+    actions = window.__dict__.get('_table_acts', {}).get('actions', {}).values()
+    return [action.text() for action in window.table_bar.actions()
+            if action in actions and action.isVisible()]
+
+
+def test_picked_rows_of_a_table_drive_only_their_references(window, pump):
+    """A sub-selection of the table is a signal at the picked reference
+    channels (Brandon, 2026-10-30); a picked response is left out."""
+    window.add_object('Channels', _table())
+    pump()
+    _pick_rows(window, pump, 'Channels', [1, 2])
+    assert 'Generate Signal' in _table_bar_acts(window), \
+        'picked rows put the act on the bar'
+    window.generate_signal_act()
+    pump()
+    panel = window.data_pane.signal_panel
+    assert panel.isVisible()
+    assert window._signaling['settings'].dofs == ('2Y+',)
+    panel.kind_box.setCurrentIndex(panel.kind_box.findData('impulse'))
+    pump()
+    assert 'at 2Y+' in window.statusBar().currentMessage()
+    assert '1X+' not in window.statusBar().currentMessage()
+    panel.apply_button.click()
+    pump()
+    made = [n for n in window.objects if n.startswith('Channels Impulse')]
+    assert made and list(window.objects[made[0]].response_dof) == ['2Y+']
+    _pick_rows(window, pump, 'Channels', [2])
+    assert 'Generate Signal' not in _table_bar_acts(window), \
+        'a response alone has nothing to drive'
+    assert window._signal_source() is None
+
+
+def test_the_whole_table_after_a_pick_drives_every_reference(window, pump):
+    """Settings remembered from a pick do not narrow the whole table."""
+    window.add_object('Channels', _table())
+    pump()
+    _pick_rows(window, pump, 'Channels', [1])
+    window.generate_signal_act()
+    pump()
+    assert window._signaling['dofs'] == ('2Y+',)
+    window.data_pane.signal_panel._editors['duration'].setValue(2.0)
+    pump()
+    assert window._signal_settings['Channels'].dofs == ('2Y+',)
+    _pick_rows(window, pump, 'Channels', [0])
+    assert window._signaling is None, 'a different pick stands the pane down'
+    panel = _open(window, pump, 'Channels')
+    settings = window._signaling['settings']
+    assert panel.isVisible() and settings.dofs is None
+    assert settings.duration == 2.0, 'the edit is kept, the pick is not'
+
+
+def test_the_sheet_button_is_named_for_what_it_makes(window):
+    assert window.author_action.text() == 'Create Specification'
+    tip = window.author_action.toolTip()
+    assert 'Create Specification — write one at the picked channels' in tip, \
+        'icons only: the name leads the tooltip'
+
+
 def test_a_generated_burst_opens_in_its_own_frames(window, pump, tmp_path):
     """The analysis settings shown on a generated burst are its bursts:
     50 rectangular frames, not one Hann frame of the whole record, and a

@@ -188,6 +188,12 @@ that is not an alpha.
   burst random, periodic random, an impulse or a pulse, and sine, made
   at the reference DOFs from a specification or a channel table
 
+## Running a test
+
+- [The run log file](run-log.md): what happened on the floor, entry by
+  entry, corrected without editing, each test's entries chained by
+  hash, kept by one writer with a second copy
+
 ## Reports
 
 - [Reports](reports.md): symbolic bindings, live text, and one file out

@@ -58,6 +58,8 @@
     - [Checking a replication reference](replication-fit.md)
     - [Judging a replication by segment](replication-segments.md)
     - [Generating reference signals](generating-signals.md)
+- Running a test:
+    - [The run log file](run-log.md)
 - Reports:
     - [Reports](reports.md)
     - [A report plot's caption](report-captions.md)

@@ -439,6 +439,58 @@ def test_a_channel_table_opens_at_its_control_channels(window, pump):
                       SpecificationDraft)
 
 
+def test_picked_rows_of_a_table_open_the_sheet_at_those_rows(window, pump):
+    """The reference rows, picked in the table's grid: a force CPSD at
+    the drives with no copy of the table to make (Brandon, 2026-10-29)."""
+    window.import_paths([fixture_path('plate', 'random.nc4')])
+    pump()
+    table = window.project['Channel Table']
+    references = [i for i, role in enumerate(table.roles()) if role == 'reference']
+    assert references and not any(table.controls()[references])
+    item = window._item_for_object('Channel Table')
+    window.tree.setCurrentItem(item)
+    window.tree.clearSelection()
+    grid = window.record_grids['Channel Table']
+    for row in references:
+        grid.item(row, 0).setSelected(True)
+    pump()
+    assert window.author_action.isVisible(), 'picked rows are a door'
+    panel = _open(window, pump)
+    wanted = [table.dof_strings()[i] for i in references]
+    made = window.project['Channel Table Specification']
+    assert made.response_dof[:len(wanted)] == wanted
+    assert set(made.response_dof) == set(wanted), 'those rows and no other'
+    assert set(made.ordinate_dim) == {f'{table.types()[references[0]]}**2/frequency'}
+    pump()
+    assert 'Channel Table Specification (2)' not in window.project, 'one made'
+    assert _columns(panel.points) == 1 + len(wanted)
+
+
+def test_picked_rows_are_not_the_whole_tables_sheet(window, pump):
+    """Opened on the whole table first, then on its reference rows: the
+    rows get a specification of their own, not the control channels'."""
+    window.import_paths([fixture_path('plate', 'random.nc4')])
+    pump()
+    table = window.project['Channel Table']
+    _select(window, pump, 'Channel Table')
+    _open(window, pump)
+    whole = window.project['Channel Table Specification']
+    references = [i for i, role in enumerate(table.roles()) if role == 'reference']
+    window.author_action.setChecked(False)
+    window._author_toggled(False)
+    item = window._item_for_object('Channel Table')
+    window.tree.setCurrentItem(item)
+    window.tree.clearSelection()
+    grid = window.record_grids['Channel Table']
+    for row in references:
+        grid.item(row, 0).setSelected(True)
+    pump()
+    _open(window, pump)
+    wanted = {table.dof_strings()[i] for i in references}
+    assert set(window.project['Channel Table Specification (2)'].response_dof) == wanted
+    assert window.project['Channel Table Specification'] is whole
+
+
 # ---- the sheet's width is the user's ----------------------------------------
 
 
@@ -1031,6 +1083,26 @@ def test_the_dashed_lines_step_where_the_shading_steps(window, pump):
     assert x0[-1] == x1[0] == 40.0, 'the two pieces meet at the corner'
     assert y0[-1] == pytest.approx(0.002 * 10 ** 0.6), "the skirt's own +6 dB"
     assert y1[0] == pytest.approx(0.002 * 10 ** 0.9), "the plateau's own +9 dB"
+
+
+def test_the_dashed_lines_follow_the_power_law_between_breakpoints():
+    """On a linear frequency axis a straight line between two
+    breakpoints runs off the zone the shading draws; the handle is the
+    law the sheet's specification is read by (Brandon, 2026-10-29)."""
+    from visualdynamics.core.author import SpecificationDraft
+    from visualdynamics.core.compliance import log_interpolate
+    from visualdynamics.plot.bands import band_edges
+
+    draft = SpecificationDraft(
+        ['1Z+'], ['acceleration'], [10.0, 100.0, 1000.0],
+        [[0.0002, 0.002, 0.0002]])
+    spec = draft.preview()
+    for side in ('lower', 'upper'):
+        (_run, x, y), = band_edges(draft, 0, visualdynamics.SI)[('abort', side)]
+        assert len(x) > 20, 'filled in between the breakpoints'
+        assert x[0] == 10.0 and x[-1] == 1000.0
+        zone = log_interpolate(x, spec.abscissa, spec.limits[f'abort_{side}'][0])
+        assert y == pytest.approx(zone, rel=1e-9), 'on the shading\'s edge'
 
 
 def test_a_failure_in_a_sheet_gesture_is_said_and_logged(window, pump, tmp_path,

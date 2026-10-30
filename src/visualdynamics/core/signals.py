@@ -686,8 +686,9 @@ def flat_spectrum(dofs: str | Sequence[str], *, quantity: str,
         What the signal is, such as 'force'; the target is its density.
     band : (float, float)
         Lowest and highest frequency, Hz.
-    level : float
-        The density across the band, in `unit`.
+    level : float or sequence of float
+        The density across the band, in `unit`: one for every DOF, or
+        one per DOF.
     unit : str, optional
         The density's unit, such as 'N**2/Hz'; SI when omitted.
 
@@ -701,9 +702,11 @@ def flat_spectrum(dofs: str | Sequence[str], *, quantity: str,
     if not 0.0 < low < high:
         raise ValueError(f'a band from {low:g} to {high:g} Hz: the lowest '
                          'has to be above zero and below the highest')
-    if not np.isfinite(level) or level <= 0.0:
-        raise ValueError(f'a level of {level:g}: it has to be above zero')
-    levels = np.full((len(dofs), 2), float(level))
+    each = np.broadcast_to(np.asarray(level, dtype=float), (len(dofs),))
+    bad = each[~(np.isfinite(each) & (each > 0.0))]
+    if len(bad):
+        raise ValueError(f'a level of {bad[0]:g}: it has to be above zero')
+    levels = np.repeat(each[:, None], 2, axis=1)
     return Specification([low, high], levels, response_dof=dofs,
                          ordinate_dim=quantity + _DENSITY,
                          ordinate_unit=unit)
@@ -769,14 +772,18 @@ class SignalSettings:
     at: float = 0.0
     #: an impulse's width, the half-sine's half cycle, in seconds
     width: float = 1e-3
-    #: a classical pulse: its shape, its signed peak in SI (an impulse's
-    #: peak too), its duration and its edge, in seconds
+    #: a classical pulse: its shape, its signed peak (an impulse's peak
+    #: too) in each reference channel's own unit, its duration and its
+    #: edge, in seconds
     shape: str = 'half-sine'
     peak: float = 1.0
     pulse_duration: float = 0.011
     edge: float | None = None
     #: a target typed rather than read: the band, Hz, and the density
-    #: across it, in SI, for random from a channel table
+    #: across it, in each reference channel's own unit squared per hertz,
+    #: for random from a channel table
+    # in the channel's unit, not SI (Brandon, 2026-10-29): 1.0 typed for
+    # an lbf table gave 1 N**2/Hz, 4.4 times low in force
     band: tuple[float, float] = (20.0, 2000.0)
     level: float = 1.0
     #: a sine specification's tone; the first when None
@@ -862,9 +869,10 @@ def kinds_for(source: Any) -> tuple[str, ...]:
 
 
 def _references(table: Any, dofs: Sequence[str] | None
-                ) -> tuple[list[str], str]:
-    """A channel table's reference channels and the one quantity they
-    measure, or a refusal naming what is missing."""
+                ) -> tuple[list[str], str, np.ndarray]:
+    """A channel table's reference channels, the one quantity they
+    measure and each one's factor from its own unit to SI (1 where no
+    unit is written), or a refusal naming what is missing."""
     rows = table.chosen('reference')
     if not rows:
         raise ValueError("no channel's role is reference: mark the channels "
@@ -885,7 +893,46 @@ def _references(table: Any, dofs: Sequence[str] | None
     if len(quantities) > 1:
         raise ValueError(f'the references measure {", ".join(sorted(quantities))}; '
                          'a signal is one quantity: pick the DOFs of one')
-    return wanted, quantities.pop()
+    quantity = quantities.pop()
+    from ..units import si_factor
+
+    units = table['unit']
+    factors = np.array([si_factor(str(units[rows[own.index(d)]]), quantity)
+                        if units[rows[own.index(d)]] else 1.0 for d in wanted])
+    return wanted, quantity, factors
+
+
+def reference_unit(table: Any, dofs: Sequence[str] | None = None) -> str:
+    """The unit a typed level and peak are read in for a channel
+    table's reference channels: the one unit they share, SI's where
+    none is written, or '' when they differ (each is then read in its
+    own channel's unit).
+
+    Parameters
+    ----------
+    table : ChannelTable
+        The table.
+    dofs : sequence of str, optional
+        Which reference DOFs; all of them when omitted.
+
+    Returns
+    -------
+    str
+        The unit, such as 'lbf', or ''.
+
+    Raises
+    ------
+    ValueError
+        As `generate` refuses the table's references.
+    """
+    from ..units import SI
+
+    wanted, quantity, _factors = _references(table, dofs)
+    rows, own = table.chosen('reference'), table.dof_strings()
+    units = table['unit']
+    written = {str(units[i]) or SI.unit(quantity) for i in rows
+               if own[i] in wanted}
+    return written.pop() if len(written) == 1 else ''
 
 
 def generate(source: Any, settings: SignalSettings, *,
@@ -935,20 +982,26 @@ def generate(source: Any, settings: SignalSettings, *,
                           dofs=s.dofs, progress=progress).history
     spectrum, dofs = source, s.dofs
     if isinstance(source, ChannelTable):
-        dofs, quantity = _references(source, s.dofs)
-        if s.kind == 'impulse':
-            return impulse_history(dofs, quantity=quantity,
-                                   duration=s.duration,
-                                   sample_rate=s.sample_rate, at=s.at,
-                                   peak=s.peak, width=s.width)
-        if s.kind == 'pulse':
-            pulse = ClassicalPulse(s.shape, s.peak, s.pulse_duration, s.edge)
-            return impulse_history(dofs, quantity=quantity,
-                                   duration=s.duration,
-                                   sample_rate=s.sample_rate, at=s.at,
-                                   pulse=pulse)
+        dofs, quantity, factors = _references(source, s.dofs)
+        if s.kind in ('impulse', 'pulse'):
+            if s.kind == 'impulse':
+                history = impulse_history(dofs, quantity=quantity,
+                                          duration=s.duration,
+                                          sample_rate=s.sample_rate, at=s.at,
+                                          peak=s.peak, width=s.width)
+            else:
+                pulse = ClassicalPulse(s.shape, s.peak, s.pulse_duration,
+                                       s.edge)
+                history = impulse_history(dofs, quantity=quantity,
+                                          duration=s.duration,
+                                          sample_rate=s.sample_rate, at=s.at,
+                                          pulse=pulse)
+            # the peak was typed in each channel's unit; the history is
+            # SI, and a pulse is linear in its peak
+            history.ordinate = history.ordinate * factors[:, None]
+            return history
         spectrum = flat_spectrum(dofs, quantity=quantity, band=s.band,
-                                 level=s.level)
+                                 level=s.level * factors ** 2)
     common = {'dofs': dofs, 'correlated': s.correlated, 'seed': s.seed}
     if s.kind == 'random':
         return random_history(spectrum, duration=s.duration,
@@ -975,9 +1028,9 @@ def target_of(source: Any, settings: SignalSettings) -> Psd | None:
     if settings.kind not in RANDOM_KINDS:
         return None
     if isinstance(source, ChannelTable):
-        dofs, quantity = _references(source, settings.dofs)
+        dofs, quantity, factors = _references(source, settings.dofs)
         return flat_spectrum(dofs, quantity=quantity, band=settings.band,
-                             level=settings.level)
+                             level=settings.level * factors ** 2)
     return source
 
 

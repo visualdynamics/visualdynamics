@@ -642,7 +642,9 @@ on the time history is not corrected on the table, or the reverse.
 A specification can also be written in the app, on a sheet that opens
 two ways. *Specification* on the table bar of a single channel table
 starts one at the table's control channels: the channels with Control
-checked, or every motion channel when none is. *Edit* on the plot bar of a
+checked, or every motion channel when none is. With rows picked in the
+table's grid it starts at those rows instead, whatever their role, so a
+force CPSD is written at the reference channels. *Edit* on the plot bar of a
 specification opens the specification itself, with all of its channels
 or only the ones whose records are picked in the tree. Several
 specifications opened at once share one sheet, with a column per
@@ -843,10 +845,11 @@ and linked to its source in one call:
 | a geometry | `generate_rigid_body_modes`; `set_view`; `add_solid_block`, `add_solid_cylinder`, `add_solid_cone`, `add_solid_sphere`, `add_solid_section`, `add_solid_hole`, `add_solid_plate` and `add_solid_disk`, then `combine_solids`, `pattern_solids` and `mesh_solids`; `tie_elements`, a patch of elements tied rigidly to an element group or a second patch; `merge_coincident_nodes` and `align_meshes` once it has elements, for the whole geometry or the element groups named by `groups=`; `merge_groups`, element groups of one element type and the same properties made one; `solve_modes` once its element groups carry their properties (a material and a thickness or a section per group in the Element Groups table, a material alone for a group of solids), which builds the finite element model and solves it |
 | the project itself | `new_geometry`, an empty geometry to build in; `new_channel_table`, an empty channel table to fill in; `generate_report` |
 | a channel table | `add_channels`, blank channels numbered on from its highest |
-| a PSD, CPSD or specification | `compute_octave`, with a specification's warning and abort limits banded along with it; `read_as_specification` for a PSD that is a requirement, and `read_as_psd` for a specification without limits |
+| a PSD, CPSD or specification | `compute_octave`, with a specification's warning and abort limits banded along with it; `convert_to_specification` for a PSD that is a requirement, and `convert_to_psd` for a specification, its limits left out |
 | a shape set, specification or channel table | `author_specification` |
 | an FRF | `fit_modes` |
 | two shape sets | `project_onto_basis`, `match_modes` |
+| a shape set and a channel table on another geometry | `project_onto_basis`, the modes at the table's channels |
 | any object with a sibling of its type | `merge` |
 
 Every object also works with the whole-project verbs (`add`, `remove`,

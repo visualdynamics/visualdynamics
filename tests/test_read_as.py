@@ -47,27 +47,37 @@ def run(imported):
 def test_a_psd_reads_as_a_specification_and_back_in_place(run):
     run.link('Target', 'Time History PSDs')
     group = run.object_group_of('Target')
-    assert run.read_as_specification('Target') == 'Target'
+    assert run.convert_to_specification('Target') == 'Target'
     spec = run['Target']
     assert isinstance(spec, Specification) and not spec.has_limits
     assert np.array_equal(spec.ordinate, run['Specification'].ordinate)
     assert spec.ordinate_unit == run['Specification'].ordinate_unit
     assert spec.interpolation == 'bin', "a controller's lines step"
     assert run.object_group_of('Target') == group, 'its group kept'
-    assert run.journal[-1] == "project.read_as_specification('Target')"
-    run.read_as_psd('Target')
+    assert run.journal[-1] == "project.convert_to_specification('Target')"
+    run.convert_to_psd('Target')
     assert type(run['Target']) is Psd
-    assert run.journal[-1] == "project.read_as_psd('Target')"
+    assert run.journal[-1] == "project.convert_to_psd('Target')"
 
 
 def test_it_is_offered_only_where_it_applies(run):
     verbs = dict(run.verbs('Target'))
-    assert 'read_as_specification' in verbs and 'read_as_psd' not in verbs
-    assert 'read_as_psd' not in dict(run.verbs('Specification')), \
-        'not with limits: a PSD has nowhere to keep them'
-    assert 'read_as_specification' not in dict(run.verbs('Time History'))
+    assert 'convert_to_specification' in verbs and 'convert_to_psd' not in verbs
+    assert 'convert_to_specification' not in dict(run.verbs('Time History'))
     with pytest.raises(ValueError, match='limits'):
         run['Specification'].as_psd()
+
+
+def test_a_specification_with_limits_converts_without_them(run):
+    # the Specification sheet always writes its bands, so a target made
+    # there could never be converted while limits refused it
+    assert run['Specification'].has_limits
+    assert 'convert_to_psd' in dict(run.verbs('Specification'))
+    ordinate = run['Specification'].ordinate.copy()
+    run.convert_to_psd('Specification')
+    plain = run['Specification']
+    assert type(plain) is Psd and 'limits' not in plain.__dict__
+    assert np.array_equal(plain.ordinate, ordinate)
 
 
 def test_a_banded_psd_reads_as_a_stepped_specification(run):
@@ -86,12 +96,12 @@ def test_the_bar_offers_it_and_the_comparison_follows(window, pump, run):
     window.tree.setCurrentItem(item)
     window.render_current()
     pump()
-    assert 'Read as Specification' in bar_acts(window.data_pane)
-    window.data_pane._acts['actions']['read_as_specification'].trigger()
+    assert 'Convert to Specification' in bar_acts(window.data_pane)
+    window.data_pane._acts['actions']['convert_to_specification'].trigger()
     pump()
     assert isinstance(window.objects['Target'], Specification)
-    assert 'read as a specification' in window.statusBar().currentMessage()
-    assert 'Read as PSD' in bar_acts(window.data_pane)
+    assert 'converted to a specification' in window.statusBar().currentMessage()
+    assert 'Convert to PSD' in bar_acts(window.data_pane)
     window.tree.clearSelection()
     for name in ('Target', 'PSDs'):
         window._item_for_object(name).setSelected(True)
@@ -99,3 +109,38 @@ def test_the_bar_offers_it_and_the_comparison_follows(window, pump, run):
     pump()
     assert window.data_pane.scaling_edit.isVisible(), \
         'a specification beside a measurement is a comparison'
+
+
+def test_the_label_follows_the_object_and_the_limits_are_said(window, pump, run):
+    """Convert to CPSD on a specification with cross terms, Convert to
+    PSD on autospectra alone, and the status line says the limits went."""
+    import copy
+
+    autos = run['Specification']
+    assert autos.is_autospectrum() and autos.has_limits
+    spec = copy.deepcopy(autos)
+    spec.reference_dof[1] = spec.response_dof[0]     # one cross term
+    assert not spec.is_autospectrum()
+    window.add_object('Target', spec)
+    window.add_object('Autos', autos)
+
+    def show(name):
+        window.tree.clearSelection()
+        item = window._item_for_object(name)
+        item.setSelected(True)
+        window.tree.setCurrentItem(item)
+        window.render_current()
+        pump()
+        return bar_acts(window.data_pane)
+
+    acts = show('Target')
+    assert 'Convert to CPSD' in acts and 'Convert to PSD' not in acts
+    acts = show('Autos')
+    assert 'Convert to PSD' in acts and 'Convert to CPSD' not in acts
+    show('Target')
+    window.data_pane._acts['actions']['convert_to_psd'].trigger()
+    pump()
+    assert type(window.objects['Target']) is Psd
+    message = window.statusBar().currentMessage()
+    assert 'converted to a CPSD' in message
+    assert 'limits were left out' in message

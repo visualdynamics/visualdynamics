@@ -277,7 +277,7 @@ from .project_tree import (
     ProjectTree,
 )
 from .record_grid import RecordGrid, channel_quantities
-from .tables import CopyPasteTableView
+from .tables import CopyPasteTableView, wear_item_checks
 
 ROLE_ORIGINAL_NAME = Qt.ItemDataRole.UserRole       # top-level, for renames
 ROLE_POPULATED = Qt.ItemDataRole.UserRole + 2       # lazy children built yet?
@@ -954,6 +954,8 @@ class MainWindow(QMainWindow):
         # window's widgets read the palette as they are made, and other
         # windows are not this constructor's to touch (a crash on CI,
         # 2026-09-27: preferences.wear_appearance)
+        # the style before the palette: a new style brings its own
+        wear_item_checks()
         wear_appearance(refresh=False)
         self.theme_name: str = chosen_scheme()
         colors = resolve_theme(self.theme_name)
@@ -4904,9 +4906,11 @@ class MainWindow(QMainWindow):
         ('add_solid_disk', 'Add Disk', 'solid_disk', 'add_solid_disk_act'),
         ('set_view', 'Set Default View', 'set_view', 'set_view_act'),
         ('add_channels', 'Add Channel', 'add_channel', 'add_channel_act'),
-        ('read_as_specification', 'Read as Specification',
-         'as_specification', 'read_as_specification_act'),
-        ('read_as_psd', 'Read as PSD', 'as_psd', 'read_as_psd_act'),
+        # Convert, not Read as (Brandon, 2026-10-29); the PSD label says
+        # CPSD where the object has cross terms (`acts_for`)
+        ('convert_to_specification', 'Convert to Specification',
+         'as_specification', 'convert_to_specification_act'),
+        ('convert_to_psd', 'Convert to PSD', 'as_psd', 'convert_to_psd_act'),
     )
 
     #: the acts offered on a geometry's Solids row: the shapes a part is
@@ -5036,6 +5040,12 @@ class MainWindow(QMainWindow):
                        'responses'))
                      for verb, label, icon, handler in self.ACTS
                      if verb == 'compute_modal_responses']
+        cross = (len(names) == 1 and isinstance(self.objects[names[0]], Psd)
+                 and not self.objects[names[0]].is_autospectrum())
+        if cross:
+            # the label follows the object (Brandon, 2026-10-29)
+            acts = [(verb, 'Convert to CPSD', *rest) if verb == 'convert_to_psd'
+                    else (verb, label, *rest) for verb, label, *rest in acts]
         if len(names) == 1 and names[0] in self._stale:
             acts.insert(0, ('refresh', 'Recompute', 'refresh',
                             self.refresh_selected,
@@ -11311,9 +11321,17 @@ class MainWindow(QMainWindow):
                              for i in range(obj.num_records)))
         tones = (tuple(t.name for t in obj.tones)
                  if isinstance(obj, SineSweepSpecification) else ())
+        channel_unit = None
+        if typed:
+            from ..core.signals import reference_unit
+
+            try:
+                channel_unit = reference_unit(obj, settings.dofs)
+            except ValueError:
+                channel_unit = ''
         panel.show_source(kinds_for(obj), settings, self.unit_system,
                           quantity=quantity, typed=typed, cross_terms=cross,
-                          tones=tones)
+                          tones=tones, channel_unit=channel_unit)
         panel.show()
         if settings.kind == 'srs':
             return self._draw_synthesis(name, obj, settings)
@@ -11725,8 +11743,9 @@ class MainWindow(QMainWindow):
         """The door a specification sheet can open on, while the
         reading is wanted; None otherwise, standing the reading down.
 
-        ('table', name) for one whole channel table, a geometry allowed
-        alongside; ('spec', key, specs) for one or more specifications and
+        ('table', key, name, rows) for one channel table, a geometry
+        allowed alongside, `rows` its picked rows or None for the whole
+        table (at its control channels); ('spec', key, specs) for one or more specifications and
         nothing else, `specs` a list of (name, channels) with the
         channels the picked records touch, or None for all of them
         (Brandon, 2026-09-04: a pick of records, in one specification
@@ -11749,9 +11768,16 @@ class MainWindow(QMainWindow):
             key = ' | '.join(f'{name}[{",".join(picked)}]' if picked else name
                              for name, picked in specs)
             door = ('spec', key, specs)
-        elif (len(channels) == 1 and channels[0][2] is None and not shapes
-              and not series and not parts_picked):
-            door = ('table', channels[0][0])
+        elif (channels and len({name for name, _o, _d in channels}) == 1
+              and not shapes and not series and not parts_picked):
+            # rows picked in the table's grid open the sheet at those
+            # rows, whatever their role (Brandon, 2026-10-29: a force
+            # CPSD at the drives); the whole table at its control channels
+            name = channels[0][0]
+            rows = (None if any(d is None for _n, _o, d in channels)
+                    else sorted({int(d) for _n, _o, d in channels}))
+            key = name if rows is None else f'{name}[{",".join(map(str, rows))}]'
+            door = ('table', key, name, rows)
         on_plot = door is not None and door[0] == 'spec'
         self.author_action.setVisible(door is not None and not on_plot)
         self.author_data_action.setVisible(on_plot)
@@ -11811,9 +11837,12 @@ class MainWindow(QMainWindow):
                         name: SpecificationDraft.from_specification(
                             self.objects[name], picked, source=name)
                         for name, picked in specs})
+            elif door[3] is not None:
+                draft = SpecificationDraft.at_rows(self.objects[door[2]],
+                                                   door[3])
             else:
                 draft = SpecificationDraft.at_control_channels(
-                    self.objects[key])
+                    self.objects[door[2]])
             self._drafts[key] = draft
             self._draft_names[key] = tuple(self._door_names(door))
         return draft
@@ -11832,6 +11861,8 @@ class MainWindow(QMainWindow):
         """The objects a door is open on, for a message."""
         if door[0] == 'spec':
             return [name for name, _picked in door[2]]
+        if door[0] == 'table':
+            return [door[2]]
         return [door[1]]
 
     def _render_author(self, door):
@@ -11854,6 +11885,10 @@ class MainWindow(QMainWindow):
             origin = (f'opened from {said_names}'
                       + (f' — {", ".join(picked)} channels picked'
                          if picked else ''))
+        elif kind == 'table' and door[3] is not None:
+            count = len(draft.channels)
+            origin = (f'at the {count} picked channel{"s" * (count != 1)} '
+                      f'of {said_names}')
         else:
             origin = f'at the control channels of {said_names}'
         if kind != 'spec':
@@ -11866,8 +11901,13 @@ class MainWindow(QMainWindow):
             # key: adding the object rebuilds the tree and drops a pick
             # of shapes, so the render in between arrives on the whole
             # set's door — and made a second object from it (2026-09-06)
+            # picked rows are a sheet of their own, so the whole table's
+            # made object does not stand in for them; theirs is still
+            # remembered under the table's name, since adding it drops
+            # the picks and the next render arrives on the whole table
+            whole = not (kind == 'table' and door[3] is not None)
             added = (self._author_made.get(door[1])
-                     or self._author_made.get(names[0]))
+                     or (self._author_made.get(names[0]) if whole else None))
             if added not in self.objects:
                 try:
                     added = self.project.author_specification(names[0], draft)
@@ -11882,8 +11922,7 @@ class MainWindow(QMainWindow):
                 self._drafts[added] = draft
                 self._draft_names[added] = (added,)
             QTimer.singleShot(0, lambda: self.show_object(added))
-            return (f'{added}: made at {origin.split(" of ")[0]}'
-                    f' of {said_names} — the sheet edits it from here')
+            return f'{added}: made {origin} — the sheet edits it from here'
         # bands the object does not have yet are said here, from the
         # object: after the first edit writes them the saying stops
         missing = [note for name in names
@@ -16344,11 +16383,18 @@ class MainWindow(QMainWindow):
         A node match tolerance, in percent of the basis model's size, is
         asked for first. The project does the projection and the
         linking."""
-        candidates = self._correlation_candidates()
-        if candidates is None:
-            return
-        basis_name = candidates['basis'][0]
-        other_name = candidates['other'][0]
+        names = self._selected_object_names()
+        tables = [n for n in names if isinstance(self.objects.get(n), ChannelTable)]
+        sets = [n for n in names if isinstance(self.objects.get(n), ShapeSet)]
+        if len(tables) == 1 and len(sets) == 1:
+            # the model's modes at a test's channels (Brandon, 2026-10-29)
+            basis_name, other_name = tables[0], sets[0]
+        else:
+            candidates = self._correlation_candidates()
+            if candidates is None:
+                return
+            basis_name = candidates['basis'][0]
+            other_name = candidates['other'][0]
         percent, ok = QInputDialog.getDouble(
             self, 'Project onto Basis DOFs',
             'Node match tolerance (% of the basis model size):',
@@ -16373,8 +16419,9 @@ class MainWindow(QMainWindow):
                 if report['dropped'] else '')
         self._show_status(
             f'{added}: {report["matched"]} of {report["total"]} basis '
-            f'nodes matched (worst {worst:.4g} {unit}){note} — select '
-            f'it beside {basis_name} to compare')
+            f'nodes matched (worst {worst:.4g} {unit}){note}'
+            + ('' if tables and basis_name == tables[0]
+               else f' — select it beside {basis_name} to compare'))
 
     # ---- the transform: a record through a shape set --------------------
 
@@ -19088,23 +19135,30 @@ class MainWindow(QMainWindow):
             f'{added}: {shapes.num_shapes} modes to {top:g} Hz, {rigid} '
             f'rigid, {percent:g}% damping — linked to {name}')
 
-    def read_as_specification_act(self) -> None:
-        """The bar's Read as Specification: the selected PSD is made a
-        specification, in place and under the same name
-        (`Project.read_as_specification`)."""
-        self._read_as('read_as_specification',
-                      'Select a PSD to read as a specification',
-                      self.project.read_as_specification,
-                      'read as a specification — compare a measurement '
+    def convert_to_specification_act(self) -> None:
+        """The bar's Convert to Specification: the selected PSD or CPSD
+        is made a specification, in place and under the same name
+        (`Project.convert_to_specification`)."""
+        self._read_as('convert_to_specification',
+                      'Select a PSD or CPSD to convert to a specification',
+                      self.project.convert_to_specification,
+                      'converted to a specification — compare a measurement '
                       'against it by selecting both')
 
-    def read_as_psd_act(self) -> None:
-        """The bar's Read as PSD: the selected specification, which must
-        have no limits, is made a plain PSD again, in place and under the
-        same name (`Project.read_as_psd`)."""
-        self._read_as('read_as_psd',
-                      'Select a specification without limits to read as a PSD',
-                      self.project.read_as_psd, 'read as a PSD')
+    def convert_to_psd_act(self) -> None:
+        """The bar's Convert to PSD (Convert to CPSD with cross terms):
+        the selected specification is made a plain PSD, in place and
+        under the same name, its limits left out
+        (`Project.convert_to_psd`)."""
+        obj = self.current_object()
+        kind = ('CPSD' if isinstance(obj, Psd) and not obj.is_autospectrum()
+                else 'PSD')
+        said = f'converted to a {kind}'
+        if isinstance(obj, Specification) and obj.has_limits:
+            said += ' — its warning and abort limits were left out'
+        self._read_as('convert_to_psd',
+                      'Select a specification to convert to a PSD',
+                      self.project.convert_to_psd, said)
 
     def _read_as(self, verb_name, refusal, verb, said) -> None:
         """Swap the selected object for its other reading, under the

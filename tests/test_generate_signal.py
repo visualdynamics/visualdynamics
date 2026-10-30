@@ -137,6 +137,55 @@ def test_settings_written_by_another_version_still_read():
 
 # ---- the pane ---------------------------------------------------------------
 
+def _lbf_table(units=('lbf', 'lbf')):
+    return ChannelTable({
+        'channel': [1, 2, 3],
+        'node': ['1', '2', '101'],
+        'direction': ['X+', 'Y+', 'Z+'],
+        'unit': [*units, 'g'],
+        'role': ['reference', 'reference', 'response'],
+        'channel_type': ['force', 'force', 'acceleration']})
+
+
+LBF = 4.4482216152605      # newtons in a pound-force
+
+
+def test_a_typed_level_and_peak_are_in_each_channels_own_unit():
+    # 1.0 typed for an lbf table gave 1 N**2/Hz: 63.1 N RMS over
+    # 20-4000 Hz where 63.1 lbf was meant (the BARC table, 2026-10-29)
+    project = visualdynamics.Project()
+    project.add('Channels', _lbf_table(('lbf', 'N')))
+    typed = project.generate_signal('Channels', 'random', duration=4.0,
+                                    sample_rate=8192.0, band=(20.0, 500.0),
+                                    level=2.0, seed=1)
+    made = project[typed]
+    rms = np.sqrt(2.0 * 480.0)
+    assert made.ordinate[0].std() == pytest.approx(rms * LBF, rel=0.03)
+    assert made.ordinate[1].std() == pytest.approx(rms, rel=0.03), \
+        'the newton channel in newtons'
+    impulse = project.generate_signal('Channels', 'impulse', duration=1.0,
+                                      sample_rate=10000.0, at=0.1, peak=5.0,
+                                      width=0.004)
+    peaks = project[impulse].ordinate.max(axis=1)
+    assert peaks == pytest.approx([5.0 * LBF, 5.0], rel=1e-9)
+    pulse = project.generate_signal('Channels', 'pulse', duration=0.1,
+                                    sample_rate=20000.0, peak=100.0,
+                                    pulse_duration=0.005)
+    assert project[pulse].ordinate.max(axis=1) == pytest.approx(
+        [100.0 * LBF, 100.0], rel=1e-3)
+    target = signals.target_of(project['Channels'], signals.SignalSettings(
+        band=(20.0, 500.0), level=2.0))
+    assert target.ordinate[:, 0] == pytest.approx([2.0 * LBF ** 2, 2.0])
+
+
+def test_the_reference_unit_is_the_one_they_share():
+    assert signals.reference_unit(_lbf_table()) == 'lbf'
+    assert signals.reference_unit(_lbf_table(('lbf', 'N'))) == ''
+    assert signals.reference_unit(_lbf_table(('', ''))) == 'N', \
+        "SI's where none is written, as the level is then read"
+    assert signals.reference_unit(_lbf_table(), ['1X+']) == 'lbf'
+
+
 def _open(window, pump, name):
     select_objects(window, pump, name)
     window.generate_signal_act()
@@ -297,3 +346,19 @@ def test_a_generated_burst_opens_in_its_own_frames(window, pump, tmp_path):
     reopened = visualdynamics.Project.open(path)
     a = reopened[added].averaging
     assert (a.frame_length, a.window, a.frames) == (4096, 'boxcar', 50)
+
+
+def test_the_pane_shows_the_level_in_the_channels_unit(window, pump):
+    """Not the display units: the level typed is the channels' own, as
+    the verb reads it, and the box says which."""
+    window.add_object('Channels', _lbf_table())
+    pump()
+    panel = _open(window, pump, 'Channels')
+    panel.kind_box.setCurrentIndex(panel.kind_box.findData('random'))
+    pump()
+    assert panel._editors['level'].suffix() == ' lbf²/Hz'
+    panel._editors['level'].setValue(3.0)
+    assert panel.settings().level == pytest.approx(3.0), 'read back as typed'
+    panel.kind_box.setCurrentIndex(panel.kind_box.findData('impulse'))
+    pump()
+    assert panel._editors['peak'].suffix() == ' lbf'

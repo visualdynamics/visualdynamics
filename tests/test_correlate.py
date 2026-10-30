@@ -408,3 +408,65 @@ def test_complex_shapes_keep_their_phase_through_the_projection():
                                         test_shapes, test_geometry)
     assert projected.shape_matrix[0] == pytest.approx(
         np.array([10.0, 21.0]) * (1.0 + 1.0j))
+
+
+def _channels():
+    """The test model's channels: 101 along X, a drive at 102 along its
+    rotated X read negative, and a row with no node yet."""
+    return visualdynamics.ChannelTable({
+        'channel': [1, 2, 3],
+        'node': ['101', '102', ''],
+        'direction': ['X+', 'X-', ''],
+        'role': ['response', 'reference', 'response'],
+        'unit': ['g', 'N', 'g'],
+        'channel_type': ['acceleration', 'force', 'acceleration']})
+
+
+def test_a_channel_table_is_a_target_before_there_are_test_modes():
+    # the BARC's FE modes at its test geometry's sensors took a
+    # placeholder shape set built by script (Brandon, 2026-10-29)
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, _shapes = _test_model()
+    project = visualdynamics.Project()
+    project.add('FEM Geometry', fem_geometry)
+    project.add('FEM Shapes', fem_shapes)
+    project.add('Test Geometry', test_geometry)
+    project.add('Channels', _channels())
+    project.link('FEM Geometry', 'FEM Shapes')
+    project.link('Test Geometry', 'Channels')
+    assert 'project_onto_basis' in dict(
+        project.selection_verbs('FEM Shapes', 'Channels'))
+    name = project.project_onto_basis('FEM Shapes', onto='Channels')
+    assert name == 'FEM Shapes @ Channels'
+    projected = project[name]
+    assert projected.coordinate == ['101X+', '102X-']
+    # 102X- is minus the local X, which is global Y, at corner (1,1,1)
+    assert projected.shape_matrix[0] == pytest.approx([10.0, -21.0])
+    assert projected.shape_matrix[1] == pytest.approx([0.0, -1.0])
+    assert name in project.object_group_of('Channels')
+    alone = visualdynamics.Project()
+    alone.add('FEM Shapes', fem_shapes)
+    alone.add('Channels', _channels())
+    assert 'project_onto_basis' not in dict(
+        alone.selection_verbs('FEM Shapes', 'Channels')), 'no geometries'
+
+
+def test_the_act_projects_a_set_onto_a_selected_table(window, pump, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, _shapes = _test_model()
+    window.add_object('Test Geometry', test_geometry)
+    window.add_object('Channels', _channels())
+    window.add_object('FEM Geometry', fem_geometry)
+    window.add_object('FEM Shapes', fem_shapes)
+    window.project.link('Test Geometry', 'Channels')
+    window.project.link('FEM Geometry', 'FEM Shapes')
+    _select(window, 'FEM Shapes', 'Channels')
+    pump()
+    assert 'project_onto_basis' in [act[0] for act in window.acts_for()]
+    monkeypatch.setattr(QInputDialog, 'getDouble',
+                        staticmethod(lambda *a, **k: (2.0, True)))
+    window.project_onto_basis()
+    assert window.objects['FEM Shapes @ Channels'].coordinate == ['101X+', '102X-']
+    assert '2 of 2 basis nodes matched' in window.statusBar().currentMessage()

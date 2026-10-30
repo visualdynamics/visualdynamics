@@ -23,6 +23,11 @@ beside the plot offers only the kinds that object makes.
 A channel table's reference channels are the rows whose role is
 reference, and they have to say what they measure (the channel type),
 all the same quantity: a signal is one quantity.
+The level and the peak typed for a channel table are in each
+reference channel's own unit, as the table writes it: a level of 1.0
+is 1 lbf²/Hz on a channel in lbf and 1 N²/Hz on a channel in N. A
+channel with no unit is read in SI. The pane shows the unit beside
+the box when the channels share one.
 
 ## The kinds
 

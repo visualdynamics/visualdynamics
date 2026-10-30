@@ -82,6 +82,8 @@ class SignalPanel(QWidget):
         super().__init__(parent)
         self._loading = False
         self._unit_system = None
+        #: a channel table's reference unit, None for any other source
+        self._channel_unit: str | None = None
         #: the quantity the signal is, for its units ('force')
         self._quantity = ''
         #: whether the target is typed (a channel table) or read
@@ -224,12 +226,19 @@ class SignalPanel(QWidget):
     def show_source(self, kinds: tuple[str, ...], settings: SignalSettings,
                     unit_system: UnitSystem, *, quantity: str,
                     typed: bool, cross_terms: bool,
-                    tones: tuple[str, ...] = ()) -> None:
+                    tones: tuple[str, ...] = (),
+                    channel_unit: str | None = None) -> None:
         """Put the settings for a source up: the kinds it makes, the
-        settings in display units, and the rows the kind reads."""
+        settings in display units, and the rows the kind reads.
+
+        `channel_unit` is given for a channel table: the typed level and
+        peak are in its reference channels' own unit
+        (`core.signals.reference_unit`), not the display units, and ''
+        says the channels differ, each read in its own."""
         self._loading = True
         try:
             self._unit_system, self._quantity = unit_system, quantity
+            self._channel_unit = channel_unit
             self._typed = typed
             self._settings = settings
             self.kind_box.clear()
@@ -262,23 +271,46 @@ class SignalPanel(QWidget):
         self.correlated_box.setChecked(bool(s.correlated))
         e['low'].setValue(float(s.band[0]))
         e['high'].setValue(float(s.band[1]))
-        e['level'].setValue(self._shown(s.level, self._density()))
+        e['level'].setValue(self._typed_shown(s.level, self._density()))
         e['at'].setValue(s.at)
         e['width'].setValue(1e3 * s.width)
         self.shape_box.setCurrentIndex(max(0, self.shape_box.findData(s.shape)))
-        e['peak'].setValue(self._shown(s.peak, self._quantity))
+        e['peak'].setValue(self._typed_shown(s.peak, self._quantity))
         e['pulse'].setValue(1e3 * s.pulse_duration)
         e['edge'].setValue(1e3 * (s.edge or 0.0))
         e['half_cycles'].setValue(int(s.half_cycles))
         for key, dim in (('level', self._density()),
                          ('peak', self._quantity)):
-            e[key].setSuffix(f' {self._label(dim)}' if dim else '')
+            e[key].setSuffix(self._typed_suffix(key, dim))
         # the ratings in the window's units, zero for one not given, as
         # the stroke reading's panel shows them
         for key, _name, dim, _tip in RATINGS:
             value = getattr(s, key)
             e[key].setValue(0.0 if value is None else self._shown(value, dim))
             e[key].setSuffix(f' {self._label(dim)}')
+
+    def _typed_shown(self, value: float, dim: str) -> float:
+        """A level or peak as its box shows it: as held for a channel
+        table, whose values are in the channels' units already."""
+        if self._channel_unit is not None:
+            return float(value)
+        return self._shown(value, dim)
+
+    def _typed_si(self, value: float, dim: str) -> float:
+        if self._channel_unit is not None:
+            return float(value)
+        return self._si(value, dim)
+
+    def _typed_suffix(self, key: str, dim: str) -> str:
+        unit = self._channel_unit
+        if unit is None:
+            return f' {self._label(dim)}' if dim else ''
+        if not unit:
+            return " in each channel's unit"
+        from ..units import pretty_unit
+
+        return f' {pretty_unit(unit)}' if key == 'peak' else \
+            f' {pretty_unit(unit + "**2")}/Hz'
 
     def _density(self) -> str:
         return f'{self._quantity}**2/frequency' if self._quantity else ''
@@ -383,11 +415,11 @@ class SignalPanel(QWidget):
             seed=None if seed < 0 else seed,
             correlated=bool(self.correlated_box.isChecked()),
             band=(float(e['low'].value()), float(e['high'].value())),
-            level=self._si(float(e['level'].value()), self._density()),
+            level=self._typed_si(float(e['level'].value()), self._density()),
             at=float(e['at'].value()),
             width=1e-3 * float(e['width'].value()),
             shape=self.shape_box.currentData() or 'half-sine',
-            peak=self._si(float(e['peak'].value()), self._quantity),
+            peak=self._typed_si(float(e['peak'].value()), self._quantity),
             pulse_duration=1e-3 * float(e['pulse'].value()),
             edge=edge or None,
             tone=self.tone_box.currentData(),

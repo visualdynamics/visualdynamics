@@ -207,3 +207,86 @@ def test_set_cells_applies_what_it_can(table):
     assert sheet.cells[0][0] == 'good'
     assert sheet.cells[2][2] == 'also good'
     assert sheet.cells[1][1] == 'r1c1'
+
+
+def check_image(style, state):
+    """A table cell's check box in `state`, drawn by `style` on white."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QColor, QImage, QPainter
+    from PySide6.QtWidgets import QStyle, QStyleOptionViewItem
+
+    image = QImage(20, 20, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(QColor('white'))
+    option = QStyleOptionViewItem()
+    option.rect = QRect(2, 2, 16, 16)
+    option.checkState = state
+    option.features = QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+    option.state = QStyle.StateFlag.State_Enabled | (
+        QStyle.StateFlag.State_On if state == Qt.CheckState.Checked
+        else QStyle.StateFlag.State_Off)
+    painter = QPainter(image)
+    style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorItemViewItemCheck,
+                        option, painter, None)
+    painter.end()
+    return image
+
+
+def ink(image):
+    from PySide6.QtGui import QColor
+
+    return sum(QColor(image.pixel(x, y)).lightness() < 200
+               for x in range(image.width()) for y in range(image.height()))
+
+
+def test_a_table_cell_check_box_is_drawn_over_the_macos_style(qt_app):
+    # Qt 6.12's macOS style draws a checked cell's box as nothing on the
+    # Mac. What the macOS style draws off screen depends on what the
+    # process has drawn before (nothing alone, a box under the whole
+    # suite), so the box is pinned to Fusion's, pixel for pixel
+    from PySide6.QtWidgets import QStyleFactory
+
+    from visualdynamics.gui.tables import ItemCheckStyle
+
+    if QStyleFactory.create('macOS') is None:
+        pytest.skip('no macOS style in this Qt')
+    style = ItemCheckStyle('macOS')
+    fusion = QStyleFactory.create('Fusion')
+    for state in (Qt.CheckState.Checked, Qt.CheckState.Unchecked):
+        assert check_image(style, state) == check_image(fusion, state)
+    checked = ink(check_image(style, Qt.CheckState.Checked))
+    unchecked = ink(check_image(style, Qt.CheckState.Unchecked))
+    assert unchecked > 0
+    assert checked > unchecked          # the tick is ink of its own
+
+
+class StyledApp:
+    """Enough of a QApplication to say its style and take a new one."""
+
+    def __init__(self, name):
+        from PySide6.QtWidgets import QStyleFactory
+
+        self.current = QStyleFactory.create(name)
+        self.set = 0
+
+    def style(self):
+        return self.current
+
+    def setStyle(self, style):
+        self.current = style
+        self.set += 1
+
+
+def test_the_check_box_style_is_worn_on_the_macos_style_only_and_once(qt_app):
+    from visualdynamics.gui.tables import ItemCheckStyle, wear_item_checks
+
+    mac = StyledApp('macOS')
+    if mac.current is None:
+        pytest.skip('no macOS style in this Qt')
+    assert wear_item_checks(mac) is True
+    assert isinstance(mac.style(), ItemCheckStyle)
+    assert mac.style().baseStyle().name().lower() == 'macos'
+    assert wear_item_checks(mac) is False
+    assert mac.set == 1
+    fusion = StyledApp('Fusion')
+    assert wear_item_checks(fusion) is False
+    assert fusion.set == 0

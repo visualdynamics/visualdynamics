@@ -337,6 +337,44 @@ class SpecificationDraft:
         return cls.at_dofs([dofs[i] for i in rows], [types[i] for i in rows])
 
     @classmethod
+    def at_rows(cls, table: ChannelTable,
+                rows: Sequence[int]) -> SpecificationDraft:
+        """A starter sheet at picked rows of a channel table, whatever
+        their role: a force CPSD at the drives is written at the
+        reference rows.
+
+        Each channel is in the quantity its channel type declares, and
+        the starter is the one `at_dofs` makes. A row with no node or
+        direction, or no channel type, is left out.
+
+        Parameters
+        ----------
+        table : ChannelTable
+            The table.
+        rows : sequence of int
+            The picked rows.
+
+        Returns
+        -------
+        SpecificationDraft
+            The sheet to fill.
+
+        Raises
+        ------
+        ValueError
+            When no picked row has both a DOF and a channel type.
+        """
+        # Brandon, 2026-10-29: a force CPSD at the drives took copying
+        # the table, deleting the accelerometers and flagging the forces
+        dofs, types = table.dof_strings(), table.types()
+        kept = [int(i) for i in rows if types[int(i)] and dofs[int(i)]]
+        if not kept:
+            raise ValueError('the picked channels declare no channel type '
+                             'or have no node and direction, so a '
+                             'specification at them would be at nothing')
+        return cls.at_dofs([dofs[i] for i in kept], [types[i] for i in kept])
+
+    @classmethod
     def from_specification(cls, spec: Specification,
                            channels: list[str] | None = None,
                            source: str = '') -> SpecificationDraft:

@@ -98,7 +98,7 @@ colored by level; *3D* on the bar switches to the flat plot and back.
 | --- | --- |
 | Geometry | The 3-D scene. The tree lists the nodes, the coordinate systems, the elements by family (Beams, Triangles, Quads, Tetras, Wedges, Hexes and Points, plus Pyramids when there are any), with the element groups of each family under it and each element group's elements under it, and the Solids. Picking a family, an element group or an element shows that part. The pencil on a family opens its elements' table, and the pencil on an element group opens the Element Groups table at its row, where its material and section are set. The *Modes* reading opens the Modes pane: *Kinematic* previews the six rigid-body shapes about a reference point, from the geometry alone, and *Finite element*, offered once the element groups have properties, solves the normal modes. |
 | Photos | Every photograph, or only the ones picked in the grid, stacked down the pane. Edit a name in the grid. |
-| Channel table | The spreadsheet, with every column typed and the drop-downs and check boxes live ([The channel table](channel-table.md)). A table from a run with more than one environment has a drop-down on its bar picking the environment whose control channels the Control column shows, and a second one, when that environment transformed its control channels or its drives, showing the matrix in the table's place. *Specification* on its bar writes a specification at its control channels, on a sheet beside the plot. |
+| Channel table | The spreadsheet, with every column typed and the drop-downs and check boxes live ([The channel table](channel-table.md)). A table from a run with more than one environment has a drop-down on its bar picking the environment whose control channels the Control column shows, and a second one, when that environment transformed its control channels or its drives, showing the matrix in the table's place. *Specification* on its bar writes a specification at its control channels, or at the rows picked in its grid, on a sheet beside the plot. |
 | Time history | The records against time, with the averaging frames or the shock windows shaded when they are set. The readings a record offers are on the bar: *Averaging*, *Filter*, *Sine Levels* (when the project has a sine sweep specification), *Truncate*, *Kurtosis*, *Statistics*, *Overload* (when a linked channel table names its channels: each channel against the range the table gives it), *Shocks* and *Wavelet*. |
 | Spectrum | The curves, or the stage. |
 | PSD | The curves or the stage, as for a spectrum. An octave-band PSD is drawn as steps; *Octave Bands* on the bar previews the PSD on proportional bands and makes one. |
@@ -253,6 +253,8 @@ The acts a selection can take are on the bar as soon as the selection
 allows them, decided by the same rules as the readings: a record and a
 shape set offer *Transform to Modal Coordinates* (or *Expand to
 Physical Responses* for modal data), two shape sets on two geometries offer
-*Project onto Basis DOFs*, and objects of one type that can be merged
+*Project onto Basis DOFs*, as do a shape set and a channel table on two
+geometries (the model's modes put at the test's channels before there
+are test modes to compare with), and objects of one type that can be merged
 offer *Merge into One* ([Projects, links, and the
 Basis](projects.md#merging)).

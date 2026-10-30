@@ -50,8 +50,16 @@ def band_edges(draft: Any, channel: int, unit_system: Any
     with one piece per run of segments that share a band. Each piece
     covers its own span from breakpoint to breakpoint, so where the band
     steps at a breakpoint two pieces meet at one frequency at two
-    levels, the same as the shading.
+    levels, the same as the shading. Between breakpoints a piece follows
+    the power law the sheet's specification is read by, filled in as
+    the shading is (`plot.as_power_law`), so on a linear frequency axis
+    the edge stays on its zone instead of cutting straight across.
     """
+    # Straight between breakpoints, the handles drifted off their zones
+    # on a linear frequency axis (Brandon, 2026-10-29); the sheet writes
+    # a log-log specification, so the law is the one the shading draws
+    from . import as_power_law
+
     # Each piece runs corner to corner (Brandon, 2026-09-06). Taken at
     # the breakpoints instead, a corner belonged to the section on its
     # right and the left section's line slanted to its neighbor's level.
@@ -64,11 +72,11 @@ def band_edges(draft: Any, channel: int, unit_system: Any
         for run in draft.band_runs(channel, kind):
             first, last = run[0], run[-1] + 1
             below, above = draft.bands[channel][kind][run[0]]
-            span = target[first:last + 1]
+            x, span = as_power_law(f[first:last + 1], target[first:last + 1])
             edges.setdefault((kind, 'lower'), []).append(
-                (list(run), f[first:last + 1], span * 10 ** (below / 10.0)))
+                (list(run), x, span * 10 ** (below / 10.0)))
             edges.setdefault((kind, 'upper'), []).append(
-                (list(run), f[first:last + 1], span * 10 ** (above / 10.0)))
+                (list(run), x, span * 10 ** (above / 10.0)))
     return edges
 
 

@@ -173,12 +173,16 @@ Dynamics, but some formats have no data type for a specification.
 ESCDF's types include power spectral density and nothing for a target,
 so a specification written by another program arrives as a PSD that
 only its name identifies. Visual Dynamics does not guess from the
-name. Select the PSD and use *Read as Specification* on the bar
-(`project.read_as_specification(name)` from a script). It keeps its
+name. Select the PSD and use *Convert to Specification* on the bar
+(`project.convert_to_specification(name)` from a script). It keeps its
 name, its group and everything that refers to it, and when it is
-selected together with a measurement the two are compared. *Read as
-PSD* (`project.read_as_psd(name)`) undoes it, for a specification that
-has no warning or abort limits.
+selected together with a measurement the two are compared. *Convert to
+PSD* (`project.convert_to_psd(name)`) goes the other way. The button
+reads *Convert to CPSD* when the specification has cross terms. A PSD
+has no warning or abort limits, so a specification's limits are left
+out, and the status line says so. This is how a target written on the
+Specification sheet, which always has its limit bands, becomes a CPSD
+to generate a signal or predict a response from.
 
 ## The test level
 

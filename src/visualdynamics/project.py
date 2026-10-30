@@ -4912,10 +4912,10 @@ class Project(dict):
         self.link(added['geometry'], added['channels'], added['shapes'])
         return added
 
-    def read_as_specification(self, name: Any) -> str:
-        """Read a PSD as a specification, the requirement measurements are
-        judged against, keeping its name, object group and every
-        reference to it.
+    def convert_to_specification(self, name: Any) -> str:
+        """Convert a PSD or CPSD to a specification, the requirement
+        measurements are judged against, keeping its name, object group
+        and every reference to it.
 
         Some formats have no way to mark a requirement (the ESCDF data
         types do not), so a file can only suggest one by its name, and a
@@ -4940,11 +4940,16 @@ class Project(dict):
         self[name] = obj.as_specification()
         return name
 
-    def read_as_psd(self, name: Any) -> str:
-        """Read a specification as a plain PSD again, under its own name.
-        This undoes `read_as_specification`.
+    def convert_to_psd(self, name: Any) -> str:
+        """Convert a specification to a plain PSD or CPSD, under its own
+        name. This undoes `convert_to_specification`, and makes a
+        target written on the Specification sheet a CPSD to drive or
+        predict with.
 
-        An object that is not a specification raises TypeError.
+        A PSD cannot hold warning and abort limits, so a specification's
+        limits are left out; asking for the conversion is asking for
+        that (`Specification.limit` takes one out as a PSD of its own
+        first). An object that is not a specification raises TypeError.
 
         Parameters
         ----------
@@ -4960,7 +4965,7 @@ class Project(dict):
         obj = self[name]
         if not isinstance(obj, Specification):
             raise TypeError(f'{name} is not a specification')
-        self[name] = obj.as_psd()
+        self[name] = obj.as_psd(drop_limits=True)
         return name
 
     def scale_family(self, measured: Any) -> list[str]:
@@ -5193,30 +5198,35 @@ class Project(dict):
     def project_onto_basis(self, source: str, *, onto: str | None = None,
                            tolerance: float = 0.02,
                            name: str | None = None) -> str:
-        """Sample a shape set at the Basis shape set's DOFs (Project onto
-        Basis DOFs). Returns the new shape set's name.
+        """Sample a shape set at the Basis shape set's DOFs, or at a
+        channel table's (Project onto Basis DOFs). Returns the new shape
+        set's name.
 
-        For each Basis DOF, the nearest node of the source's geometry is
-        found, and the displacement there is dotted with the DOF's
-        direction. A Basis DOF with no node within `tolerance` is
+        For each target DOF, the nearest node of the source's geometry
+        is found, and the displacement there is dotted with the DOF's
+        direction on the target's geometry, its node's coordinate system
+        and sign included. A DOF with no node within `tolerance` is
         dropped rather than estimated. The result is linked into the
-        Basis shape set's group. With no shape set to project onto, or
-        either shape set without a geometry, this raises ValueError.
+        target's group. A channel table as the target puts a model's
+        modes at a test's sensors and drives before there are test modes
+        to compare with: its channels' DOFs, on the geometry the table
+        answers to. With no target, or the source or the target without
+        a geometry, this raises ValueError.
 
         Parameters
         ----------
         source : str
             The shape set to project.
         onto : str, optional
-            The shape set to project onto. Defaults to the one in the
-            project's Basis.
+            The shape set or channel table to project onto. Defaults to
+            the shape set in the project's Basis.
         tolerance : float, default 0.02
             How far the nearest node may be, as a fraction of the Basis
             geometry's extent (the largest distance of a node from the
             nodes' mean position).
         name : str, optional
             What to call the result. Defaults to the source's name
-            followed by '@ Basis DOFs'.
+            followed by '@ Basis DOFs', or by '@' and the table's name.
 
         Returns
         -------
@@ -5228,8 +5238,20 @@ class Project(dict):
 
         source = self.name_of(source)
         onto = None if onto is None else self.name_of(onto)
-        basis = ((onto, self[onto]) if onto is not None
-                 else self._basis_shapes())
+        if onto is not None and isinstance(self[onto], ChannelTable):
+            # Brandon, 2026-10-29: the BARC's FE modes at its test
+            # geometry's sensors took a placeholder shape set by script.
+            # Only the DOFs are read from the target
+            dofs = list(dict.fromkeys(d for d in self[onto].dof_strings() if d))
+            if not dofs:
+                raise ValueError(f'{onto} has no channel with a node and '
+                                 'direction')
+            target = ShapeSet([], [], dofs, np.zeros((0, len(dofs))))
+            name = name or f'{source} @ {onto}'
+        else:
+            target = None
+        basis = ((onto, target if target is not None else self[onto])
+                 if onto is not None else self._basis_shapes())
         if basis is None:
             raise ValueError('name the set to project onto, or declare a '
                              'Basis holding one')
@@ -5237,8 +5259,8 @@ class Project(dict):
         home = self.geometry_for(basis_name)
         theirs = self.geometry_for(source)
         if home is None or theirs is None:
-            raise ValueError('both shape sets need a geometry — link one '
-                             'to each side')
+            raise ValueError(f'{source} and {basis_name} each need a '
+                             'geometry — link one to each side')
         projected, report = project_shapes(self[source], theirs[1],
                                            basis_shapes, home[1],
                                            tolerance=tolerance)
@@ -8432,12 +8454,13 @@ _VERB_APPLIES: tuple = (
     # the Realizability reading's apply button
     ('make_realizable', lambda p, o: (isinstance(o, Psd)
                                       and o.reference_dof is not None)),
-    # what a file could not say: a PSD that is a requirement, and back
-    # — but not a specification with limits, which a PSD cannot hold
-    ('read_as_specification', lambda p, o: (
+    # what a file could not say: a PSD that is a requirement, and back.
+    # A specification with limits is converted too, the limits left
+    # out (Brandon, 2026-10-29): the Specification sheet always writes
+    # its bands, so a target made there could never become a CPSD
+    ('convert_to_specification', lambda p, o: (
         isinstance(o, Psd) and not isinstance(o, Specification))),
-    ('read_as_psd', lambda p, o: (isinstance(o, Specification)
-                                  and not o.has_limits)),
+    ('convert_to_psd', lambda p, o: isinstance(o, Specification)),
     ('fit_modes', lambda p, o: isinstance(o, Frf)),
     ('transform', lambda p, o: _reads_as(p, o, 'physical')),
     ('expand', lambda p, o: _reads_as(p, o, 'modal')),
@@ -8558,6 +8581,18 @@ def _two_sets_on_two_geometries(project, objects):
             and homes[0][1] is not homes[1][1])
 
 
+def _set_and_table_apart(project, objects):
+    """A shape set and a channel table, each answering to its own
+    geometry: the model's modes put at the test's channels."""
+    sets = [o for o in objects if isinstance(o, ShapeSet)]
+    tables = [o for o in objects if isinstance(o, ChannelTable)]
+    if len(objects) != 2 or len(sets) != 1 or len(tables) != 1:
+        return False
+    homes = [project.geometry_for(sets[0]), project.geometry_for(tables[0])]
+    return (all(home is not None for home in homes)
+            and homes[0][1] is not homes[1][1])
+
+
 def _mergeable(project, objects):
     from .core.merge import mergeable
 
@@ -8583,7 +8618,8 @@ _SELECTION_APPLIES: tuple = (
     ('compute_modal_responses', lambda p, o: _forces_and_modes(o)),
     ('transform', lambda p, o: _pair_reads(p, o, 'physical')),
     ('expand', lambda p, o: _pair_reads(p, o, 'modal')),
-    ('project_onto_basis', _two_sets_on_two_geometries),
+    ('project_onto_basis', lambda p, o: (_two_sets_on_two_geometries(p, o)
+                                         or _set_and_table_apart(p, o))),
     ('match_modes', lambda p, o: (len(o) == 2 and all(
         isinstance(x, ShapeSet) for x in o))),
     ('merge', _mergeable),
@@ -8650,7 +8686,7 @@ _JOURNALED_VERBS = (
     'tie_elements', 'mate_surfaces', 'add_mated_surfaces',
     'edit_mated_surfaces', 'delete_mated_surfaces',
     'merge_groups', 'set_view', 'set_comparison_scale',
-    'read_as_specification', 'read_as_psd',
+    'convert_to_specification', 'convert_to_psd',
     'author_specification', 'derive_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',

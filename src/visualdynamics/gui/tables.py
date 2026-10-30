@@ -51,8 +51,10 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QMenu,
+    QProxyStyle,
     QStyle,
     QStyledItemDelegate,
+    QStyleFactory,
     QStyleOptionComboBox,
     QTableView,
     QToolButton,
@@ -67,6 +69,49 @@ NO_PARENT = QModelIndex()      # Qt's default parent for a flat table
 
 FILL_HANDLE = 9                # the square you drag to fill, in pixels
 FILL_GRAB = 4                  # slack around it, so it is not a pixel hunt
+
+
+class ItemCheckStyle(QProxyStyle):
+    """The platform's style, with the check box in a table or list cell
+    drawn by Fusion.
+
+    Qt 6.12's macOS style draws a checked cell's check box as nothing
+    and an unchecked one as a faint rounded square, so a flag column
+    such as the channel table's Control reads as empty. Everything else
+    is drawn by the platform's style, the check box widget included.
+    """
+    # Found in Brandon's BARC channel table, 2026-10-29: a bare
+    # QTableView over checkable QStandardItems draws the same, so it is
+    # Qt's, and the offscreen platform the tests run on draws it right.
+    # Handing the macOS style's own PE_IndicatorCheckBox the cell's rect
+    # was tried and draws the same blank square. Qt's QTBUG-150017 (macOS
+    # 27), reported fixed in 6.12.1: retire this once that release is
+    # seen drawing the box on the Mac. Not a pin to 6.11 (Principle 12).
+
+    def __init__(self, key: str) -> None:
+        super().__init__(key)
+        self._fusion = QStyleFactory.create('Fusion')
+        self._fusion.setParent(self)
+
+    def drawPrimitive(self, element: Any, option: Any, painter: Any,
+                      widget: Any = None) -> None:
+        if element == QStyle.PrimitiveElement.PE_IndicatorItemViewItemCheck:
+            self._fusion.drawPrimitive(element, option, painter, widget)
+            return
+        super().drawPrimitive(element, option, painter, widget)
+
+
+def wear_item_checks(app: Any = None) -> bool:
+    """Put `ItemCheckStyle` on the application when it runs the macOS
+    style, and say whether it did. Once is enough; a second call, or
+    any other style, changes nothing."""
+    app = app or QApplication.instance()
+    if app is None or isinstance(app.style(), ItemCheckStyle):
+        return False
+    if app.style().name().lower() != 'macos':
+        return False
+    app.setStyle(ItemCheckStyle(app.style().name()))
+    return True
 
 
 @dataclass

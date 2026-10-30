@@ -5072,10 +5072,17 @@ class Specification(Bounded, Psd):
         with np.errstate(invalid='ignore'):
             return (np.isfinite(magnitude) & (magnitude > 0.0)).any(axis=0)
 
-    def as_psd(self) -> Psd:
+    def as_psd(self, drop_limits: bool = False) -> Psd:
         """This specification as a plain PSD; the inverse of
         `Psd.as_specification`, for a PSD marked as a requirement by
-        mistake. Its `interpolation` is kept.
+        mistake or a target to be driven as a CPSD. Its `interpolation`
+        is kept.
+
+        Parameters
+        ----------
+        drop_limits : bool, default False
+            Leave out the warning and abort limits, which a PSD cannot
+            hold. Without it a specification with limits is refused.
 
         Returns
         -------
@@ -5085,11 +5092,11 @@ class Specification(Bounded, Psd):
         Raises
         ------
         ValueError
-            If it has limits: a PSD cannot hold them, and dropping them
-            without being asked would lose what the file said.
+            If it has limits and `drop_limits` is not given: dropping
+            them without being asked would lose what the file said.
             `limit(name)` returns one as a PSD of its own.
         """
-        if self.limits:
+        if self.limits and not drop_limits:
             raise ValueError(
                 'it carries warning or abort limits, which a PSD cannot '
                 'hold; take one out with limit(name) instead')

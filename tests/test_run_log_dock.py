@@ -1,28 +1,37 @@
-"""The Run Log dock: opened from the menu, floated and put back where it
-was left, the level row and the abort key, the holds, a log read-only
-when another program writes it, corrections struck through, and the
-window's teardown.
+"""The Run Log dock: opened from the menu and by `--run-log`, floated and
+put back where it was left, the log alone in the window, the level row
+and the abort key, the holds, a log read-only when another program
+writes it, corrections struck through, and the window's teardown.
 
 Every log is written under `tmp_path`, with a fixed login and machine
 name, on a clock the test sets: the event time an act takes and the
 entered-at time the log writes are both read off it, so a time "taken
 at the key" is pinned by value.
+
+What the launch imports is read in a fresh interpreter, since the
+suite's own process has imported VTK long before any test here runs.
 """
 
 from __future__ import annotations
 
 import gc
+import json
 import os
+import pathlib
+import subprocess
+import sys
 import threading
 import weakref
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from conftest import destroy_window, release_modifiers
+from conftest import destroy_window, fixture_path, release_modifiers
 
+import visualdynamics
 from visualdynamics.core.run_log import RunLog
 from visualdynamics.core.run_log_model import RunLogModel
 
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 WHO = ('tester', 'bench')
 ZONE = timezone(timedelta(hours=-6))
 START = datetime(2026, 10, 30, 8, 0, tzinfo=ZONE)
@@ -166,6 +175,24 @@ def test_the_dock_floats_and_is_put_back_where_it_was_left(window_factory,
     assert third.dockWidgetArea(dock) == Qt.DockWidgetArea.LeftDockWidgetArea
 
 
+def test_the_log_alone_fills_the_window_and_the_whole_window_comes_back(
+        window, pump):
+    window.set_log_only(True)
+    pump()
+    dock = window.run_log_dock
+    assert window.run_log_only
+    assert not window.centralWidget().isVisible()
+    assert not window.project_dock.isVisible()
+    assert dock.width() >= window.width() - 20, 'the log fills the window'
+    assert dock.panel.layout_action.text() == 'Whole Window'
+    dock.panel.layout_action.trigger()
+    pump()
+    assert not window.run_log_only
+    assert window.centralWidget().isVisible() and window.project_dock.isVisible()
+    assert dock.isVisible() and dock.width() < window.width() - 20
+    assert dock.panel.layout_action.text() == 'Log Only'
+
+
 def test_a_log_not_yet_written_is_offered_to_the_new_log_form(window, pump,
                                                               tmp_path):
     """Named on the command line but not there: nothing is written until
@@ -177,6 +204,152 @@ def test_a_log_not_yet_written_is_offered_to_the_new_log_form(window, pump,
     assert form is not None and form.name == 'new log'
     assert form.box_text('path') == path
     assert not os.path.exists(path)
+
+
+def test_the_command_line_flag():
+    from visualdynamics.gui.run_log_dock import log_argument
+
+    assert log_argument(['a.vdyn']) == (['a.vdyn'], False, None)
+    rest, wanted, path = log_argument(['--run-log', 'day.vdlog', 'b.nc4'])
+    assert rest == ['b.nc4'] and wanted
+    assert path == os.path.abspath('day.vdlog')
+    assert log_argument(['--run-log', 'b.nc4']) == (['b.nc4'], True, None)
+    assert log_argument(['--run-log']) == ([], True, None)
+
+
+# ---- the launch -----------------------------------------------------------
+
+# The real launcher (`gui.main`) in a fresh interpreter, as
+# test_first_3d_view runs it, with `--run-log`: the check and its message
+# box replaced by recorders and the event loop by a function that reads
+# the window, then goes to the whole window and opens a project the way
+# File > Open does.
+_LAUNCH = '''
+import json, os, sys
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+from PySide6.QtWidgets import QApplication
+from visualdynamics import gui
+from visualdynamics.gui import opengl
+
+ROOTS = {'vtk', 'vtkmodules', 'pyvista', 'pyvistaqt'}
+
+
+def vtk_loaded():
+    return sorted(m for m in sys.modules if m.split('.')[0] in ROOTS)
+
+
+log, path = json.loads(sys.argv[1])
+asked, said, result = [], [], {}
+
+
+def missing():
+    asked.append(bool(vtk_loaded()))     # was VTK in before the check?
+    return None
+
+
+opengl.missing = missing
+opengl.say = said.append
+
+
+def run(app):
+    from visualdynamics.gui.main_window import MainWindow
+
+    window = next(w for w in app.topLevelWidgets()
+                  if isinstance(w, MainWindow))
+    dock = window.run_log_dock
+    dock.panel.settle()
+    for _ in range(5):
+        app.processEvents()
+    seen = dock.panel.snapshot
+    result['log_only'] = window.run_log_only
+    result['dock_shown'] = dock.isVisible()
+    result['panes_shown'] = window.centralWidget().isVisible()
+    result['tree_shown'] = window.project_dock.isVisible()
+    result['fills'] = dock.width() >= window.width() - 20
+    result['log'] = None if seen is None else seen.path
+    result['writable'] = None if seen is None else seen.writable
+    result['vtk_in_log'] = vtk_loaded()
+    result['asked_in_log'] = len(asked)
+    window.set_log_only(False)
+    for _ in range(5):
+        app.processEvents()
+    result['asked_whole'] = len(asked)
+    if path:
+        window.import_path(path)
+        for _ in range(5):
+            app.processEvents()
+        plotter = window.scene.built_plotter
+        result['view'] = None if plotter is None else type(plotter).__name__
+        result['actors'] = (0 if plotter is None
+                            else len(plotter.renderer.actors))
+    result['asked'] = asked
+    result['said'] = said
+    window.close()
+    return 0
+
+
+QApplication.exec = run
+code = gui.main(['--no-disclaimer', '--run-log', log])
+print('RESULT ' + json.dumps(result))
+sys.exit(code)
+'''
+
+
+def _launch(tmp_path, log, path=None):
+    env = dict(os.environ, QT_QPA_PLATFORM='offscreen',
+               PYVISTA_OFF_SCREEN='true',
+               VISUALDYNAMICS_SETTINGS=str(tmp_path / 'preferences.ini'))
+    result = subprocess.run(
+        [sys.executable, '-c', _LAUNCH, json.dumps([log, path])],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=600,
+        check=False)
+    assert result.returncode == 0, result.stderr[-3000:]
+    line = next(line for line in result.stdout.splitlines()
+                if line.startswith('RESULT '))
+    return json.loads(line[len('RESULT '):])
+
+
+@pytest.fixture
+def day_log(tmp_path):
+    path = tmp_path / 'day.vdlog'
+    RunLog.create(path, title='Article 7', who=WHO).close()
+    return str(path)
+
+
+@pytest.fixture
+def plate(tmp_path):
+    """A project holding one geometry: opening it draws it in the scene."""
+    project = visualdynamics.Project('Plate')
+    project.import_file(fixture_path('plate', 'test_geometry.npz'))
+    project.geometry.define_units('m')
+    return str(project.save(tmp_path / 'plate.vdyn'))
+
+
+def test_the_log_only_launch_imports_no_vtk_and_runs_no_check(tmp_path,
+                                                            day_log):
+    """`--run-log day.vdlog`: the window with the log alone in it, the log
+    open for writing, and nothing of VTK in the process; going to the
+    whole window with nothing to draw asks nothing either."""
+    seen = _launch(tmp_path, day_log)
+    assert seen['log_only'] and seen['dock_shown'] and seen['fills']
+    assert not seen['panes_shown'] and not seen['tree_shown']
+    assert seen['log'] == day_log and seen['writable']
+    assert seen['vtk_in_log'] == [], 'VTK imported for the log alone'
+    assert seen['asked_in_log'] == 0, 'the check ran for the log alone'
+    assert seen['asked_whole'] == 0, 'asked with no 3-D view to build'
+
+
+def test_the_whole_window_checks_before_its_first_3d_view(tmp_path, day_log,
+                                                         plate):
+    """From the log alone to the whole window in one session: the first
+    3-D view still asks the check once, before VTK is imported, and the
+    scene is built and drawn."""
+    seen = _launch(tmp_path, day_log, plate)
+    assert seen['vtk_in_log'] == [] and seen['asked_in_log'] == 0
+    assert seen['asked'] == [False], 'asked once, before any VTK'
+    assert seen['view'] == 'QtInteractor'
+    assert seen['actors'] > 0, 'the geometry was drawn'
+    assert seen['said'] == []
 
 
 # ---- the level row --------------------------------------------------------

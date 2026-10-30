@@ -4,7 +4,9 @@ Start it with `visualdynamics [files...]` (the older `visualdynamics-gui`
 still works) or `python -m visualdynamics`. Files named on the command
 line are imported once the window is open, `--theme dark` or
 `--theme light` sets the theme, and `--no-disclaimer` skips the alpha
-notice. On Windows, a machine without the OpenGL the 3-D view needs is
+notice. `--run-log [file.vdlog]` opens the window with the Run Log
+filling it and the analysis panes hidden (`run_log_dock`), the log named
+opened. On Windows, a machine without the OpenGL the 3-D view needs is
 told so before the first 3-D view is built (`opengl`); the launch itself
 neither checks OpenGL nor imports VTK.
 """
@@ -198,6 +200,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     argv, theme = theme_flag(argv)
     if theme is not None:
         os.environ[THEME_OVERRIDE] = theme
+    # --run-log [file.vdlog]: the window with the log alone in it, for
+    # the keeper's own computer; its own flag, not a file to import
+    from .run_log_dock import log_argument
+
+    argv, run_log, log_path = log_argument(argv)
     before_application()
     app = QApplication.instance() or QApplication(sys.argv[:1])
     if '--check-movie' in argv:
@@ -213,6 +220,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     app.setWindowIcon(app_icon())
     window = MainWindow()
+    if run_log:
+        # laid out before it is shown, so the analysis panes never flash
+        window.set_log_only(True)
     window.show()
     # macOS: a window from a terminal python opens behind the terminal
     # unless explicitly raised and activated
@@ -228,6 +238,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not disclaimer.acknowledged(window):
                 return 0
             disclaimer.remember()
+    if run_log and log_path is not None:
+        window.show_run_log(log_path)
     if argv:
         # Import once the event loop is running: an import may open a modal
         # units dialog, which cannot be displayed before app.exec() starts.

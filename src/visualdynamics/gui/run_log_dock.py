@@ -3,8 +3,11 @@ writes the run log while a test runs.
 
 The log keeper is a named person who is not at the controller, so the
 dock is built to be read across a room and typed into fast. It floats
-to a second monitor and remembers where it was put. Nothing here drives
-the controller: every check is a reminder, never an interlock.
+to a second monitor and remembers where it was put, and
+`visualdynamics --run-log [file]` opens the main window with the dock
+filling it and the analysis panes hidden (`MainWindow.set_log_only`),
+for a lab that analyzes its data elsewhere. Nothing here drives the
+controller: every check is a reminder, never an interlock.
 
 What it shows, in large type:
 
@@ -47,6 +50,7 @@ mirror is copied or a file is hashed. The window only ever shows a
 from __future__ import annotations
 
 import contextlib
+import os
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -991,6 +995,9 @@ class RunLogPanel(QWidget):
 
     #: a log was opened, created or closed; carries the path or ''
     log_changed = Signal(str)
+    #: the layout asked for: True for the log alone, False for the whole
+    #: window
+    layout_wanted = Signal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1147,8 +1154,20 @@ class RunLogPanel(QWidget):
                                 'writer'))
         bar.addAction(self._act('reload', 'Reload', self.reload,
                                 'Read the log again from its file'))
+        bar.addSeparator()
+        self.layout_action: QAction = self._act(
+            'layout', 'Whole Window', self._toggle_layout,
+            'Show the analysis panes beside the log, or the log alone')
+        bar.addAction(self.layout_action)
         self._act('level row', 'Level Row', self.focus_level_row,
                   'Back to the level row')
+
+    def _toggle_layout(self) -> None:
+        self.layout_wanted.emit(self.layout_action.text() == 'Log Only')
+
+    def show_layout(self, log_only: bool) -> None:
+        """Name the layout the toggle would switch to."""
+        self.layout_action.setText('Whole Window' if log_only else 'Log Only')
 
     # ---- opening and closing --------------------------------------------------
 
@@ -1642,7 +1661,7 @@ class RunLogPanel(QWidget):
         self.status.show_snapshot(seen, self.clock())
         writable = seen is not None and seen.writable
         for name, action in self.actions_by_name.items():
-            if name not in ('new log', 'open log', 'level row'):
+            if name not in ('new log', 'open log', 'layout', 'level row'):
                 action.setEnabled(seen is not None and (
                     writable or name in ('close log', 'reload')))
         self.level_row.setEnabled(writable)
@@ -1873,3 +1892,31 @@ def restore_place(dock: QDockWidget, window: Any) -> None:
                     dock.restoreGeometry(geometry)
     finally:
         dock.placing = placing
+
+
+def log_argument(argv: Sequence[str]) -> tuple[list[str], bool, str | None]:
+    """Take `--run-log [file]` out of the command line: the arguments
+    left, whether the flag was given, and the log named after it (an
+    argument ending in `.vdlog`), or None."""
+    rest: list[str] = []
+    wanted = False
+    path = None
+    skip = False
+    for index, argument in enumerate(argv):
+        if skip:
+            skip = False
+            continue
+        if argument == '--run-log':
+            wanted = True
+            following = argv[index + 1] if index + 1 < len(argv) else None
+            if following is not None and following.lower().endswith(SUFFIX):
+                path = following
+                skip = True
+        elif argument.startswith('--run-log='):
+            wanted = True
+            path = argument.split('=', 1)[1] or None
+        else:
+            rest.append(argument)
+    if path is not None:
+        path = os.path.abspath(path)
+    return rest, wanted, path

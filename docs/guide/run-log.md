@@ -44,6 +44,21 @@ it opens next time where it was left. The log keeper is not the person
 at the controller, so the dock belongs on the keeper's own computer, or
 on a monitor that does not cover the control screens.
 
+`visualdynamics --run-log article-7.vdlog` opens the main window with
+the log filling it and the project tree, the 3-D view and the plots
+hidden, for the keeper's computer or for a lab that analyzes its data in
+other tools. On Windows the Start menu has a **Visual Dynamics Run Log**
+shortcut that opens it this way. Nothing 3-D is built while the log is
+alone, so the window starts quickly and runs on a computer without the
+graphics the 3-D view needs. **Whole Window** on the dock's bar brings
+the rest of the window back, and the first 3-D view after that checks
+the graphics first, as every first 3-D view does. A log named on the
+command line that does not exist yet is offered to the New Log form,
+and written only when it is confirmed.
+
+![The Run Log alone in the window, part way through a random
+test](images/run-log-window.png)
+
 The window is drawn in large type, to be read from across the room.
 
 - **The status strip** across the top reads the current test, its axis,

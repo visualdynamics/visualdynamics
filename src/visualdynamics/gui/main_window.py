@@ -1685,8 +1685,9 @@ class MainWindow(QMainWindow):
         self.report_editor: Any = None
         self._table_layout = table_layout
         #: the Run Log dock (`gui.run_log_dock`), built the first time it
-        #: is asked for
+        #: is asked for, and whether the window shows the log alone
         self.run_log_dock: Any = None
+        self.run_log_only: bool = False
         # the splitter takes the height going spare; without the
         # stretch the button bar below it claimed an even share and
         # stood a quarter of the window tall
@@ -3214,14 +3215,15 @@ class MainWindow(QMainWindow):
 
     # ---- the run log ---------------------------------------------------------
 
-    def show_run_log(self, path: str | None = None) -> Any:
+    def show_run_log(self, path: str | None = None, *,
+                     log_only: bool | None = None) -> Any:
         """Show the Run Log dock, built the first time and put back where
         it was last left, and return it.
 
         `path` names a log: one that exists is opened (read-only, saying
         who holds it, when another program is writing it); one that does
         not is offered to the New Log form, written only when the keeper
-        confirms it.
+        confirms it. `log_only` sets the layout (`set_log_only`).
         """
         import os
 
@@ -3231,10 +3233,14 @@ class MainWindow(QMainWindow):
         if dock is None:
             dock = self.run_log_dock = RunLogDock(self)
             restore_place(dock, self)
+            dock.panel.layout_wanted.connect(self.set_log_only)
             dock.topLevelChanged.connect(self._run_log_moved)
             dock.dockLocationChanged.connect(self._run_log_moved)
+            dock.panel.show_layout(self.run_log_only)
         dock.show()
         dock.raise_()
+        if log_only is not None:
+            self.set_log_only(log_only)
         if path is not None:
             if os.path.exists(path):
                 dock.panel.open_log(path)
@@ -3244,15 +3250,60 @@ class MainWindow(QMainWindow):
                     form.set_box('path', path)
         return dock
 
+    def set_log_only(self, on: bool) -> None:
+        """Show the Run Log alone, filling the window, with the project
+        tree and the 3-D and plot panes hidden (`on`), or the whole window
+        with the dock back where it was left.
+
+        Nothing is drawn while the log is alone, so no 3-D view is built
+        and no OpenGL check is run. Going back to the whole window draws
+        what is selected, and the first 3-D view it builds asks the check
+        first (`opengl.ready`), as every first 3-D view does.
+        """
+        from .run_log_dock import restore_place
+
+        dock = self.show_run_log() if on else self.run_log_dock
+        if dock is None:
+            return
+        if on != self.run_log_only:
+            if on:
+                # its place as the keeper left it, kept for the way back
+                self._remember_run_log_place()
+                self.run_log_only = True
+                dock.setFloating(False)
+                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
+                                   dock)
+                # closing the dock would leave an empty window
+                dock.setFeatures(
+                    dock.features()
+                    & ~QDockWidget.DockWidgetFeature.DockWidgetClosable)
+                self.centralWidget().hide()
+                self.project_dock.hide()
+                dock.show()
+                self._show_status('The run log alone: Whole Window on its '
+                                  'bar shows the project and its views')
+            else:
+                self.run_log_only = False
+                dock.setFeatures(
+                    dock.features()
+                    | QDockWidget.DockWidgetFeature.DockWidgetClosable)
+                self.centralWidget().show()
+                self.project_dock.show()
+                restore_place(dock, self)
+                dock.show()
+                self.render_current()
+        dock.panel.show_layout(on)
+
     def _run_log_moved(self, *_where) -> None:
         self._remember_run_log_place()
 
     def _remember_run_log_place(self) -> None:
-        """Store where the Run Log dock is."""
+        """Store where the Run Log dock is, unless the log is alone in the
+        window, where its place is the layout's, not the keeper's."""
         from .run_log_dock import remember_place
 
         dock = self.run_log_dock
-        if dock is None or dock.placing:
+        if dock is None or self.run_log_only or dock.placing:
             return
         remember_place(dock, self.dockWidgetArea(dock))
 

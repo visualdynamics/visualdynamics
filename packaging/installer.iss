@@ -28,6 +28,7 @@ Source: "..\dist\VisualDynamics\*"; DestDir: "{app}"; Flags: recursesubdirs crea
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\VisualDynamics.exe"
+Name: "{group}\{#MyAppName} Run Log"; Filename: "{app}\VisualDynamics.exe"; Parameters: "--run-log"; Comment: "The run log alone in the window"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\VisualDynamics.exe"; Tasks: desktopicon
 
 [Tasks]

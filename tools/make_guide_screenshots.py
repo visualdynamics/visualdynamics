@@ -1803,9 +1803,102 @@ def report_features():
     close(window)
 
 
+def run_log():
+    """The Run Log alone in the window, as `--run-log` opens it, part way
+    through a random test: a level row corrected, an abort with its
+    first minute part written and its cause found, the next row being
+    typed with its projection to full level, and the holds open. The log
+    is written to a temporary folder on a clock set here, so the times
+    in the picture do not change from one run to the next."""
+    import tempfile
+    from datetime import datetime, timedelta
+
+    print('run_log:', flush=True)
+    window = fresh_window()
+    window.set_log_only(True)
+    pump()
+    panel = window.run_log_dock.panel
+    now = [datetime(2026, 3, 12, 8, 40).astimezone()]
+
+    def clock():
+        return now[0]
+
+    def later(minutes):
+        now[0] += timedelta(minutes=minutes)
+
+    panel.clock = panel.log_clock = clock
+    panel.who = ('keeper', 'lab-pc')
+    folder = tempfile.mkdtemp(prefix='run-log-')
+    panel.new_log(os.path.join(folder, 'unit-7.vdlog'), 'Unit 7')
+    panel.settle()
+    panel.initials_box.setText('KL')
+
+    def form(name, text='', **boxes):
+        made = panel.open_form(name)
+        for field, value in boxes.items():
+            made.set_box(field, value)
+        if text and made.text_box is not None:
+            made.text_box.setText(text)
+        made.write()
+        panel.settle()
+
+    def level(level_db, voltage, current, drive, answer, go=True):
+        row = panel.level_row
+        row.level_box.setText(level_db)
+        row.voltage_box.setText(voltage)
+        row.current_box.setText(current)
+        row.drive_box.setText(drive)
+        row.answer_box.setCurrentText(answer)
+        row.go_box.setChecked(go)
+        row.write()
+        panel.settle()
+
+    form('clock check', offset_s='0.4', recorder='independent recorder')
+    form('open test', test_kind='Random Vibration', title='Random, Y axis',
+         article='Unit 7', serial='SN 0042', steps_db='-12, -6, -3, 0',
+         sigma='3', rated_current_peak='800', rail_voltage='250')
+    form('person in', person='R. Analyst', role='analyst')
+    form('person in', person='C. Rep', role='customer')
+    panel.axis_box.setText('Y')
+    later(6)
+    level('-12', '14.1', '55', '0.14', 'as predicted')
+    later(2)
+    level('-6', '28.4', '111', '0.27', 'as predicted')
+    later(1)
+    # the -6 dB current was misread off the meter: corrected, not erased
+    item = next(panel.day_list.item(i) for i in range(panel.day_list.count())
+                if 'current: 111' in panel.day_list.item(i).text())
+    panel.day_list.setCurrentItem(item)
+    form('correct', 'misread off the meter', current='101')
+    later(2)
+    level('-3', '40.0', '143', '0.38', 'explained')
+    later(1)
+    level('0', '56.5', '202', '0.54', 'as predicted')
+    later(4)
+    aborted = panel.abort()
+    aborted.set_box('stop', 'controller ramp')
+    aborted.set_box('channel', '12 (bracket, Y)')
+    aborted.set_box('counter', '3:40')
+    aborted.write()
+    panel.settle()
+    later(9)
+    form('cause found', cause='bracket response rose 4 dB at 410 Hz over 90 '
+         's; mount tight, treated as the article')
+    later(2)
+    panel.level_row.level_box.setText('-12')
+    panel.level_row.voltage_box.setText('14.3')
+    panel.level_row.current_box.setText('56')
+    panel.level_row.redraw()
+    panel.status.holds_button.setChecked(True)
+    panel.day_list.clearSelection()
+    panel.status.tick(clock())
+    shoot(window, 'run-log-window')
+    close(window)
+
+
 def main(which=('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
                 'mixed', 'tree', 'fem', 'fem_solids', 'plan',
-                'report_features')):
+                'report_features', 'run_log')):
     import traceback
 
     from PySide6.QtWidgets import QApplication
@@ -1815,7 +1908,7 @@ def main(which=('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
     QApplication.instance() or QApplication(['visualdynamics'])
     OUT.mkdir(parents=True, exist_ok=True)
     for build in (modal, random, transient, shock, sine, sysid, mixed, tree,
-                  fem, fem_solids, plan, report_features):
+                  fem, fem_solids, plan, report_features, run_log):
         if build.__name__ not in which:
             continue
         try:
@@ -1846,4 +1939,4 @@ if __name__ == '__main__':
     picked = tuple(args.workflows)
     main(picked or ('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
                     'mixed', 'tree', 'fem', 'fem_solids', 'plan',
-                    'report_features'))
+                    'report_features', 'run_log'))

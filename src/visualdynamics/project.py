@@ -6060,6 +6060,110 @@ class Project(dict):
             self._report(name), number, self, measured, specification,
             criterion, self.object_groups, provenance=self.provenance).text
 
+    def draft_findings_from_run_log(self, name: str,
+                                    run_log: str | None = None) -> list[str]:
+        """Offer a report the deviations and anomalies a run log extract
+        holds, as drafts beside its findings register.
+
+        Each is offered with the log's number, proposed (D-1, A-1), its
+        kind and its fact as typed at the console, citing the log, test
+        and entry (with the extract's badge when the log has newer
+        entries). Nothing enters the register: the deviations section
+        stays owed, the editing page shows the drafts marked as drafted
+        from the run log, and the check lists them as waiting. The
+        author accepts one (`accept_logged_finding`), which enters the
+        finding, or discards it. A new offer replaces the drafts
+        waiting. A finding the register holds with its fact written is
+        not offered over, one with no fact logged is not offered, and
+        the cause, effect and approval or disposition are never
+        offered. A log holding no deviation or anomaly offers nothing:
+        setting the section to None stays the author's step.
+
+        Parameters
+        ----------
+        name : str
+            The report, with the report feature `findings` on.
+        run_log : str, optional
+            The run log extract; the project's one extract when
+            omitted.
+
+        Returns
+        -------
+        list of str
+            A line per finding of the log: offered, or left alone and
+            why; or one line saying the log holds none.
+
+        Raises
+        ------
+        ValueError
+            When the report does not have the feature enabled, the
+            project holds no run log extract, or holds several and
+            `run_log` does not name one. Nothing is changed.
+        TypeError
+            When `name` is not a report, or `run_log` is not a run log
+            extract.
+        """
+        from .report import findings
+
+        report = self._report(name)
+        findings._require(report)
+        _held, extract = self._one_run_log(run_log)
+        return findings.offer_log(report, extract)
+
+    def accept_logged_finding(self, name: str, number: str, *,
+                              fact: str | None = None,
+                              discard: bool = False) -> str | None:
+        """Accept, or discard, a finding a run log offered a report
+        (`draft_findings_from_run_log`).
+
+        Accepting is what enters the finding in the register: under the
+        log's number when the register has not given it, otherwise under
+        the next number of its kind (a finding already entered under
+        that number with its fact blank takes the fact instead). Its
+        fact, as offered or as edited (`fact`), reaches it through the
+        register's one entry point for drafts
+        (`visualdynamics.report.findings.offer`) and is accepted; its
+        cause, effect and approval or disposition stay owed, for the
+        author to type (`report_finding`). Discarding drops the draft and
+        enters nothing.
+
+        Parameters
+        ----------
+        name : str
+            The report, with the report feature `findings` on.
+        number : str
+            The number the log gave it, as offered.
+        fact : str, optional
+            The fact as the author edited it; the logged fact when
+            omitted.
+        discard : bool, default False
+            Drop the draft instead.
+
+        Returns
+        -------
+        str or None
+            The number the finding was entered under; None when
+            discarded.
+
+        Raises
+        ------
+        ValueError
+            When the report does not have the feature enabled, no
+            finding is offered as `number`, the fact accepted is blank,
+            or `fact` is given with `discard`. Nothing is changed.
+        TypeError
+            When `name` is not a report, or `fact` is not a string.
+        """
+        from .report import findings
+
+        report = self._report(name)
+        if discard:
+            if fact is not None:
+                raise ValueError(f'{number}: a discarded draft takes no fact')
+            findings.discard_log(report, number)
+            return None
+        return findings.accept_log(report, number, fact)
+
     def report_test_date(self, name: str, start: str | None,
                          end: str | None = None) -> None:
         """Set the dates of the test a report covers, which its sensors'
@@ -6729,6 +6833,26 @@ class Project(dict):
                               'as it is now.')
         self[name] = fresh
         return fresh
+
+    def _one_run_log(self, name: Any = None) -> tuple[str, RunLogExtract]:
+        """The run log extract a report feature draws on: `name`'s, or the
+        project's one extract when `name` is None. `ValueError` when
+        there is none, or several and none is named; `TypeError` when
+        `name` is not a run log extract."""
+        from .core.run_log_extract import held
+
+        if name is not None:
+            name = self.name_of(name)
+            return name, self._run_log_extract(name)
+        extracts = held(self)
+        if not extracts:
+            raise ValueError('the project holds no run log extract; bring one '
+                             'in with attach_run_log')
+        if len(extracts) > 1:
+            names = ', '.join(repr(found) for found, _extract in extracts)
+            raise ValueError(f'the project holds {len(extracts)} run log '
+                             f'extracts ({names}); name the one to draw on')
+        return extracts[0]
 
     def _run_log_extract(self, name: str) -> RunLogExtract:
         """The run log extract called `name`; `TypeError` for anything
@@ -8885,6 +9009,7 @@ _JOURNALED_VERBS = (
     'accept_chronology',
     'report_finding', 'draft_finding_fact', 'report_flash',
     'report_requirement', 'draft_finding_from_requirement',
+    'draft_findings_from_run_log', 'accept_logged_finding',
     'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:

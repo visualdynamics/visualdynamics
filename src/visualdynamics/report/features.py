@@ -162,7 +162,9 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         'numbered, each in four parts: fact, cause, effect and approval. '
         'Section 9 draws them and the summary lists them by number; a '
         'blank part is owed. The fact can be offered as a draft from a '
-        'measurement; the rest are typed.',
+        'measurement, and a run log brought into the project offers its '
+        'deviations and anomalies as drafts, entered only when accepted; '
+        'the rest are typed.',
         requires=('skeleton_sections',)),
     ReportFeature(
         'check_blocks', 'Check blocks', 'Results',

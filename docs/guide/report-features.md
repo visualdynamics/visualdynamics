@@ -533,6 +533,41 @@ objects do not share, a comparison the package refuses (different
 quantities, units on one side only), a band with nothing to judge, an
 all-zero channel, and a channel inside its limits.
 
+**Findings from a run log.** A run log brought into the project
+(`project.attach_run_log`, [The run log file](run-log.md#in-a-project))
+holds each deviation and anomaly as it was typed at the console,
+numbered across the log. `draft_findings_from_run_log` offers them as
+drafts beside the register, never in it: each with the log's number
+proposed, its kind and its fact, citing the log, test and entry, with
+the extract's badge, *[newer entries in the log]*, when the log has
+grown since the extract was taken. The register and section 9 do not
+change: the section keeps its owed card, the editing page shows the
+drafts under it marked *drafted from the run log, not yet accepted*
+(they are never in the exported report), and the check lists them as
+waiting.
+
+```python
+project.attach_run_log('article-7.vdlog', test=1)
+project.draft_findings_from_run_log('Report')
+# ['D-1: offered as a draft from the run log, not in the register until accepted.',
+#  'A-1: offered as a draft from the run log, not in the register until accepted.']
+project.accept_logged_finding('Report', 'D-1')            # 'D-1'
+project.accept_logged_finding('Report', 'A-1', fact='A rattle at 300 Hz.')
+```
+
+Accepting a draft is what enters the finding: under the log's number
+when the register has not given it, otherwise under the next number of
+its kind, with the fact as offered or as edited, through the same entry
+point as a fact read off a measurement. Its cause, effect and approval
+or disposition stay owed for the author to type; the log's approvals
+and dispositions are never offered. `discard=True` drops a draft and
+enters nothing. A finding the register holds with its fact written is
+not offered over, and one logged with no fact is not offered; each has
+a line saying why. A log with no deviation or anomaly offers nothing:
+an empty log cannot tell "nothing happened" from "nobody wrote it
+down", so setting the section to None stays the author's step. With
+several extracts in the project, name the one with `run_log=`.
+
 ## Calibration in date
 
 **Calibration in date** (group Records) answers the first thing a

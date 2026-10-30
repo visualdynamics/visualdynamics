@@ -9,21 +9,26 @@ report (`report.findings`): entering, editing and removing, the
 one-step None, the fact draft offered, accepted and discarded through
 its one seam, the check before export, the page, the project verbs and
 their journal, persistence, and the editor's pane. And the promise the
-feature rests on: off, the page is the page it was.
+feature rests on: off, the page is the page it was. Last, the findings
+a run log brought into the project offers: drafts beside the register,
+nothing entered and the section owed until the author accepts one.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import math
 
 import numpy as np
 import pytest
 from conftest import fixture_path
+from test_run_log_extract import HEADER, two_tests, writer
 
 import visualdynamics
 from visualdynamics.core import compliance
 from visualdynamics.core import findings as cf
+from visualdynamics.core import run_log_model as model
 from visualdynamics.core.data import Psd, Specification
 from visualdynamics.core.report import Report
 from visualdynamics.report import features as rf
@@ -990,3 +995,200 @@ def test_only_a_blank_fact_with_a_draft_waiting_says_so():
          'effect, approval not yet written'),
         ('9. Deviations, Anomalies and Nonconformances: A-1: cause, effect, '
          'disposition not yet written')]
+
+
+# ---- findings offered from a run log ----------------------------------------
+
+
+def _logged(tmp_path, *features):
+    """A project holding a report with `features` (the register's by
+    default) and one run log extract of a random test with a deviation
+    (D-1) and an anomaly (A-1) whose disposition the next test logged."""
+    path = tmp_path / 'article.vdlog'
+    ids = two_tests(path)
+    project = visualdynamics.Project('Article 7')
+    name = project.add('R', _report(*features))
+    held = project.attach_run_log(path, test=1)
+    return project, name, held, path, ids
+
+
+def test_without_a_run_log_the_register_and_page_are_as_before(tmp_path):
+    project, name, held, _path, _ids = _logged(tmp_path)
+    project.detach_run_log(held)
+    report = project[name]
+    before = _render(report, project)
+    edit = _render(report, project, edit=True)
+    with pytest.raises(ValueError, match='holds no run log extract; bring one '
+                       'in with attach_run_log'):
+        project.draft_findings_from_run_log(name)
+    assert fd.register(report) == [] and fd.log_drafts(report) == []
+    assert _render(report, project) == before
+    assert _render(report, project, edit=True) == edit
+
+
+def test_the_log_findings_are_offered_and_nothing_enters_the_register(
+        tmp_path):
+    project, name, held, _path, ids = _logged(tmp_path)
+    report = project[name]
+    extract = project[held]
+    deviation = next(found for found in extract.findings()
+                     if found.number == 'D-1')
+    assert project.draft_findings_from_run_log(name) == [
+        ('D-1: offered as a draft from the run log, not in the register until '
+         'accepted.'),
+        ('A-1: offered as a draft from the run log, not in the register until '
+         'accepted.')]
+    # nothing reaches the register, and section 9 keeps its owed card
+    assert fd.register(report) == []
+    assert sk.words(report, fd.SECTION) == ''
+    assert _owed(report) == [
+        '9. Deviations, Anomalies and Nonconformances: not yet written',
+        ('9. Deviations, Anomalies and Nonconformances: D-1, A-1 offered from '
+         'the run log, not yet accepted')]
+    reading = _render(report, project)
+    assert sk.OWED in _head(reading, 9) and fd.FROM_LOG not in reading
+    assert 'D-1' not in _head(reading, 2)
+    head = _head(_render(report, project, edit=True), 9)
+    assert sk.OWED in head and fd.FROM_LOG in head
+    assert ('<strong>Proposed D-1.</strong> Deviation <span class="finding-'
+            'where">(' + html.escape(f'{extract.cited()}, entry '
+                                     f'#{deviation.entry.id}')
+            + ')</span>: a notch at 180 Hz not in the plan') in head
+    drafts = fd.log_drafts(report)
+    assert [draft['number'] for draft in drafts] == ['D-1', 'A-1']
+    assert drafts[1]['source'].endswith(f'entry #{ids["anomaly"]}')
+    # the disposition the log holds for A-1 is never offered
+    assert 'use as is' not in json.dumps(drafts)
+    # accepting is what enters the finding: its fact, the rest owed
+    assert project.accept_logged_finding(name, 'D-1') == 'D-1'
+    entry = fd.find(report, 'D-1')
+    assert entry['fact'] == 'a notch at 180 Hz not in the plan'
+    assert [entry[part] for part in ('cause', 'effect', 'approval')] == [
+        '', '', '']
+    assert entry['draft'] is None
+    assert [draft['number'] for draft in fd.log_drafts(report)] == ['A-1']
+    owed = _owed(report)
+    assert ('9. Deviations, Anomalies and Nonconformances: D-1: cause, '
+            'effect, approval not yet written') in owed
+    assert ('9. Deviations, Anomalies and Nonconformances: A-1 offered from '
+            'the run log, not yet accepted') in owed
+    # accepted as edited
+    assert project.accept_logged_finding(
+        name, 'A-1', fact='A rattle at 300 Hz on the cable tie.') == 'A-1'
+    assert fd.find(report, 'A-1')['fact'] == ('A rattle at 300 Hz on the '
+                                              'cable tie.')
+    assert fd.log_drafts(report) == []
+    assert not any('offered from the run log' in item
+                   for item in _owed(report))
+    # offered again: a written fact is not offered over
+    assert project.draft_findings_from_run_log(name)[0] == (
+        "D-1: the register holds it with its fact written; the log's is not "
+        'offered over it.')
+    assert project.journal[-4:-1] == [
+        f'project.draft_findings_from_run_log({name!r})',
+        f"project.accept_logged_finding({name!r}, 'D-1')",
+        (f"project.accept_logged_finding({name!r}, 'A-1', fact='A rattle at "
+         "300 Hz on the cable tie.')")]
+
+
+def test_the_badge_shows_in_the_draft_source_when_the_log_grew(tmp_path):
+    project, name, _held, path, _ids = _logged(tmp_path)
+    with writer(path) as log:
+        log.append('note', author='AB', test=1, text='later')
+    project.draft_findings_from_run_log(name)
+    assert fd.log_drafts(project[name])[1]['source'].split(', entry')[
+        0].endswith('[newer entries in the log]')
+
+
+def test_an_accepted_finding_takes_the_logged_number_only_when_free(
+        tmp_path):
+    project, name, _held, _path, _ids = _logged(tmp_path)
+    report = project[name]
+    # D-1 issued and removed: the log's D-1 enters as D-2
+    project.report_finding(name, kind='deviation')
+    project.report_finding(name, 'D-1', remove=True)
+    # A-1 entered by the author with its fact blank: it takes the fact
+    assert project.report_finding(name, kind='anomaly',
+                                  cause='Not determined.') == 'A-1'
+    project.draft_findings_from_run_log(name)
+    assert project.accept_logged_finding(name, 'D-1') == 'D-2'
+    assert fd.find(report, 'D-2')['fact'] == ('a notch at 180 Hz not in the '
+                                              'plan')
+    assert project.accept_logged_finding(name, 'A-1') == 'A-1'
+    assert fd.find(report, 'A-1')['fact'] == 'a rattle at 300 Hz'
+    assert fd.find(report, 'A-1')['cause'] == 'Not determined.'
+    assert [entry['number'] for entry in fd.register(report)] == ['D-2',
+                                                                  'A-1']
+
+
+def test_a_logged_finding_with_no_fact_is_not_offered(tmp_path):
+    path = tmp_path / 'article.vdlog'
+    with writer(path) as log:
+        model.open_test(log, author='AB', test_kind='Random Vibration',
+                        header=HEADER)
+        model.append(log, 'anomaly_opened', author='AB', test=1, axis='Z',
+                     run=2, fields={'owner': 'CD'})
+        model.append(log, 'anomaly_opened', author='AB', test=1, axis='Z',
+                     run=3, fields={'fact': 'a crack at the foot'})
+    project = visualdynamics.Project()
+    name = project.add('R', _report())
+    project.attach_run_log(path)
+    assert project.draft_findings_from_run_log(name) == [
+        ('A-1: the log holds no fact for it, so nothing is offered; enter it '
+         'in the register.'),
+        ('A-2: offered as a draft from the run log, not in the register until '
+         'accepted.')]
+    # the run the log names fills the finding's run on acceptance
+    assert project.accept_logged_finding(name, 'A-2') == 'A-2'
+    assert fd.find(project[name], 'A-2')['run'] == '3'
+
+
+def test_a_log_with_no_finding_offers_no_none(tmp_path):
+    path = tmp_path / 'article.vdlog'
+    with writer(path) as log:
+        model.open_test(log, author='AB', test_kind='Random Vibration',
+                        header=HEADER)
+        model.append(log, 'level_row', author='AB', test=1, axis='Z', run=1,
+                     fields={'level_db': 0.0})
+    project = visualdynamics.Project()
+    name = project.add('R', _report())
+    project.attach_run_log(path)
+    report = project[name]
+    assert project.draft_findings_from_run_log(name) == [
+        ('The run log holds no deviation or anomaly of test 1 by entry #2; '
+         "nothing is offered, and whether there were none is the author's to "
+         'say (set the section to None).')]
+    assert report.blocks == [] and fd.register(report) == []
+    assert _owed(report) == [
+        '9. Deviations, Anomalies and Nonconformances: not yet written']
+
+
+def test_offering_and_accepting_are_refused_by_name(tmp_path):
+    project, name, held, path, _ids = _logged(tmp_path, 'skeleton_sections')
+    with pytest.raises(ValueError, match='does not have the Findings register'):
+        project.draft_findings_from_run_log(name)
+    with pytest.raises(ValueError, match='does not have the Findings register'):
+        project.accept_logged_finding(name, 'D-1')
+    project.report_features(name, enable=['findings'])
+    project.attach_run_log(path, test=2)
+    with pytest.raises(ValueError, match=r"holds 2 run log extracts \('Run "
+                       r"Log, Test 1', 'Run Log, Test 2'\); name the one"):
+        project.draft_findings_from_run_log(name)
+    with pytest.raises(TypeError, match="'R' is a Report, not a run log "
+                       'extract'):
+        project.draft_findings_from_run_log(name, run_log='R')
+    with pytest.raises(ValueError, match='no finding D-1 offered from the run '
+                       'log; waiting: none'):
+        project.accept_logged_finding(name, 'D-1')
+    project.draft_findings_from_run_log(name, run_log=held)
+    report = project[name]
+    with pytest.raises(ValueError, match='D-1: a blank fact is not accepted'):
+        project.accept_logged_finding(name, 'D-1', fact='  ')
+    with pytest.raises(ValueError, match='a discarded draft takes no fact'):
+        project.accept_logged_finding(name, 'D-1', fact='x', discard=True)
+    with pytest.raises(ValueError, match='waiting: D-1, A-1'):
+        project.accept_logged_finding(name, 'D-9')
+    assert fd.register(report) == []
+    assert project.accept_logged_finding(name, 'D-1', discard=True) is None
+    assert [draft['number'] for draft in fd.log_drafts(report)] == ['A-1']
+    assert fd.register(report) == []

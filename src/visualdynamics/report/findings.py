@@ -24,8 +24,19 @@ generated into it.
   edits it or discards it (`accept`, `discard`), and once accepted it
   is the author's fact. Until then the fact stays owed, on the page
   and in the check, marked as having a drafted fact waiting. Every
-  source of a draft feeds it through one function, `offer`, so a
-  later source (the run log) needs nothing else here.
+  source of a draft feeds it through one function, `offer`.
+- A **run log** brought into the project offers each deviation and
+  anomaly it holds as a draft (`offer_log`): its kind, its fact as
+  typed at the console and the log's number, proposed, citing the log,
+  test and entry. The drafts are kept beside the register, never in
+  it: the register and section 9 do not change, the section stays
+  owed, and the editing page shows the drafts marked as drafted from
+  the run log. Accepting one (`accept_log`) is what enters the finding,
+  under the log's number when it is free, with its fact through
+  `offer`; its cause, effect and approval or disposition stay owed. A
+  fact the author has written is never offered over, and the log's
+  approvals and dispositions are never offered. A log with no deviation
+  or anomaly offers nothing, never "none".
 - **Cause, effect and approval** are only ever typed.
 - **None** is the skeleton's one-step None (`none`), and it says only
   what the author asks it to: with nothing entered it writes the
@@ -318,6 +329,152 @@ def discard(report: Any, number: str) -> None:
                     else other for other in register(report)])
 
 
+#: what findings offered from a run log are marked with on the editing
+#: page until the author accepts them
+FROM_LOG = 'DRAFTED FROM THE RUN LOG, NOT YET ACCEPTED'
+
+#: where the deviations section's block keeps the findings a run log
+#: offers, apart from the register: nothing here is a finding until the
+#: author accepts it
+LOG_DRAFTS = 'log_drafts'
+
+
+def log_drafts(report: Any) -> list[dict[str, Any]]:
+    """The findings a run log offers `report` and the author has not
+    accepted or discarded, each {'number', 'kind', 'fact', 'source',
+    'run'}, in the order offered. The number is the log's, proposed;
+    none of them is in the register."""
+    block = _block(report)
+    held = block.get(LOG_DRAFTS) if block is not None else None
+    return [dict(draft) for draft in held or ()]
+
+
+def _keep_drafts(report: Any, drafts: Sequence[Mapping[str, Any]]) -> None:
+    held = skeleton.blocks_of(report, SECTION)
+    if not held and not drafts:
+        return
+    block = report.blocks[held[0] if held else skeleton.write(report,
+                                                              SECTION)]
+    if drafts:
+        block[LOG_DRAFTS] = [dict(draft) for draft in drafts]
+    else:
+        block.pop(LOG_DRAFTS, None)
+
+
+def offer_log(report: Any, extract: Any) -> list[str]:
+    """Offer the deviations and anomalies a run log extract holds as
+    drafts, and return a line on each.
+
+    Each is offered with the log's number, proposed, its kind and its
+    fact as typed at the console, its source citing the log, test and
+    entry (with the extract's badge when the log has newer entries). A
+    draft is kept beside the register, never in it: the register and
+    the deviations section do not change, the section stays owed, and
+    the editing page shows the drafts marked `FROM_LOG` until the author
+    accepts one (`accept_log`, which enters the finding) or discards it
+    (`discard_log`). A new offer replaces the drafts waiting. Not
+    offered, each with its line: a finding whose number the register
+    holds with its fact written, and a finding with no fact logged. The
+    cause, the effect and the approval or disposition are never offered,
+    whatever the log holds.
+
+    A log holding no deviation or anomaly offers nothing; its line says
+    so, and leaves setting the section to None (`none`) to the author.
+
+    Raises `ValueError` when the feature is off.
+    """
+    _require(report)
+    found = extract.findings()
+    if not found:
+        _keep_drafts(report, [])
+        return [(f'The run log holds no deviation or anomaly of test '
+                 f'{extract.test} by entry #{extract.upto}; nothing is '
+                 "offered, and whether there were none is the author's to "
+                 'say (set the section to None).')]
+    cited = extract.cited()
+    written = {entry['number'] for entry in register(report) if entry['fact']}
+    drafts, lines = [], []
+    for finding in found:
+        number = finding.number
+        fact = (finding.fact or '').strip()
+        if number in written:
+            lines.append(f"{number}: the register holds it with its fact "
+                         "written; the log's is not offered over it.")
+            continue
+        if not fact:
+            lines.append(f'{number}: the log holds no fact for it, so '
+                         'nothing is offered; enter it in the register.')
+            continue
+        run = finding.entry.run
+        drafts.append({'number': number, 'kind': finding.kind, 'fact': fact,
+                       'source': f'{cited}, entry #{finding.entry.id}',
+                       'run': str(run) if run is not None else ''})
+        lines.append(f'{number}: offered as a draft from the run log, not '
+                     'in the register until accepted.')
+    _keep_drafts(report, drafts)
+    return lines
+
+
+def _log_draft(report: Any, number: str) -> dict[str, Any]:
+    for draft in log_drafts(report):
+        if draft['number'] == number:
+            return draft
+    waiting = ', '.join(draft['number'] for draft in log_drafts(report))
+    raise ValueError(f'no finding {number} offered from the run log; '
+                     f'waiting: {waiting or "none"}')
+
+
+def accept_log(report: Any, number: str, text: str | None = None) -> str:
+    """Accept the finding the run log offered as `number`, and return the
+    number it is entered under.
+
+    The finding is entered in the register then, and not before: under
+    the log's number when the register has not given that number, and
+    otherwise under the next number of its kind (`add`); a finding the
+    register already holds under that number with its fact blank takes
+    the fact instead. Its fact, as offered or as the author edited it
+    (`text`), reaches it through the register's one entry point for
+    drafts (`offer`) and is accepted (`accept`); its run fills the
+    finding's where blank. Its cause, effect and approval or disposition
+    stay owed. The draft is no longer offered afterwards.
+
+    Raises `ValueError` when the feature is off, no draft is offered as
+    `number`, or the fact accepted is blank; nothing is changed.
+    """
+    _require(report)
+    draft = _log_draft(report, number)
+    kind = draft['kind']
+    if text is not None and not core.clean({'number': number,
+                                            'fact': text})['fact']:
+        raise ValueError(f'{number}: a blank fact is not accepted; discard '
+                         'the draft instead')
+    held = next((entry for entry in register(report)
+                 if entry['number'] == number), None)
+    _n = core.number(number)[1]
+    if held is not None and not held['fact']:
+        entered = number
+    elif held is None and _n > _issued(report).get(core.PREFIX[kind], 0):
+        entered = add(report, kind, number=number)
+    else:
+        entered = add(report, kind)
+    offer(report, entered, FactDraft(text=draft['fact'],
+                                     source=draft['source'],
+                                     run=draft['run']))
+    accept(report, entered, text)
+    _keep_drafts(report, [other for other in log_drafts(report)
+                          if other['number'] != number])
+    return entered
+
+
+def discard_log(report: Any, number: str) -> None:
+    """Drop the finding the run log offered as `number`; nothing enters
+    the register. Refused when no draft is offered as `number`."""
+    _require(report)
+    _log_draft(report, number)
+    _keep_drafts(report, [other for other in log_drafts(report)
+                          if other['number'] != number])
+
+
 def _hz(value: float) -> str:
     """A frequency with as few decimals as say it (one at least)."""
     for places in range(1, 5):
@@ -482,8 +639,17 @@ def check(report: Any, owed: Sequence[skeleton.Owed]) -> tuple[skeleton.Owed,
     found = skeleton.BY_KEY[SECTION]
     entries = register(report)
     words = skeleton.words(report, SECTION)
+    waiting = log_drafts(report)
+    # drafts from a run log are not findings: the section is owed as it
+    # was, and the check says what waits to be accepted
+    numbers = ', '.join(draft['number'] for draft in waiting)
+    extra = ([skeleton.Owed(
+        SECTION, found.number, found.title,
+        f'{numbers} offered from the run log, not yet accepted')]
+        if waiting else [])
     if not entries and not words:
-        return tuple(owed)
+        return (tuple(sorted([*owed, *extra], key=lambda item: item.number))
+                if extra else tuple(owed))
     said = core.declared(words)
     reasons = []
     for kind in core.KINDS:
@@ -504,7 +670,8 @@ def check(report: Any, owed: Sequence[skeleton.Owed]) -> tuple[skeleton.Owed,
     rest = [item for item in owed if item.key != SECTION]
     mine = [skeleton.Owed(SECTION, found.number, found.title, reason)
             for reason in reasons]
-    return tuple(sorted([*rest, *mine], key=lambda item: item.number))
+    return tuple(sorted([*rest, *mine, *extra],
+                        key=lambda item: item.number))
 
 
 # ---- the page ---------------------------------------------------------------
@@ -519,6 +686,8 @@ class Heads:
     deviations: dict[str, Any] | None
     summary_html: str
     deviations_html: str
+    #: the findings a run log offers, drawn on the editing page only
+    offered_html: str = ''
 
 
 def _escape(text: str) -> str:
@@ -609,7 +778,25 @@ def summary_html(entries: Sequence[Mapping[str, Any]], said: set[str]) -> str:
     return f'<p class="findings-summary">{" ".join(out)}</p>'
 
 
-def prepare(blocks: Sequence[dict[str, Any]], report: Any) -> Heads:
+def offered_html(drafts: Sequence[Mapping[str, Any]]) -> str:
+    """The findings a run log offers, as the editing page draws them under
+    section 9: marked `FROM_LOG`, each with its proposed number, its kind,
+    where it came from and its fact. '' when none is offered."""
+    if not drafts:
+        return ''
+    out = [(f'<p class="finding-head"><span class="finding-drafted">'
+            f'{FROM_LOG}</span></p>')]
+    for draft in drafts:
+        out.append(f'<p class="finding-part"><strong>Proposed '
+                   f'{html.escape(draft["number"])}.</strong> '
+                   f'{draft["kind"].capitalize()} <span class="finding-where">'
+                   f'({html.escape(draft["source"])})</span>: '
+                   f'{_escape(draft["fact"])}</p>')
+    return f'<div class="finding">{"".join(out)}</div>'
+
+
+def prepare(blocks: Sequence[dict[str, Any]], report: Any,
+            edit: bool = False) -> Heads:
     """Ready the page `skeleton.arrange` laid out for the register.
 
     Section 9's head keeps the skeleton's owed card while nothing is
@@ -617,7 +804,9 @@ def prepare(blocks: Sequence[dict[str, Any]], report: Any) -> Heads:
     section: its head shows the heading and the author's other words,
     the none sentences being drawn in their kinds' places by `draw`.
     Call before the text is drawn as HTML, and `draw` after
-    `skeleton.finish`.
+    `skeleton.finish`. With `edit`, the findings a run log offers
+    (`log_drafts`) are drawn under section 9 as well, marked as drafted;
+    they are never on the reading page.
     """
     def head(key):
         return next((block for block in blocks
@@ -636,7 +825,8 @@ def prepare(blocks: Sequence[dict[str, Any]], report: Any) -> Heads:
         deviations['text'] = core.withdraw(words, said - entered)
         deviations['skeleton']['state'] = 'written'
         filled = register_html(entries, said)
-    return Heads(summary, deviations, summary_html(entries, said), filled)
+    return Heads(summary, deviations, summary_html(entries, said), filled,
+                 offered_html(log_drafts(report)) if edit else '')
 
 
 def draw(heads: Heads) -> None:
@@ -648,3 +838,6 @@ def draw(heads: Heads) -> None:
     if heads.deviations is not None and heads.deviations_html:
         heads.deviations['html'] = heads.deviations.get('html', '') \
             + heads.deviations_html
+    if heads.deviations is not None and heads.offered_html:
+        heads.deviations['html'] = heads.deviations.get('html', '') \
+            + heads.offered_html

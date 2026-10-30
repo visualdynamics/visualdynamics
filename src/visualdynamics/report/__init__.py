@@ -427,7 +427,7 @@ def _report_payload(report, objects, unit_system=None, edit=False,
     if 'findings' in active:
         from .findings import prepare as prepare_findings
 
-        registered = prepare_findings(payload['blocks'], report)
+        registered = prepare_findings(payload['blocks'], report, edit)
     if conventions:
         apply_conventions(payload, kinded,
                           shared='shared_decades' in active)

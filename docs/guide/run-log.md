@@ -179,6 +179,16 @@ is typed, under its boxes, before anything is written:
   its axis, band and depth, as the log will judge it; one that is not
   holds the test until a deviation names it.
 
+**Predictions beside the readings.** When the window has drawn a notch
+prediction or a drive prediction for the project open in it, the dock
+keeps the last of each and shows it beside what is read: a notch entry
+shows the notch predicted at its band, in the prediction's own words,
+beside the band and depth observed, and the level row shows the
+predicted drive beside the drive fraction read, projected to full
+level. Nothing is predicted in the dock itself. With no prediction drawn
+(always so for the log alone with no project) each place reads **no
+prediction in a project**.
+
 **Findings.** A deviation carries the fact at the console; its cause,
 effect and approval are written when they are known, then or later by
 correction. The names typed into **Agreed at the console by** are

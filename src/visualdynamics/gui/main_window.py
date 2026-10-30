@@ -1688,6 +1688,10 @@ class MainWindow(QMainWindow):
         #: is asked for, and whether the window shows the log alone
         self.run_log_dock: Any = None
         self.run_log_only: bool = False
+        #: the last notch and drive predictions drawn, by kind ('limit',
+        #: 'drive'), each with the objects it was made from: what the Run
+        #: Log shows beside what is read (`RunLogPanel.offer_prediction`)
+        self.run_log_predictions: dict[str, tuple[Any, str]] = {}
         # the splitter takes the height going spare; without the
         # stretch the button bar below it claimed an even share and
         # stood a quarter of the window tall
@@ -3237,6 +3241,8 @@ class MainWindow(QMainWindow):
             dock.topLevelChanged.connect(self._run_log_moved)
             dock.dockLocationChanged.connect(self._run_log_moved)
             dock.panel.show_layout(self.run_log_only)
+            for kind, (prediction, source) in self.run_log_predictions.items():
+                dock.panel.offer_prediction(kind, prediction, source)
         dock.show()
         dock.raise_()
         if log_only is not None:
@@ -3296,6 +3302,14 @@ class MainWindow(QMainWindow):
 
     def _run_log_moved(self, *_where) -> None:
         self._remember_run_log_place()
+
+    def _offer_run_log(self, kind: str, prediction: Any, source: str) -> None:
+        """Keep the prediction just drawn for the Run Log, and hand it to
+        the dock when it is open: a notch entry and the level row show
+        it beside what is read."""
+        self.run_log_predictions[kind] = (prediction, source)
+        if self.run_log_dock is not None:
+            self.run_log_dock.panel.offer_prediction(kind, prediction, source)
 
     def _remember_run_log_place(self) -> None:
         """Store where the Run Log dock is, unless the log is alone in the
@@ -14042,6 +14056,9 @@ class MainWindow(QMainWindow):
                                unit_system=self.unit_system,
                                theme=self.theme_name)
         panel.show_prediction(prediction, unit_system=self.unit_system)
+        self._offer_run_log('limit', prediction, f'{frf_name} and {spec_name}'
+                            + ('' if profiles_name is None
+                               else f' with {profiles_name}'))
         prefix = ('visualdynamics.plot.plot_limit_prediction('
                   f'project[{frf_name!r}], project[{spec_name!r}]')
         given = ('' if profiles_name is None
@@ -14448,6 +14465,7 @@ class MainWindow(QMainWindow):
                                channel=channel, unit_system=self.unit_system,
                                theme=self.theme_name)
         panel.show_prediction(prediction)
+        self._offer_run_log('drive', prediction, f'{frf_name} and {spec_name}')
         given = ''.join(f', {key}={value!r}' for key, value in (
             ('method', settings['method']),
             ('tolerance', settings['tolerance']),

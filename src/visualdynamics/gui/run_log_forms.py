@@ -1,15 +1,17 @@
 """The Run Log's forms: the test header in full, the readings each kind
-of test takes, and the findings.
+of test takes, the findings, and the predictions read beside what is
+observed.
 
 Every form here is an `EntryForm` (`gui.run_log_dock`): its event time
 taken when it opens, Enter writing it, Esc putting it away, and nothing
 written when a box cannot be read. What a form computes from what is
 typed is shown under its boxes as it is typed (`EntryForm.live`): a
 sweep's current against the continuous rating, a shot's pulses against
-the budget, a notch's place in the plan. Each of those is read through
-the function the package keeps for it (`run_log_model.project`,
-`judge_pulses`, `notch_in_plan`), so a form says what the log will say
-once the entry is written.
+the budget, a notch's place in the plan and the notch predicted there.
+Each of those is read through the function the package keeps for it
+(`run_log_model.project`, `judge_pulses`, `notch_in_plan`, and the
+predictions' own readings), so a form says what the log will say once
+the entry is written.
 
 **The header** comes in three forms: the test opened, the roll to the
 next test (every field offered as it stands and carried unless
@@ -18,11 +20,21 @@ header change and the fields carried from the last test are marked
 until they are confirmed. Its fields are grouped as `HEADER_GROUPS`
 lists them, and every field of `run_log.HEADER_FIELDS` is in one group.
 
+**The predictions** are the ones the window drew for the project open
+in it: the notch the limit channels would cut (`core.limit_prediction`)
+and the drives the specification asks for (`core.drive_prediction`).
+The window hands each one to the dock when it is drawn
+(`RunLogPanel.offer_prediction`), and the dock shows it beside what is
+read: a notch entry beside the predicted notch at its band, and the
+level row's drive beside the predicted drive. Nothing is predicted here.
+With none drawn, which is always so for a log kept with no project, the
+place it would be shown says so.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -30,6 +42,8 @@ from ..core.run_log import (
     DIRECTIONS,
     HEADER_FIELDS,
     SETTING_CLASSES,
+    RunLogError,
+    band_hz,
 )
 from ..core.run_log_model import (
     SHOT_CHECKS,
@@ -39,6 +53,9 @@ from ..core.run_log_model import (
     project,
 )
 from .run_log_dock import EntryForm, Snapshot, notches_text
+
+#: what a prediction field reads when the window has drawn none
+NO_PREDICTION = 'no prediction in a project'
 
 #: the header's fields in the groups the header form shows them in:
 #: (group title, ((field, label, box kind), ...)). Every field of
@@ -102,6 +119,19 @@ FOR_SHAPES = {
     'shot': ('shots', 'any'),
     'result': ('result', 'any'),
 }
+
+
+@dataclass(frozen=True)
+class Predictions:
+    """The predictions the window drew for the project open in it: the
+    notch prediction (`core.limit_prediction.LimitPrediction`) and the
+    drive prediction (`core.drive_prediction.DrivePrediction`), each None
+    until one is drawn, with the objects each was made from in words."""
+
+    limit: Any = None
+    limit_from: str = ''
+    drive: Any = None
+    drive_from: str = ''
 
 
 # ---- the header ----------------------------------------------------------------
@@ -300,11 +330,13 @@ def result_form(taken: datetime) -> EntryForm:
                      required=('result',))
 
 
-def notch_form(taken: datetime, seen: Snapshot | None, axis: str | None
-               ) -> EntryForm:
+def notch_form(taken: datetime, seen: Snapshot | None, axis: str | None,
+               predictions: Callable[[], Predictions]) -> EntryForm:
     """A notch: its axis, channel, band and depth. Live: whether it is
     in the header's planned list (`run_log_model.notch_in_plan`, the
-    rule a written notch is held by)."""
+    rule a written notch is held by), and the notch predicted at its
+    band beside it, from the predictions as `predictions()` gives them
+    when the form is read."""
     header = dict(seen.header) if seen is not None else {}
     fields = [('axis', 'Axis', 'text', None),
               ('channel', 'Channel', 'text', None),
@@ -312,18 +344,83 @@ def notch_form(taken: datetime, seen: Snapshot | None, axis: str | None
               ('depth_db', 'Depth (dB)', 'number', None)]
     return EntryForm('notch', 'Notch', fields, taken, required=('band',),
                      defaults={'axis': axis},
-                     live=lambda form: notch_text(header, form))
+                     live=lambda form: notch_text(header, form,
+                                                  predictions()))
 
 
-def notch_text(header: Mapping[str, Any], form: EntryForm) -> str:
-    """A notch's place in the plan, in words."""
+def notch_text(header: Mapping[str, Any], form: EntryForm,
+               predictions: Predictions) -> str:
+    """A notch's place in the plan, then the prediction beside it."""
     typed = _typed(form, 'band', 'depth_db')
     planned, why = notch_in_plan(header.get('notches_planned'),
                                  form.value('axis'), typed)
     plan = (f'Planned: {why}' if planned else
             f'Not planned: {why} Written, it holds the test until a '
             'deviation names it.')
-    return plan
+    return plan + '\n' + predicted_notch_text(predictions, typed.get('band'),
+                                              typed.get('depth_db'))
+
+
+def predicted_notch_text(predictions: Predictions, band: Any,
+                         depth_db: float | None) -> str:
+    """The notch the limit prediction cuts at `band` beside the notch
+    observed there, each predicted notch in the prediction's own words
+    (`Notch.describe`); with no band typed, the prediction's verdict.
+    'no prediction in a project' when the window has drawn none."""
+    prediction = predictions.limit
+    if prediction is None:
+        return f'Predicted: {NO_PREDICTION}'
+    said = f'Predicted (from {predictions.limit_from})'
+    if band is None:
+        return f'{said}: {prediction.verdict()}'
+    try:
+        low, high = band_hz(band, 'the band')
+    except RunLogError as error:
+        return f'{said}: not compared: {error}'
+    observed = (f'Observed: {low:g} to {high:g} Hz, '
+                + (f'{abs(depth_db):g} dB deep' if depth_db is not None
+                   else 'no depth given'))
+    near = [notch for notch in prediction.notches
+            if notch.low <= high and notch.high >= low]
+    if not near:
+        return (f'{said}: no notch from {low:g} to {high:g} Hz; '
+                f'{prediction.verdict()}\n{observed}')
+    return (f'{said}: '
+            + '; '.join(notch.describe(prediction.dimension,
+                                       prediction.tolerance)
+                        for notch in near)
+            + f'\n{observed}')
+
+
+def drive_text(predictions: Predictions, header: Mapping[str, Any],
+               fields: Mapping[str, Any]) -> str:
+    """The drive predicted for the test's setup (each drive demand in
+    the prediction's own words, `Demand.describe`) beside the drive the
+    level row reads, its drive fraction projected to full level
+    (`run_log_model.project`). 'no prediction in a project' when the
+    window has drawn none."""
+    prediction = predictions.drive
+    if prediction is None:
+        return f'Predicted drive: {NO_PREDICTION}'
+    drives = [demand.describe() for demand in prediction.demands
+              if demand.kind == 'drive']
+    said = (f'Predicted drive (from {predictions.drive_from}): '
+            + ('; '.join(drives) if drives
+               else 'the prediction judges no drive'))
+    level = fields.get('level_db')
+    fraction = fields.get('drive_fraction')
+    if fraction is None:
+        return f'{said}\nRead drive: no drive fraction read'
+    if level is None:
+        return f'{said}\nRead drive: {fraction:g} of the range, at no level'
+    try:
+        check = project(level, drive_fraction=fraction,
+                        drive_window=header.get('drive_window')
+                        ).check('drive fraction')
+    except RunLogError as error:
+        return f'{said}\nRead drive: not projected: {error}'
+    return (f'{said}\nRead drive: {fraction:g} of the range at '
+            f'{level:+g} dB; {check.message}')
 
 
 # ---- the findings and the rest -------------------------------------------------

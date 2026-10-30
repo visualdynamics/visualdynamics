@@ -1,8 +1,8 @@
 """The Run Log's forms: the test header in full, carried fields marked
 until confirmed, the readings of each kind of test (a sweep against the
 continuous rating, a shot's four checks and its pulses against the
-budget, a survey's result), the notch against the plan and the
-findings.
+budget, a survey's result), the notch against the plan, the findings,
+and the predictions read beside what is observed.
 
 Every log is written under `tmp_path`, with a fixed login and machine
 name, on a clock the test sets. Each form is driven the way the keeper
@@ -18,14 +18,17 @@ import threading
 import weakref
 from datetime import datetime, timedelta, timezone
 
+import numpy as np
 import pytest
 from conftest import destroy_window, release_modifiers
 
+from visualdynamics.core.data import Frf, Specification
 from visualdynamics.core.run_log import HEADER_FIELDS, RunLog
 
 WHO = ('tester', 'bench')
 ZONE = timezone(timedelta(hours=-6))
 START = datetime(2026, 10, 30, 8, 0, tzinfo=ZONE)
+G = 9.80665
 
 RANDOM = {'test_kind': 'Random Vibration', 'title': 'Random, Z',
           'steps_db': '-12, -6, -3, 0', 'sigma': '3',
@@ -557,6 +560,134 @@ def test_a_limit_changed_holds_and_an_opinion_is_written(panel, tmp_path):
     assert dict(opinion.fields) == {
         'to': 'C. Rep',
         'opinion': 'the bracket response looks like a loose joint'}
+
+
+# ---- the predictions ------------------------------------------------------
+
+
+def _limit_prediction():
+    """A limit channel of transmissibility 4 over 240 to 260 Hz against a
+    flat profile of 0.18 g^2/Hz, under a flat reference of 0.04 g^2/Hz:
+    the control comes down 5.51 dB there."""
+    from visualdynamics.core.limit_prediction import predict_limits
+
+    f = np.arange(0.0, 2001.0, 1.0)
+    t = np.ones(len(f), dtype=complex)
+    t[(f >= 240) & (f <= 260)] = 4.0
+    frf = Frf(f, t[None], response_dof=['2Z+'], reference_dof=['1Z+'],
+              ordinate_dim='acceleration/acceleration')
+    values = np.array([[0.04, 0.04], [0.18, 0.18]]) * G ** 2
+    spec = Specification(
+        np.array([20.0, 2000.0]), values, response_dof=['1Z+', '2Z+'],
+        ordinate_dim='acceleration**2/frequency',
+        abort_lower=np.array([values[0] * 0.5, np.full(2, np.nan)]),
+        abort_upper=np.array([values[0] * 2.0, np.full(2, np.nan)]))
+    return frf, spec, predict_limits(frf, spec)
+
+
+def _drive_prediction():
+    """397 lines of 5 Hz at 0.01 V^2/Hz: 4.455 V rms; at a peak factor of
+    three, 13.37 V against a 10 V limit, 134 %."""
+    from visualdynamics.core.drive_prediction import predict_drives
+
+    f = np.arange(0.0, 2002.5, 5.0)
+    frf = Frf(f, np.full(len(f), 2.0 * G, dtype=complex)[None],
+              response_dof='1Z+', reference_dof='1Z+',
+              ordinate_dim='acceleration/voltage')
+    spec = Specification(np.array([20.0, 2000.0]),
+                         np.array([[0.04, 0.04]]) * G ** 2,
+                         response_dof=['1Z+'],
+                         ordinate_dim='acceleration**2/frequency')
+    return predict_drives(frf, spec, drive_limit=10.0, peak_factor=3.0)
+
+
+def test_a_notch_shows_the_predicted_notch_beside_the_observed(panel,
+                                                               tmp_path):
+    _opened(panel, tmp_path, **RANDOM)
+    _frf, _spec, prediction = _limit_prediction()
+    (notch,) = prediction.notches
+    form = _form(panel, 'notch', band='245-255', depth_db='5')
+    assert form.live_label.text().splitlines()[1] == \
+        'Predicted: no prediction in a project'
+    # offered while the form is up, it is shown at once
+    panel.offer_prediction('limit', prediction, 'T and S')
+    lines = form.live_label.text().splitlines()
+    assert lines[1] == ('Predicted (from T and S): '
+                        + notch.describe(prediction.dimension,
+                                         prediction.tolerance))
+    assert lines[1].startswith('Predicted (from T and S): notch from 240 to '
+                               '260 Hz (21 lines): 5.5 dB deep at 240 Hz')
+    assert lines[2] == 'Observed: 245 to 255 Hz, 5 dB deep'
+    form.set_box('band', '600-700')
+    lines = form.live_label.text().splitlines()
+    assert lines[1] == ('Predicted (from T and S): no notch from 600 to 700 '
+                        f'Hz; {prediction.verdict()}')
+    assert lines[2] == 'Observed: 600 to 700 Hz, 5 dB deep'
+    form.set_box('band', '')
+    assert form.live_label.text().splitlines()[1] == \
+        f'Predicted (from T and S): {prediction.verdict()}'
+    form.set_box('band', 'wide')
+    assert 'not compared:' in form.live_label.text().splitlines()[1]
+
+
+def test_the_level_row_shows_the_predicted_drive_beside_the_read(panel,
+                                                                 tmp_path):
+    """The read drive fraction 0.12 at -12 dB is 0.478 of the range at
+    full level, beside the predicted drive in the prediction's words."""
+    from PySide6.QtTest import QTest
+
+    _opened(panel, tmp_path, **RANDOM)
+    row = panel.level_row
+    assert row.prediction_label.text() == \
+        'Predicted drive: no prediction in a project'
+    prediction = _drive_prediction()
+    (drive,) = [d for d in prediction.demands if d.kind == 'drive']
+    panel.offer_prediction('drive', prediction, 'F and S')
+    assert row.prediction_label.text() == (
+        f'Predicted drive (from F and S): {drive.describe()}\n'
+        'Read drive: no drive fraction read')
+    assert drive.describe().startswith('drive at 1Z+: 4.46 V rms, 13.4 V '
+                                       'expected peak against 10 V (134 %')
+    row.drive_box.setFocus()
+    QTest.keyClicks(row.drive_box, '0.12')
+    assert row.prediction_label.text().splitlines()[1] == (
+        'Read drive: 0.12 of the range at -12 dB; 0.478 of the range at full '
+        'level, within the default window 0.333 to 0.667')
+    row.level_box.setText('3')
+    assert 'not projected: a level of +3 dB is above full level' in \
+        row.prediction_label.text()
+
+
+def test_the_log_alone_with_no_project_says_there_is_no_prediction(
+        window, clock, tmp_path):
+    window.set_log_only(True)
+    panel = window.run_log_dock.panel
+    panel.clock = panel.log_clock = clock
+    panel.who = WHO
+    _opened(panel, tmp_path, **RANDOM)
+    assert panel.level_row.prediction_label.isVisibleTo(panel)
+    assert panel.level_row.prediction_label.text() == \
+        'Predicted drive: no prediction in a project'
+    form = _form(panel, 'notch', band='245-255')
+    assert form.live_label.text().splitlines()[1] == \
+        'Predicted: no prediction in a project'
+
+
+def test_the_window_hands_the_notch_prediction_it_draws_to_the_log(window):
+    frf, spec, _prediction = _limit_prediction()
+    window._render_notch('T', frf, 'S', spec, None, None)
+    kept, source = window.run_log_predictions['limit']
+    assert source == 'T and S' and kept.notches
+    # kept for a dock opened later, and handed to one already open
+    panel = window.show_run_log().panel
+    assert panel.predictions.limit is kept
+    assert panel.predictions.limit_from == 'T and S'
+    window._render_notch('T2', frf, 'S', spec, None, None)
+    assert panel.predictions.limit_from == 'T2 and S'
+    assert panel.predictions.limit is window.run_log_predictions['limit'][0]
+    with pytest.raises(ValueError, match="'shock' is not a kind of "
+                                         'prediction'):
+        panel.offer_prediction('shock', None, '')
 
 
 # ---- drawn, and torn down -------------------------------------------------

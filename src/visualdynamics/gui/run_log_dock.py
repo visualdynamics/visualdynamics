@@ -44,7 +44,8 @@ What it takes:
   carried fields marked until confirmed; a sweep, a shot, a survey's
   result, a notch, a deviation, an anomaly and its disposition, a
   setting change and an opinion given, each computing what the log will
-  judge as it is typed.
+  judge as it is typed, and the predictions the window drew shown
+  beside what is read.
 
 Every read and write of the file, and every rebuild of the model from
 it, runs on one worker thread of its own (`LogWorker`), in order, and
@@ -743,8 +744,8 @@ class EntryForm(QWidget):
 
     A field of kind 'heading' is a group's title, not a box. `live`, when
     given, is read on every change to a box and shown under the boxes:
-    what the form computes from what is typed (a budget, a count, a place
-    in the plan), without writing anything."""
+    what the form computes from what is typed (a budget, a count, a
+    prediction), without writing anything."""
 
     written = Signal()
     cancelled = Signal()
@@ -1058,6 +1059,13 @@ class LevelRow(QWidget):
         self.projection_label.setWordWrap(True)
         self.projection_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
+        #: the drive predicted for the test's setup beside the drive read,
+        #: given by the panel from the row's fields; None shows nothing
+        self.predicted: Callable[[Mapping[str, Any]], str] | None = None
+        self.prediction_label: QLabel = QLabel('')
+        self.prediction_label.setWordWrap(True)
+        self.prediction_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
         self.message: QLabel = QLabel('')
         self.message.setWordWrap(True)
         title = QLabel('Level row (Enter writes it)')
@@ -1071,6 +1079,7 @@ class LevelRow(QWidget):
         column_layout.addLayout(heading)
         column_layout.addLayout(grid)
         column_layout.addWidget(self.projection_label)
+        column_layout.addWidget(self.prediction_label)
         column_layout.addWidget(self.message)
         column_layout.addStretch(1)
         for line in (self.level_box, self.voltage_box, self.current_box,
@@ -1128,7 +1137,8 @@ class LevelRow(QWidget):
                 if value is not None}
 
     def redraw(self) -> None:
-        """The projection to full level of what the row holds now."""
+        """The projection to full level of what the row holds now, and
+        the drive predicted beside the drive read."""
         try:
             fields = self.fields()
         except RunLogError as error:
@@ -1138,6 +1148,8 @@ class LevelRow(QWidget):
             self.header, fields.get('level_db'),
             voltage=fields.get('voltage'), current=fields.get('current'),
             drive_fraction=fields.get('drive_fraction')))
+        self.prediction_label.setText(
+            self.predicted(fields) if self.predicted is not None else '')
 
     def write(self) -> None:
         """Hand the row to `on_write` with its event time."""
@@ -1233,8 +1245,16 @@ class RunLogPanel(QWidget):
         self.run_label: QLabel = QLabel('')
         self.message: QLabel = QLabel('')
         self.message.setWordWrap(True)
+        from .run_log_forms import Predictions, drive_text
+
+        #: the predictions the window drew for its project, shown beside
+        #: what is read (`offer_prediction`)
+        self.predictions: Predictions = Predictions()
         self.level_row: LevelRow = LevelRow(lambda: self.clock())
         self.level_row.on_write = self.write_level
+        self.level_row.predicted = lambda fields: drive_text(
+            self.predictions, self.level_row.header, fields)
+        self.level_row.redraw()
         self.entry_stack: QStackedWidget = QStackedWidget()
         self.entry_stack.addWidget(self.level_row)
         self._form_holder: QScrollArea | None = None
@@ -1371,7 +1391,7 @@ class RunLogPanel(QWidget):
                 ('result', 'Result', ('A survey or functional run\'s result, '
                                       'and who ran it')),
                 ('notch', 'Notch', ('A notch: axis, band and depth, planned '
-                                    'or not')),
+                                    'or not, beside the prediction')),
                 ('deviation', 'Deviation', ('A deviation: the fact at the '
                                             'console, and cause, effect and '
                                             'approval when known')),
@@ -1695,7 +1715,8 @@ class RunLogPanel(QWidget):
             'sweep': lambda: forms.sweep_form(taken, seen),
             'shot': lambda: forms.shot_form(taken, seen, self._axis()),
             'result': lambda: forms.result_form(taken),
-            'notch': lambda: forms.notch_form(taken, seen, self._axis()),
+            'notch': lambda: forms.notch_form(taken, seen, self._axis(),
+                                              lambda: self.predictions),
             'deviation': lambda: forms.deviation_form(taken, seen),
             'anomaly': lambda: forms.anomaly_form(taken),
             'disposition': lambda: forms.disposition_form(taken, seen),
@@ -1946,6 +1967,29 @@ class RunLogPanel(QWidget):
                 and entry.id in self.snapshot.deviation_wanted:
             self.say(f'Notch #{entry.id} is not planned: the test holds until '
                      f'a deviation names it ({KEYS["deviation"]}).')
+
+    def offer_prediction(self, kind: str, prediction: Any,
+                         source: str) -> None:
+        """Show `prediction` beside what is read: a notch prediction
+        (`kind` 'limit', `core.limit_prediction.LimitPrediction`) beside
+        a notch entry, a drive prediction ('drive',
+        `core.drive_prediction.DrivePrediction`) beside the level row's
+        drive. `source` names the objects it was made from. The window
+        offers each prediction it draws; None takes it away."""
+        from dataclasses import replace
+
+        if kind == 'limit':
+            self.predictions = replace(self.predictions, limit=prediction,
+                                       limit_from=source)
+        elif kind == 'drive':
+            self.predictions = replace(self.predictions, drive=prediction,
+                                       drive_from=source)
+        else:
+            raise ValueError(f'{kind!r} is not a kind of prediction; it is '
+                             'limit or drive')
+        self.level_row.redraw()
+        if self.form is not None:
+            self.form.refresh()
 
     def _open(self, form: EntryForm) -> None:
         self._close_form()

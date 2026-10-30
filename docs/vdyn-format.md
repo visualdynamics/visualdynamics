@@ -13,16 +13,19 @@ it.
 
 Every file stamps one root attribute:
 
-    visualdynamics_schema = 1 or 2   (integer)
+    visualdynamics_schema = 1, 2 or 3   (integer)
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
 never renamed or given a new meaning. Version 2 added the response
 predictions (`predictions/`, below) and the report block that reads a
 measurement against them; a reader that knows only version 1 would
-meet a kind it cannot read, so a file holding either is stamped 2, and
-every other file is stamped 1 as before, so an older reader still opens
-it. The reader follows three rules:
+meet a kind it cannot read, so a file holding either is stamped 2.
+Version 3 added the run log extract (`run_log_extract/`, below), and a
+file holding one is stamped 3. Every other file is stamped with the
+earliest version that holds everything in it, 1 when it holds nothing
+a later version added, so an older reader still opens it. The reader
+follows three rules:
 
 - a stamp newer than the reader knows is refused with a message saying
   the file was written by a newer Visual Dynamics and to update to open
@@ -45,8 +48,8 @@ imported and exported beside it, for exchanging data with other tools.
 
 A single object saved on its own is one group at the root, named for
 its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
-`matches/`, `channel_table/`, `sine_specification/`, `sine_levels/` or
-`predictions/`.
+`matches/`, `channel_table/`, `sine_specification/`, `sine_levels/`,
+`predictions/` or `run_log_extract/`.
 The loader recognizes the file by the group it finds.
 
 A whole project is an `objects/` container of numbered groups (`0000`,
@@ -268,6 +271,24 @@ Present only where they mean something:
 A report's blocks may include one of kind `prediction`, naming the
 predictions (`source`) and the measurement (`measured`) with the level
 it was run at (`level`, dB relative to full level, or null).
+
+## `run_log_extract/` (schema 3)
+
+    run_log_extract/  attrs: path, test, upto, taken, log_size, after,
+                      after_in_test, problems (a JSON list of strings)
+                      dset log (one UTF-8 string: the snapshot, the
+                      run log's own JSON Lines)
+
+One test of a run log (`.vdlog`), frozen at entry `upto`: `log` holds
+the log's header line and the lines of the entries kept, exactly as the
+log file had them, so it reads with the run log's own reader for its
+version and its chains verify. `path` is where the log was, relative to
+the project file (with forward slashes) when the log was in the
+project file's folder or one beneath it, absolute otherwise. `taken` is
+when the snapshot was taken (ISO 8601 with its offset), `log_size` the
+log file's size in bytes then, `after` and `after_in_test` how many
+entries the file held after `upto` then, in all and of the test, and
+`problems` the lines before `upto` skipped as not entries.
 
 ## Reading one without Visual Dynamics
 

@@ -13,7 +13,14 @@ touches every object kind and the optional fields (averaging,
 scale_db, complex modal mass and damping, links, roles, project type)
 whose absent-with-a-default handling is what future readers must keep.
 Schema 2 adds the predictions and the report block that reads them.
+Schema 3 adds a run log extract, taken from the frozen run log of
+`vdlog_corpus/` and stored as if the log sat beside the project file,
+so the frozen file holds a relative path and the log is not found
+beside it, which is a case a reader must keep too.
 """
+
+import os
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
@@ -26,6 +33,7 @@ from visualdynamics.core.matches import MatchedModes
 from visualdynamics.core.photos import Photos
 from visualdynamics.core.prediction import Prediction, Predictions
 from visualdynamics.core.report import Report
+from visualdynamics.core.run_log_extract import RunLogExtract, take
 from visualdynamics.core.shapes import ShapeSet
 from visualdynamics.core.shocks import Shock
 from visualdynamics.core.sine import (
@@ -42,6 +50,22 @@ ONE_PIXEL_PNG = bytes.fromhex(
     '89504e470d0a1a0a0000000d494844520000000100000001080200000090'
     '7753de0000000c4944415408d763f8cfc00000030101'
     '00c9fe92ef0000000049454e44ae426082')
+
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def run_log_extract() -> RunLogExtract:
+    """Test 1 of the frozen run log, as if the log were beside the
+    corpus file, taken at a fixed time."""
+    taken = take(os.path.join(HERE, 'vdlog_corpus', 'v1.vdlog'), test=1)
+    return RunLogExtract(
+        taken.text, path=os.path.join(HERE, 'vdyn_corpus', 'v1.vdlog'),
+        test=taken.test, upto=taken.upto,
+        taken=datetime(2026, 10, 30, 12, 0,
+                       tzinfo=timezone(timedelta(hours=-6))),
+        log_size=taken.log_size, after=taken.after,
+        after_in_test=taken.after_in_test, problems=taken.problems)
 
 
 def build_project() -> visualdynamics.Project:
@@ -137,6 +161,8 @@ def build_project() -> visualdynamics.Project:
     project.add('Matches', matches)
     project.add('Photos', photos)
     project.add('Predictions', predictions)
+    # schema 3: the run log brought in
+    project.add('Run Log, Test 1', run_log_extract())
     # through the project's own verbs, so the file carries provenance
     # — the staleness fingerprints have to survive a save too
     psds = project.compute_psds('Time History')

@@ -31,39 +31,50 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.matches import MatchedModes
     from ..core.photos import Photos
     from ..core.report import Report
+    from ..core.run_log_extract import RunLogExtract
     from ..core.shapes import ShapeSet
 
 #: the newest schema this build reads. Version 2 adds response
 #: predictions (`core.prediction`): a `Predictions` object, and the
-#: report block that reads a measurement against one. A file is stamped
-#: 2 only when it holds either (`schema_for`); every other file is
-#: stamped 1, as before, so a build that reads only version 1 still
-#: opens it, and refuses one with predictions with its message to
-#: update rather than failing on a kind it does not know.
-SCHEMA_VERSION = 2
+#: report block that reads a measurement against one. Version 3 adds
+#: the run log brought into a project (`core.run_log_extract`): a
+#: `RunLogExtract` object. A file is stamped with the newest version
+#: whose additions it holds (`schema_for`), and 1 when it holds none,
+#: so a build that reads only an earlier version still opens every
+#: file that does not need a later one, and refuses one that does with
+#: its message to update rather than failing on a kind it does not know.
+SCHEMA_VERSION = 3
 
-#: the schema of a file that holds nothing version 2 added
+#: the schema of a file that holds nothing version 2 or 3 added
 BASE_SCHEMA = 1
 
 #: the schema of a file holding predictions
 PREDICTIONS_SCHEMA = 2
 
+#: the schema of a file holding a run log extract
+RUN_LOG_SCHEMA = 3
+
 
 def schema_for(objects: Any) -> int:
     """The schema version a file holding `objects` (one object, or a
-    mapping of names to objects) is stamped with: 2 when it holds
-    predictions or a report reading one, 1 otherwise."""
+    mapping of names to objects) is stamped with: 3 when it holds a run
+    log extract, 2 when it holds predictions or a report reading one
+    (and no extract), 1 otherwise."""
     from ..core.prediction import Predictions
     from ..core.report import Report
+    from ..core.run_log_extract import RunLogExtract
 
     held = objects.values() if isinstance(objects, Mapping) else [objects]
+    stamp = BASE_SCHEMA
     for obj in held:
+        if isinstance(obj, RunLogExtract):
+            return RUN_LOG_SCHEMA
         if isinstance(obj, Predictions) or (
                 isinstance(obj, Report) and any(
                     block.get('kind') == 'prediction'
                     for block in obj.blocks)):
-            return PREDICTIONS_SCHEMA
-    return BASE_SCHEMA
+            stamp = PREDICTIONS_SCHEMA
+    return stamp
 
 
 def _write_ragged(group: h5py.Group, name: str,
@@ -822,6 +833,58 @@ def load_photos(group: h5py.Group) -> Photos:
                           for i in range(len(names))])
 
 
+def _file_path(group: h5py.Group) -> str | None:
+    """The path of the file `group` is in, or None for a file held in
+    memory (a MATLAB or ESCDF layout being built), whose name is only a
+    label."""
+    if group.file.driver in ('core', 'fileobj'):
+        return None
+    return os.path.abspath(group.file.filename)
+
+
+def save_run_log_extract(extract: RunLogExtract, group: h5py.Group) -> None:
+    """Write a `RunLogExtract` into `group`: the snapshot's JSON Lines
+    whole, in a dataset (it can pass the 64 KiB an attribute holds), and
+    what it was taken from as attributes. The log's path is stored
+    relative to the project file when the log is in the file's folder
+    or one beneath it (`run_log_extract.stored_path`), so a project
+    moved with its log still finds it."""
+    import json
+
+    import h5py
+
+    from ..core.run_log_extract import stored_path
+
+    group.attrs['path'] = stored_path(extract.path, _file_path(group))
+    group.attrs['test'] = extract.test
+    group.attrs['upto'] = extract.upto
+    group.attrs['taken'] = extract.taken.isoformat()
+    group.attrs['log_size'] = extract.log_size
+    group.attrs['after'] = extract.after
+    group.attrs['after_in_test'] = extract.after_in_test
+    group.attrs['problems'] = json.dumps(list(extract.problems))
+    group.create_dataset('log', data=extract.text,
+                         dtype=h5py.string_dtype('utf-8'))
+
+
+def load_run_log_extract(group: h5py.Group) -> RunLogExtract:
+    import json
+
+    from ..core.run_log_extract import RunLogExtract, resolved_path
+
+    def text(value: Any) -> str:
+        return value.decode('utf-8') if isinstance(value, bytes) else str(value)
+
+    attrs = group.attrs
+    return RunLogExtract(
+        text(group['log'][()]),
+        path=resolved_path(text(attrs['path']), _file_path(group)),
+        test=int(attrs['test']), upto=int(attrs['upto']),
+        taken=text(attrs['taken']), log_size=int(attrs['log_size']),
+        after=int(attrs['after']), after_in_test=int(attrs['after_in_test']),
+        problems=json.loads(text(attrs['problems'])))
+
+
 def save_matches(matches: MatchedModes, group: h5py.Group) -> None:
     group.attrs['first'] = matches.first
     group.attrs['second'] = matches.second
@@ -921,6 +984,7 @@ def _savers():
     from ..core.photos import Photos
     from ..core.prediction import Predictions
     from ..core.report import Report
+    from ..core.run_log_extract import RunLogExtract
     from ..core.shapes import ShapeSet
     from ..core.sine import SineLevelSet, SineSweepSpecification
 
@@ -934,7 +998,8 @@ def _savers():
             (Photos, 'photos', save_photos),
             (MatchedModes, 'matches', save_matches),
             (ChannelTable, 'channel_table', save_channel_table),
-            (Predictions, 'predictions', save_predictions)]
+            (Predictions, 'predictions', save_predictions),
+            (RunLogExtract, 'run_log_extract', save_run_log_extract)]
 
 
 _LOADERS = {'geometry': load_geometry,
@@ -946,7 +1011,8 @@ _LOADERS = {'geometry': load_geometry,
             'photos': load_photos,
             'matches': load_matches,
             'channel_table': load_channel_table,
-            'predictions': load_predictions}
+            'predictions': load_predictions,
+            'run_log_extract': load_run_log_extract}
 
 
 def _saver_for(obj):

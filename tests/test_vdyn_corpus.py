@@ -142,6 +142,28 @@ def test_schema2_predictions_are_intact():
         'caption': 'schema exercise'}
 
 
+def test_schema3_run_log_extract_is_intact():
+    """Schema 3 added the run log extract: test 1 of the frozen run log,
+    its path stored relative to the project file, the log itself not
+    beside it."""
+    p = native.load(os.path.join(str(CORPUS), 'schema3.vdyn'))
+    held = p['Run Log, Test 1']
+    assert held.path == os.path.normpath(os.path.join(str(CORPUS),
+                                                      'v1.vdlog'))
+    assert (held.test, held.upto, held.log_size) == (1, 11, 5284)
+    assert held.log_id == 'c450fa86662a4b189b0a3fa1c5d80fee'
+    assert held.head == ('6053046025deae4ec09f738a9587c728'
+                         '218cbdb0d1704cc72551975cd5a28782')
+    assert held.verify().ok
+    assert (held.kind, held.title, held.state) == (
+        'Random Vibration', 'Random, Z', 'closed to runs')
+    assert [(f.number, f.fact) for f in held.findings()] == [
+        ('D-1', 'a notch at 180 Hz not in the plan')]
+    assert [row.file.name for row in held.files()] == ['run2.csv']
+    assert held.taken.isoformat() == '2026-10-30T12:00:00-06:00'
+    assert held.status().state == 'missing'
+
+
 def test_a_newer_schema_is_refused_not_half_loaded(tmp_path):
     newer = tmp_path / 'from_the_future.vdyn'
     shutil.copy(os.path.join(str(CORPUS), 'schema1.vdyn'), newer)

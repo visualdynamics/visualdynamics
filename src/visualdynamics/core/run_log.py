@@ -1135,6 +1135,34 @@ class RunLog:
             raise FileNotFoundError(f'no run log at {path}')
         with open(path, 'rb') as handle:
             data = handle.read()
+        return cls.parse(data, path)
+
+    @classmethod
+    def parse(cls, data: bytes, path: str = '<memory>') -> RunLog:
+        """A run log read from `data`, the bytes of a `.vdlog`, read-only:
+        `read` without the file, for a log held in memory (a snapshot
+        kept in a project) or bytes read once and examined more than
+        one way.
+
+        Parameters
+        ----------
+        data : bytes
+            The log's bytes, its header line first.
+        path : str, optional
+            What the log is called in messages, and its `path`.
+
+        Returns
+        -------
+        RunLog
+            The log, every entry that could be read in it, and the lines
+            that could not in `problems`.
+
+        Raises
+        ------
+        RunLogError
+            When `data` is empty, is not a run log, or is of a newer
+            format version than this build reads.
+        """
         if not data.strip():
             raise RunLogError(f'{path} is empty: it has no header line, so it '
                               'holds no log yet')

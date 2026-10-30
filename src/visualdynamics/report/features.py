@@ -117,6 +117,12 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
                _has_module('visualdynamics.core.chance')),
     Capability('record_caption', "the caption read off a plot's record",
                _has_module('visualdynamics.core.report_caption')),
+    # a feature that draws on a run log brought into the project (its
+    # chronology, findings, files and head hash) names this; whether a
+    # given project holds an extract is the feature's own question,
+    # asked of `project.run_log_extracts` when it renders
+    Capability('run_log_extract', 'the run log brought into a project',
+               _has_module('visualdynamics.core.run_log_extract')),
 )}
 
 

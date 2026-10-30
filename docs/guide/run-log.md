@@ -550,3 +550,99 @@ a run log that holds each test's head hash, so the report's record of
 data carries the anchor that `log.verify(heads=...)` checks the log
 against. The data index is the project's one index of files: the log
 writes into it rather than keeping one of its own.
+
+## In a project
+
+A report holds references to the objects of its project, never data
+that can move under it, and a log keeps growing while the test runs.
+So a log is brought into a project as a **run log extract**: one test,
+frozen at a stated entry, the way photos are brought in.
+
+```python
+import visualdynamics
+
+project = visualdynamics.Project('Article 7')
+name = project.attach_run_log('article-7.vdlog', test=1)   # to its last entry
+extract = project[name]
+extract.runs(), extract.interruptions(), extract.credited()
+extract.findings(), extract.files(), extract.chronology()
+extract.head                                    # the test's head hash
+```
+
+`attach_run_log(path, test=1, upto=12)` takes the test as it stood at
+entry 12; with no `upto` it takes the log to its last entry, and with
+no `test` the log's one test. The extract keeps the lines of the log
+that test's views read, exactly as the file has them: the log's header,
+the test's entries and the entries between tests up to that entry, and
+the few entries written under another test that answer one of its own
+(a cause, path, restart or deviation naming one of its entries, a
+disposition of one of its anomalies, and the next test's opening when
+that is what closed it to runs), each with its corrections. Its views
+are what `RunLogModel` gave for the test at that entry, read from the
+extract alone, so the extract reads the same wherever the project is
+opened, with the log beside it or not. Comparing a reading with the
+last run of the same setup in an earlier test needs that test, which
+the extract does not hold.
+
+`attach_run_log` refuses a file that is not a run log, a test the log
+does not hold by the stated entry, an entry the log does not hold, an
+entry before the cut that the log cannot read, and a chain of the test
+(or the chain between tests) that does not verify, naming the chain,
+the entry and the line. Each test's chain verifies on its own, so a
+damaged entry of another test does not refuse this one, unless it is
+one of the entries the extract keeps because it answers this test,
+which is checked as well. With no `upto`
+it refuses a last line that is still torn, since the entry being
+written may be of the test; give the last whole entry as `upto`. A
+fragment a crash left in the middle of the file, which the log itself
+skips and its chain checks across, is named in the extract's
+`problems`.
+
+**A report never changes because the log grew.** `extract.status()`
+compares the live file with the extract: its length first, and the
+file is read only when the length has changed. It says `current`, or
+`newer` with how many entries the log holds after the extract's last
+one and how many of them are of the test (the badge reads "newer
+entries in the log"), or `changed` when the file is another log or no
+longer holds the entries the extract was taken from, or `unreadable`,
+or `missing` when there is no file. None of these is an error, and the
+extract stands as it was taken. `project.refresh_run_log(name)` takes
+the log again to its newest entry, a step of its own that the journal
+records; it is refused when the log has changed under the extract.
+`project.detach_run_log(name)` takes the extract out. Each is undone
+the way it was done: refreshing back to the `upto` the extract had, or
+attaching again with the same test and entry, gives the same entries,
+since a log is only ever added to.
+
+The extract is saved in the project file whole. The log's path is
+saved relative to the project file when the log is in the project
+file's folder or one beneath it, so a folder moved or copied with its
+log still finds it, and absolute otherwise. A project holding an
+extract is stamped schema 3, and a Visual Dynamics that reads only
+schema 2 refuses the whole file with its message to update rather than
+open part of it; a project with no extract is stamped as before.
+
+### Drafts for the report's author sections
+
+The chronology and the deviations are sections only the author writes.
+An extract offers text for them, never fills them:
+
+```python
+draft = extract.draft_chronology()      # for the Chronology section
+draft.text, draft.mark                  # Markdown; 'DRAFTED FROM THE RUN LOG, NOT YET ACCEPTED'
+extract.draft_findings()                # for the deviations section
+```
+
+The chronology draft is the test's runs in order (axis, start, the
+levels, sweeps or shots each held, the counter at the stop and the
+outcome), its interruptions with the cause, path and restart the log
+records, and the time credited on each axis. The findings draft is each
+deviation and anomaly by number with its fact as typed at the console,
+an anomaly's owner, and whether a disposition is logged; the cause, the
+effect and the approval or disposition are the author's and are never
+drafted. A draft is marked as drafted until the author accepts or edits
+it, and the section stays owed until then. A log with nothing of a kind
+offers nothing for it, not "none": an empty log cannot tell "nothing
+happened" from "nobody wrote it down", so the draft's `notes` say what
+the log does not hold, and setting a section to None stays the author's
+step.

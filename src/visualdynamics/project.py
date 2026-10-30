@@ -49,6 +49,7 @@ from .core.matches import MatchedModes
 from .core.photos import Photos
 from .core.prediction import Predictions
 from .core.report import Report
+from .core.run_log_extract import RunLogExtract
 from .core.shapes import ShapeSet
 from .core.sine import SineLevelSet, SineSweepSpecification
 from .names import display_name
@@ -82,7 +83,7 @@ ObjectGroup = dict[str, Any]
 TYPE_ORDER = (Geometry, Photos, ChannelTable, TimeHistory, Spectrum, Psd,
               Srs, SineSweepSpecification, SineLevelSet, Frf,
               _CoherenceBase, ShapeSet, MatchedModes, Predictions,
-              Report)
+              RunLogExtract, Report)
 
 
 def type_rank(obj: Any) -> int:
@@ -129,6 +130,10 @@ def describe(obj: Any) -> str:
                 f'{obj.first} against {obj.second}')
     elif isinstance(obj, Predictions):
         counts = [(len(obj), 'channel')]
+    elif isinstance(obj, RunLogExtract):
+        count = len(obj.entries)
+        return (f'test {obj.test}, {obj.kind}, {count} '
+                f'entr{"y" if count == 1 else "ies"} to log entry #{obj.upto}')
     elif isinstance(obj, Report):
         counts = [(obj.num_blocks, 'block')]
     else:
@@ -249,6 +254,7 @@ KINDS: tuple[tuple[str, str, type], ...] = (
     ('shapes', 'shape_sets', ShapeSet),
     ('matches', 'match_sets', MatchedModes),
     ('predictions', 'prediction_sets', Predictions),
+    ('run_log_extract', 'run_log_extracts', RunLogExtract),
     ('report', 'reports', Report),
 )
 
@@ -324,6 +330,8 @@ class Selection:
         match_sets: list[MatchedModes]
         predictions: Predictions
         prediction_sets: list[Predictions]
+        run_log_extract: RunLogExtract
+        run_log_extracts: list[RunLogExtract]
         report: Report
         reports: list[Report]
 
@@ -493,6 +501,8 @@ class Project(dict):
         match_sets: list[MatchedModes]
         predictions: Predictions
         prediction_sets: list[Predictions]
+        run_log_extract: RunLogExtract
+        run_log_extracts: list[RunLogExtract]
         report: Report
         reports: list[Report]
 
@@ -6589,6 +6599,146 @@ class Project(dict):
                 if entries else _index_now())
         return [f'{entry.name}: {entry.status}' for entry in entries]
 
+    # ---- the run log --------------------------------------------------------
+
+    def attach_run_log(self, path: str | os.PathLike, test: int | None = None,
+                       upto: int | None = None, *,
+                       name: str | None = None) -> str:
+        """Bring one test of a run log into the project, frozen at a stated
+        entry, as a run log extract (`core.run_log_extract`).
+
+        The extract holds the test's entries as they stood at entry
+        `upto` (corrected), with the test's head hash, and reads them as
+        the run log model does: its runs, interruptions, credited
+        duration, findings, files and chronology. A report drawing on it
+        never changes because the log grew; the extract says when the
+        log holds newer entries (`RunLogExtract.status`), and
+        `refresh_run_log` takes them, as a step of its own. The log's
+        path is saved relative to the project file when the log is in
+        the project file's folder or one beneath it, and absolute
+        otherwise.
+
+        Parameters
+        ----------
+        path : str or os.PathLike
+            The `.vdlog`.
+        test : int, optional
+            The test, by number; may be left out when the log holds one.
+        upto : int, optional
+            The id of the last entry to take; the log's last entry when
+            omitted.
+        name : str, optional
+            What to call the extract; 'Run Log, Test N' when omitted.
+
+        Returns
+        -------
+        str
+            The name the extract was added under.
+
+        Raises
+        ------
+        FileNotFoundError
+            When there is no file at `path`.
+        RunLogError
+            A `ValueError`: when the file is not a run log, holds no test
+            `test` (or no entry `upto`), cannot read an entry before the
+            cut, or a chain the extract rests on does not verify, the
+            message naming the chain, entry and line. Nothing is
+            changed.
+        """
+        from .core.run_log_extract import take
+
+        extract = take(path, test, upto)
+        return self.add(name or f'Run Log, Test {extract.test}', extract)
+
+    def detach_run_log(self, name: Any) -> RunLogExtract:
+        """Take a run log extract out of the project, and return it.
+
+        Attaching the same log with the same test and entry
+        (`attach_run_log(path, test=..., upto=...)`) brings back the same
+        entries, since a log is only ever added to.
+
+        Parameters
+        ----------
+        name : str or RunLogExtract
+            The extract.
+
+        Returns
+        -------
+        RunLogExtract
+            The extract taken out.
+
+        Raises
+        ------
+        TypeError
+            When `name` is not a run log extract. Nothing is changed.
+        """
+        name = self.name_of(name)
+        extract = self._run_log_extract(name)
+        self.remove(name)
+        return extract
+
+    def refresh_run_log(self, name: Any, upto: int | None = None
+                        ) -> RunLogExtract:
+        """Take a run log extract again from its log, to its newest entry
+        or to entry `upto`: the one way an extract changes, and never on
+        its own.
+
+        Refused when the log at the extract's path is another log, or no
+        longer holds the entries the extract was taken from (cut short or
+        changed since): attach it again to take it as it is now. Giving
+        the `upto` the extract had before takes back its entries.
+
+        Parameters
+        ----------
+        name : str or RunLogExtract
+            The extract.
+        upto : int, optional
+            The id of the last entry to take; the log's last entry when
+            omitted.
+
+        Returns
+        -------
+        RunLogExtract
+            The new extract, under the same name.
+
+        Raises
+        ------
+        TypeError
+            When `name` is not a run log extract.
+        FileNotFoundError
+            When the log is not at the extract's path.
+        RunLogError
+            A `ValueError`: when the log is another log, has changed
+            under the extract, or is refused as `attach_run_log` refuses
+            it. Nothing is changed.
+        """
+        from .core.run_log import RunLogError
+        from .core.run_log_extract import take
+
+        name = self.name_of(name)
+        extract = self._run_log_extract(name)
+        fresh = take(extract.path, extract.test, upto)
+        if fresh.log_id != extract.log_id:
+            raise RunLogError(f'{extract.path} is another run log now (its id '
+                              "is not the extract's); attach it to bring it "
+                              'in as an extract of its own')
+        found = extract.status()
+        if found.state == 'changed':
+            raise RunLogError(f'{found.message}. Attach it again to take it '
+                              'as it is now.')
+        self[name] = fresh
+        return fresh
+
+    def _run_log_extract(self, name: str) -> RunLogExtract:
+        """The run log extract called `name`; `TypeError` for anything
+        else."""
+        held = self[name]
+        if not isinstance(held, RunLogExtract):
+            raise TypeError(f'{name!r} is a {type(held).__name__}, not a run '
+                            'log extract')
+        return held
+
     def report_identity(self, name: str, **fields: Any) -> None:
         """Enter a report's identification (the report editor's Identity
         and Issue fields).
@@ -8693,6 +8843,7 @@ _JOURNALED_VERBS = (
     'generate_report', 'report_features', 'report_section',
     'report_test_date', 'predict', 'report_prediction', 'export_report',
     'index_file', 'unindex_file', 'verify_data_index', 'report_check_block',
+    'attach_run_log', 'detach_run_log', 'refresh_run_log',
     'report_identity', 'export_report_pdf', 'issue_report', 'amend_report',
     'set_run_identity', 'report_runs', 'report_chronology',
     'accept_chronology',

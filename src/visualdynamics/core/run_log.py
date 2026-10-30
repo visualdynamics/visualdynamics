@@ -70,9 +70,10 @@ from typing import Any, BinaryIO, Self
 from . import data_index, findings
 
 # One module for the file and the model of its entries. The tests,
-# axes and runs (their states, holds and owed lists) are built on the
-# plain references every entry carries here, so this module never has
-# to know what a test is beyond its number.
+# axes and runs (their states, holds and owed lists) are built in
+# run_log_model on the plain references every entry carries here, so
+# this module never has to know what a test is beyond its number and
+# the fields its header may carry.
 
 #: the extension of a run log
 SUFFIX = '.vdlog'
@@ -95,12 +96,58 @@ LATE_AFTER = timedelta(minutes=10)
 #: kind of stop is asked first.
 STOPS = ('controller ramp', 'amplifier trip', 'power loss', 'stop word')
 
+#: the analyst's answer to a low level, for the run and for each
+#: response channel: "not explained" holds the test at that level
+ANSWERS = ('as predicted', 'explained', 'not explained')
+
+#: what a setting change governs. A change to a limit, a tolerance or an
+#: abort band on the floor is a change to the test, which a deviation
+#: answers; 'other' is any other setting.
+SETTING_CLASSES = ('limit', 'tolerance', 'abort band', 'other')
+
+#: the directions of a sine sweep
+DIRECTIONS = ('up', 'down')
+
+#: the fields of a test's header, which a test opened carries and a
+#: header change changes: what the test is (its kind, title, class and
+#: purpose), the article and its configuration, the documents and their
+#: revisions, and the plan's numbers the log checks against. A level is
+#: in dB relative to full level (-12 for twelve below); a band is two
+#: frequencies in Hz or text such as '180-220 Hz'.
+HEADER_FIELDS = (
+    'title', 'test_kind', 'test_class', 'purpose', 'article', 'serial',
+    'configuration', 'document', 'document_revision', 'plan_revision',
+    'procedure', 'procedure_revision', 'profile_source', 'steps_db',
+    'hold_points_db', 'notches_planned', 'limits', 'tolerance',
+    'abort_bands', 'duration_s', 'duration_minus_pct', 'duration_plus_pct',
+    'sigma', 'rated_current_peak', 'rated_current_rms', 'rail_voltage',
+    'drive_window', 'projected_current', 'projected_voltage',
+    'pulse_budget')
+
 #: what a field of an entry holds: free text, a finite number, a whole
-#: number from 1, a yes or no, a list of texts, any one of the scalars,
+#: number from 1, a yes or no, a list of texts, a list of numbers, a
+#: list of planned notches, answers by channel, any one of the scalars,
 #: or the id of an earlier entry
 FIELD_TYPES: dict[str, str] = {
     'title': 'text', 'test_kind': 'text', 'article': 'text',
     'serial': 'text', 'procedure': 'text', 'reason': 'text',
+    'test_class': 'text', 'purpose': 'text', 'configuration': 'text',
+    'document': 'text', 'document_revision': 'text',
+    'plan_revision': 'text', 'procedure_revision': 'text',
+    'profile_source': 'text', 'steps_db': 'numbers',
+    'hold_points_db': 'numbers', 'notches_planned': 'notches',
+    'limits': 'text', 'tolerance': 'text', 'abort_bands': 'text',
+    'duration_s': 'number', 'duration_minus_pct': 'number',
+    'duration_plus_pct': 'number', 'sigma': 'number',
+    'rated_current_peak': 'number', 'rated_current_rms': 'number',
+    'rail_voltage': 'number', 'drive_window': 'numbers',
+    'projected_current': 'number', 'projected_voltage': 'number',
+    'pulse_budget': 'whole', 'carried': 'texts',
+    'channel_answers': 'answers', 'in_tolerance': 'flag',
+    'within_stroke': 'flag', 'peak_current': 'number',
+    'peak_voltage': 'number', 'prediction': 'text', 'pulses': 'whole',
+    'scheduled': 'flag', 'resume': 'flag', 'decided_by': 'text',
+    'governs': 'text',
     'field': 'text', 'value': 'scalar', 'was': 'scalar',
     'offset_s': 'number', 'recorder': 'text', 'method': 'text',
     'person': 'text', 'role': 'text', 'attendees': 'texts',
@@ -159,8 +206,7 @@ def _kinds(*kinds: EntryKind) -> dict[str, EntryKind]:
 #: form offers them
 KINDS: dict[str, EntryKind] = _kinds(
     EntryKind('test_opened', 'Test opened',
-              optional=('title', 'test_kind', 'article', 'serial',
-                        'procedure'),
+              optional=(*HEADER_FIELDS, 'carried'),
               needs_test=True, machine=True),
     EntryKind('test_closed', 'Test closed', optional=('reason',),
               needs_test=True, machine=True),
@@ -179,32 +225,37 @@ KINDS: dict[str, EntryKind] = _kinds(
     EntryKind('run_start', 'Run started', optional=('level_db', 'counter')),
     EntryKind('level_row', 'Level',
               optional=('level_db', 'voltage', 'current', 'drive_fraction',
-                        'answer', 'go')),
+                        'answer', 'channel_answers', 'go', 'agreed_by')),
     EntryKind('sweep', 'Sweep', optional=('direction', 'n', 'of')),
-    EntryKind('shot', 'Shot', optional=('polarity', 'n', 'of', 'level_db')),
-    EntryKind('run_stop', 'Run stopped', optional=('counter', 'reason')),
+    EntryKind('shot', 'Shot',
+              optional=('polarity', 'n', 'of', 'level_db', 'pulses',
+                        'in_tolerance', 'within_stroke', 'peak_current',
+                        'peak_voltage', 'prediction')),
+    EntryKind('run_stop', 'Run stopped',
+              optional=('counter', 'reason', 'scheduled', 'result', 'by')),
     EntryKind('abort', 'Abort or trip', ('stop',),
               ('channel', 'band', 'panel_fault', 'counter', 'called_by',
-               'heard', 'records_read', 'over_test'),
+               'heard', 'records_read', 'over_test', 'level_db'),
               machine=True),
     EntryKind('cause_found', 'Cause found', ('cause',), ('refers_to',)),
     EntryKind('path_decided', 'Path decided', ('path',), ('refers_to',)),
     EntryKind('restart', 'Restart',
-              optional=('counter_at_stop', 'counter_at_restart', 'cause'),
+              optional=('resume', 'counter_at_stop', 'counter_at_restart',
+                        'cause', 'decided_by', 'refers_to'),
               machine=True),
     EntryKind('notch', 'Notch',
               optional=('channel', 'band', 'depth_db', 'planned')),
     EntryKind('deviation', 'Deviation',
-              optional=('number', 'fact', 'agreed_by')),
+              optional=('number', 'fact', 'agreed_by', 'refers_to')),
     EntryKind('anomaly_opened', 'Anomaly opened',
-              optional=('number', 'fact', 'owner')),
+              optional=('number', 'fact', 'owner', 'refers_to')),
     EntryKind('anomaly_dispositioned', 'Anomaly dispositioned', ('number',),
               ('disposition', 'by')),
     EntryKind('adjustment', 'Adjustment', optional=('what',)),
     EntryKind('photo', 'Photo', optional=('subject',)),
     EntryKind('observation', 'Observation'),
     EntryKind('setting_change', 'Setting changed', ('setting',),
-              ('value', 'was'), machine=True),
+              ('value', 'was', 'governs'), machine=True),
     EntryKind('opinion_given', 'Opinion given', optional=('to', 'opinion')),
     EntryKind('post_test_step', 'Post-test step', ('step',), ('result',)),
     EntryKind('correction', 'Correction'),
@@ -502,11 +553,107 @@ def _axis(value: Any) -> str | None:
     return value.strip()
 
 
-def _value(kind: EntryKind, name: str, value: Any) -> Any:
+_BAND = re.compile(r'^\s*([0-9.eE+]+)\s*(?:(?:-|–|to)\s*([0-9.eE+]+))?\s*'
+                   r'(hz|khz)?\s*$', re.IGNORECASE)
+
+
+def band_hz(value: Any, what: str = 'a band') -> tuple[float, float]:
+    """A band as (low, high) in Hz, from two frequencies or from text
+    such as '180-220 Hz', '180 to 220', '1.2-2 kHz' or '200 Hz' (one
+    frequency, both edges).
+
+    Refused with `RunLogError` naming `what`: text that is not one of
+    those forms, and anything `findings.band_of` refuses (not two
+    finite, non-negative frequencies, low edge above high).
+    """
+    if isinstance(value, str):
+        found = _BAND.match(value)
+        if found is None:
+            raise RunLogError(f'{what} {value!r} is not read as a band: give '
+                              'it as low-high in Hz, such as 180-220 Hz')
+        scale = 1000.0 if (found.group(3) or '').lower() == 'khz' else 1.0
+        try:
+            low = float(found.group(1)) * scale
+            high = float(found.group(2) or found.group(1)) * scale
+        except ValueError:
+            raise RunLogError(f'{what} {value!r} is not read as a band: give '
+                              'it as low-high in Hz, such as 180-220 Hz'
+                              ) from None
+        value = (low, high)
+    try:
+        edges = findings.band_of(value, what)
+    except (TypeError, ValueError) as error:
+        raise RunLogError(str(error)) from None
+    if edges is None:
+        raise RunLogError(f'{what} is two frequencies in Hz, not None')
+    return edges[0], edges[1]
+
+
+def _notches(where: str, value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, (str, Mapping)) or not isinstance(value, Sequence):
+        raise RunLogError(f'{where} is a list of planned notches, each with '
+                          f'its band, and its axis and depth_db where the '
+                          f'plan gives them, not {value!r}')
+    kept = []
+    for number, item in enumerate(value, start=1):
+        at = f'{where}, notch {number}'
+        if not isinstance(item, Mapping) or 'band' not in item:
+            raise RunLogError(f'{at} is a mapping with its band, not {item!r}')
+        extra = set(item) - {'axis', 'band', 'depth_db'}
+        if extra:
+            raise RunLogError(f'{at} has no {", ".join(sorted(extra))}; a '
+                              'planned notch has axis, band and depth_db')
+        notch: dict[str, Any] = {}
+        if item.get('axis') is not None:
+            notch['axis'] = _axis(item['axis'])
+        band = item['band']
+        band_hz(band, f'{at}: band')
+        notch['band'] = band if isinstance(band, str) else [float(edge) for
+                                                             edge in band]
+        depth = item.get('depth_db')
+        if depth is not None:
+            if isinstance(depth, bool) or not isinstance(depth, (int, float)) \
+                    or not math.isfinite(depth):
+                raise RunLogError(f'{at}: depth_db is a finite number, not '
+                                  f'{depth!r}')
+            notch['depth_db'] = depth
+        kept.append(notch)
+    return kept
+
+
+def _field_type(kind: EntryKind, name: str,
+                fields: Mapping[str, Any]) -> str:
+    # A header change's value and previous value are of the type of the
+    # header field it names, so a step schedule changes as a list of
+    # levels and a planned notch list as notches.
+    if kind.name == 'header_change' and name in ('value', 'was'):
+        return FIELD_TYPES.get(fields.get('field'), 'scalar')
+    return FIELD_TYPES.get(name, 'text')
+
+
+def _value(kind: EntryKind, name: str, value: Any,
+           held: str | None = None) -> Any:
     """`value` as field `name` of an entry of `kind` holds it, or
     `RunLogError` naming the kind, the field and what it holds."""
-    held = FIELD_TYPES.get(name, 'text')
+    held = held or FIELD_TYPES.get(name, 'text')
     where = f'{kind.label}: {name}'
+    if held == 'numbers':
+        if isinstance(value, (str, Mapping)) or not isinstance(
+                value, Sequence) or not all(
+                isinstance(item, (int, float)) and not isinstance(item, bool)
+                and math.isfinite(item) for item in value):
+            raise RunLogError(f'{where} is a list of finite numbers, not '
+                              f'{value!r}')
+        return list(value)
+    if held == 'notches':
+        return _notches(where, value)
+    if held == 'answers':
+        if not isinstance(value, Mapping) or not all(
+                isinstance(key, str) and key.strip() and isinstance(item, str)
+                for key, item in value.items()):
+            raise RunLogError(f'{where} is an answer by channel name, not '
+                              f'{value!r}')
+        return dict(value)
     if held == 'text':
         if not isinstance(value, str):
             raise RunLogError(f'{where} is text, not {value!r}')
@@ -561,7 +708,8 @@ def check_fields(kind: str, fields: Mapping[str, Any] | None,
                               f'{name!r}; its fields are: {carried}')
         if value is None or (isinstance(value, str) and not value.strip()):
             continue
-        kept[name] = _value(entry_kind, name, value)
+        kept[name] = _value(entry_kind, name, value,
+                            _field_type(entry_kind, name, fields))
     _check_required(entry_kind, kept)
     return kept
 
@@ -584,6 +732,23 @@ def _check_required(kind: EntryKind, fields: Mapping[str, Any]) -> None:
     if 'stop' in fields and fields['stop'] not in STOPS:
         raise RunLogError(f'{fields["stop"]!r} is not a kind of stop; the '
                           'kinds are: ' + ', '.join(STOPS))
+    for name, allowed, what in (('answer', ANSWERS, 'an answer'),
+                                ('governs', SETTING_CLASSES,
+                                 'what a setting governs'),
+                                ('direction', DIRECTIONS,
+                                 'a sweep direction')):
+        if name in fields and fields[name] not in allowed:
+            raise RunLogError(f'{fields[name]!r} is not {what}; it is one of: '
+                              + ', '.join(allowed))
+    for channel, answer in fields.get('channel_answers', {}).items():
+        if answer not in ANSWERS:
+            raise RunLogError(f'channel {channel}: {answer!r} is not an '
+                              'answer; it is one of: ' + ', '.join(ANSWERS))
+    if kind.name == 'header_change' and fields.get('field') not in \
+            HEADER_FIELDS:
+        raise RunLogError(f'{fields.get("field")!r} is not a field of a '
+                          'test\'s header; the fields are: '
+                          + ', '.join(HEADER_FIELDS))
 
 
 def _files(files: Iterable[Any]) -> tuple[FileRef, ...]:
@@ -1502,6 +1667,10 @@ class RunLog:
             raise RunLogError(f'a correction\'s values are a mapping, not '
                               f'{type(fields).__name__}')
         entry_kind = KINDS[original.kind]
+        if original.kind == 'header_change' and 'field' in fields:
+            raise RunLogError('a header change\'s field is never changed; '
+                              'write a header change of the other field')
+        merged = {**self.current(entry_id).fields, **fields}
         changes: dict[str, Any] = {}
         for name, value in fields.items():
             if name in CORRECTABLE:
@@ -1518,7 +1687,8 @@ class RunLog:
             elif value is None:
                 changes[name] = None
             else:
-                changes[name] = _value(entry_kind, name, value)
+                changes[name] = _value(entry_kind, name, value,
+                                       _field_type(entry_kind, name, merged))
                 self._check_entry_refs(entry_kind, {name: changes[name]})
         corrected = dict(self.current(entry_id).fields)
         for name, value in changes.items():

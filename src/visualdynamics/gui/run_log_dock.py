@@ -35,10 +35,13 @@ What it takes:
   at the key and opens a form needing only the kind of stop and the
   author's initials; Enter writes the run stop and the abort together,
   and what the first minute still owes is listed.
-- **Small forms** for the rest: a new or opened log, a test opened, the
-  roll to the next test, a test closed or released, a clock check, a
-  person in or out, a note, a run started or stopped, a cause found and
-  a correction. Each takes its event time when it opens.
+- **Small forms** for the rest: a new or opened log, a test closed or
+  released, a clock check, a person in or out, a note, a run started or
+  stopped, a cause found and a correction. Each takes its event time
+  when it opens.
+- **The header forms** (`gui.run_log_forms`): the test header in full
+  for a test opened, the roll and the current test, with carried fields
+  marked until confirmed.
 
 Every read and write of the file, and every rebuild of the model from
 it, runs on one worker thread of its own (`LogWorker`), in order, and
@@ -72,6 +75,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QStackedWidget,
     QTabBar,
@@ -91,14 +95,16 @@ from ..core.run_log import (
     STOPS,
     SUFFIX,
     Entry,
+    FileRef,
     RunLog,
     RunLogError,
+    band_hz,
     check_fields,
+    file_ref,
 )
 from ..core.run_log_export import ALL, _correction_text, _fields_text, _where
 from ..core.run_log_model import (
     LEVEL_MATCH_DB,
-    TEST_KINDS,
     Hold,
     OwedList,
     RunLogModel,
@@ -127,6 +133,7 @@ KEYS = {
     'person out': 'Ctrl+Shift+O',
     'cause found': 'Ctrl+Shift+C',
     'level row': 'Ctrl+Shift+L',
+    'header': 'Ctrl+Shift+H',
 }
 
 
@@ -205,6 +212,9 @@ class Snapshot:
     `levels` the levels already written in it. `open_aborts` are the
     aborts with no cause, `unreleased` the tests closed to runs and not
     yet released.
+
+    `carried` names the current header's fields carried from the last
+    test and not yet confirmed.
     """
 
     path: str
@@ -224,6 +234,7 @@ class Snapshot:
     levels: tuple[float, ...]
     open_aborts: tuple[int, ...]
     unreleased: tuple[int, ...]
+    carried: tuple[str, ...] = ()
 
 
 def snapshot(log: RunLog, *, read_only: str = '') -> Snapshot:
@@ -286,7 +297,8 @@ def snapshot(log: RunLog, *, read_only: str = '') -> Snapshot:
         open_aborts=tuple(hold.entry.id for hold in holds
                           if hold.rule == 'abort-cause'),
         unreleased=tuple(test.number for test in model.tests()
-                         if test.state == 'closed to runs'))
+                         if test.state == 'closed to runs'),
+        carried=tuple(current.header.carried) if current else ())
 
 
 def entry_line(entry: Entry) -> str:
@@ -397,6 +409,84 @@ def channel_answers(text: str) -> dict[str, str] | None:
                               'answer; it is one of: ' + ', '.join(ANSWERS))
         answers[name.strip()] = answer
     return answers or None
+
+
+def planned_notches(text: str) -> list[dict[str, Any]] | None:
+    """A header's planned notches as typed: items separated by
+    semicolons, each its band with the axis before a colon and the depth
+    after a comma where the plan gives them, such as 'Z: 180-220 Hz, 6
+    dB; 400-450 Hz'. None for nothing typed; `RunLogError` naming the
+    item for a band `run_log.band_hz` does not read or a depth that is
+    not a number of dB."""
+    notches: list[dict[str, Any]] = []
+    for item in text.split(';'):
+        if not item.strip():
+            continue
+        axis, colon, rest = item.partition(':')
+        if not colon:
+            axis, rest = '', item
+        band, comma, depth = rest.partition(',')
+        notch: dict[str, Any] = {}
+        if axis.strip():
+            notch['axis'] = axis.strip()
+        if not band.strip():
+            raise RunLogError(f'planned notches: {item.strip()!r} gives no '
+                              'band')
+        band_hz(band.strip(), f'planned notches: {item.strip()!r}: its band')
+        notch['band'] = band.strip()
+        if comma:
+            number = depth.strip()
+            if number.lower().endswith('db'):
+                number = number[:-2].strip()
+            notch['depth_db'] = _number(number, f'planned notches: '
+                                                f'{item.strip()!r}: its depth')
+            if notch['depth_db'] is None:
+                raise RunLogError(f'planned notches: {item.strip()!r}: the '
+                                  'depth after the comma is blank')
+        notches.append(notch)
+    return notches or None
+
+
+def _number_text(value: Any) -> str:
+    # as short as reads back to the same number, so a box left as it
+    # was offered reads as unchanged
+    if isinstance(value, float) and float(f'{value:g}') == value:
+        return f'{value:g}'
+    return str(value)
+
+
+def notches_text(notches: Any) -> str:
+    """Planned notches as `planned_notches` reads them back."""
+    items = []
+    for notch in notches or ():
+        band = notch.get('band')
+        if not isinstance(band, str):
+            band = f'{_number_text(band[0])}-{_number_text(band[1])} Hz'
+        text = f'{notch["axis"]}: {band}' if notch.get('axis') else band
+        if notch.get('depth_db') is not None:
+            text += f', {_number_text(notch["depth_db"])} dB'
+        items.append(text)
+    return '; '.join(items)
+
+
+def _paths(text: str) -> list[str] | None:
+    paths = [item.strip() for item in text.split(';')]
+    return [path for path in paths if path] or None
+
+
+def hashed(paths: Sequence[str]) -> list[FileRef]:
+    """Each file at `paths` as a `FileRef`, read and hashed now: called
+    on the log's worker as the entry naming them is written, never on
+    the window's thread. `RunLogError` naming a file that cannot be
+    read."""
+    refs = []
+    for path in paths:
+        try:
+            refs.append(file_ref(path))
+        except OSError as error:
+            raise RunLogError(f'{path} could not be read to attach it: '
+                              f'{error.strerror or error}') from None
+    return refs
 
 
 def event_time(text: str, taken: datetime) -> datetime:
@@ -617,14 +707,16 @@ class EntryForm(QWidget):
     opened and editable for an event entered late, its fields, a line of
     free text, and Write and Cancel. Enter in any box writes; Esc
     cancels. What a box cannot hold is said on the form's message line,
-    and nothing is written."""
+    and nothing is written.
+
+    A field of kind 'heading' is a group's title, not a box."""
 
     written = Signal()
     cancelled = Signal()
 
     #: what a field of a form is typed as
     BOX_KINDS = ('text', 'number', 'whole', 'numbers', 'texts', 'flag',
-                 'choice', 'path', 'entry')
+                 'choice', 'path', 'entry', 'notches', 'files', 'heading')
 
     def __init__(self, name: str, title: str,
                  fields: Sequence[tuple[str, str, str, Any]], taken: datetime,
@@ -640,6 +732,10 @@ class EntryForm(QWidget):
         #: the entry a correction form corrects
         self.target: Entry | None = None
         self.boxes: dict[str, QWidget] = {}
+        #: the label beside each box, by field
+        self.labels: dict[str, QLabel] = {}
+        #: the groups' titles, in order
+        self.headings: list[str] = []
         self._kinds: dict[str, str] = {}
         self._labels: dict[str, str] = {}
         column = QVBoxLayout(self)
@@ -666,11 +762,22 @@ class EntryForm(QWidget):
         for field, label, kind, choices in fields:
             if kind not in self.BOX_KINDS:
                 raise ValueError(f'{kind!r} is not a kind of box')
+            if kind == 'heading':
+                heading = QLabel(label)
+                font = QFont(heading.font())
+                font.setBold(True)
+                heading.setFont(font)
+                grid.addWidget(heading, row, 0, 1, 2)
+                self.headings.append(label)
+                row += 1
+                continue
             box = self._box(kind, choices, defaults.get(field))
             marked = label + (' *' if field in self.required else '')
-            grid.addWidget(QLabel(marked), row, 0)
+            said = QLabel(marked)
+            grid.addWidget(said, row, 0)
             grid.addWidget(box, row, 1)
             self.boxes[field] = box
+            self.labels[field] = said
             self._kinds[field] = kind
             self._labels[field] = label
             row += 1
@@ -709,22 +816,33 @@ class EntryForm(QWidget):
             if default is not None:
                 box.setCurrentText('yes' if default else 'no')
             return box
-        if kind == 'path':
+        if kind in ('path', 'files'):
             holder = QWidget()
+            if isinstance(default, (list, tuple)):
+                default = '; '.join(str(item) for item in default)
             line = QLineEdit('' if default is None else str(default))
             browse = QPushButton('Browse…')
             row = QHBoxLayout(holder)
             row.setContentsMargins(0, 0, 0, 0)
             row.addWidget(line, 1)
             row.addWidget(browse)
-            browse.clicked.connect(lambda: self._browse(line))
+            if kind == 'files':
+                line.setPlaceholderText('files, separated by ;')
+                browse.clicked.connect(lambda: self._attach(line))
+            else:
+                browse.clicked.connect(lambda: self._browse(line))
             holder.line = line  # type: ignore[attr-defined]
             return holder
         line = QLineEdit()
+        if kind == 'notches':
+            line.setPlaceholderText('Z: 180-220 Hz, 6 dB; 400-450 Hz')
+            if default is not None:
+                line.setText(notches_text(default))
+            return line
         if default is not None:
-            line.setText(', '.join(str(item) for item in default)
+            line.setText(', '.join(_number_text(item) for item in default)
                          if isinstance(default, (list, tuple))
-                         else str(default))
+                         else _number_text(default))
         return line
 
     def _browse(self, line: QLineEdit) -> None:
@@ -732,6 +850,11 @@ class EntryForm(QWidget):
             self, 'Run log', line.text(), f'Run log (*{SUFFIX})')
         if chosen:
             line.setText(chosen)
+
+    def _attach(self, line: QLineEdit) -> None:
+        chosen, _ = QFileDialog.getOpenFileNames(self, 'Attach files')
+        if chosen:
+            line.setText('; '.join([*(_paths(line.text()) or []), *chosen]))
 
     def _inputs(self) -> list[QWidget]:
         found: list[QWidget] = [self.time_box]
@@ -761,28 +884,37 @@ class EntryForm(QWidget):
             assert isinstance(box, QLineEdit)
             box.setText(value)
 
+    def value(self, field: str) -> Any:
+        """Box `field` read as its field holds it, None when blank.
+        `RunLogError` naming the box for one that cannot be read."""
+        kind = self._kinds[field]
+        text = self.box_text(field)
+        label = self._labels[field]
+        if kind in ('text', 'path', 'choice'):
+            return text.strip() or None
+        if kind == 'number':
+            return _number(text, label)
+        if kind in ('whole', 'entry'):
+            return _whole(text, label)
+        if kind == 'numbers':
+            return _numbers(text, label)
+        if kind == 'texts':
+            return _texts(text)
+        if kind == 'notches':
+            return planned_notches(text)
+        if kind == 'files':
+            return _paths(text)
+        return {'yes': True, 'no': False}.get(text)
+
     def values(self) -> dict[str, Any]:
         """Every box read as its field holds it, blank boxes left out.
         `RunLogError` naming the box for one that cannot be read, or for
         a required box left blank."""
         values: dict[str, Any] = {}
-        for field, kind in self._kinds.items():
-            text = self.box_text(field)
-            label = self._labels[field]
-            if kind in ('text', 'path', 'choice'):
-                value: Any = text.strip() or None
-            elif kind == 'number':
-                value = _number(text, label)
-            elif kind in ('whole', 'entry'):
-                value = _whole(text, label)
-            elif kind == 'numbers':
-                value = _numbers(text, label)
-            elif kind == 'texts':
-                value = _texts(text)
-            else:
-                value = {'yes': True, 'no': False}.get(text)
+        for field in self._kinds:
+            value = self.value(field)
             if value is None and field in self.required:
-                raise RunLogError(f'{label} is needed')
+                raise RunLogError(f'{self._labels[field]} is needed')
             if value is not None:
                 values[field] = value
         return values
@@ -1044,8 +1176,10 @@ class RunLogPanel(QWidget):
         self.level_row.on_write = self.write_level
         self.entry_stack: QStackedWidget = QStackedWidget()
         self.entry_stack.addWidget(self.level_row)
+        self._form_holder: QScrollArea | None = None
 
         self.acts: QToolBar = QToolBar('Run log')
+        self.forms_bar: QToolBar = QToolBar('Run log readings')
         self.actions_by_name: dict[str, QAction] = {}
         self._build_acts()
 
@@ -1081,6 +1215,7 @@ class RunLogPanel(QWidget):
         column = QVBoxLayout(self)
         column.setContentsMargins(4, 4, 4, 4)
         column.addWidget(self.acts)
+        column.addWidget(self.forms_bar)
         column.addWidget(self.status)
         column.addWidget(self.holds_list)
         column.addWidget(self.tests_bar)
@@ -1161,6 +1296,13 @@ class RunLogPanel(QWidget):
         bar.addAction(self.layout_action)
         self._act('level row', 'Level Row', self.focus_level_row,
                   'Back to the level row')
+        forms = self.forms_bar
+        forms.setMovable(False)
+        forms.addAction(self._act('header', 'Header',
+                                  lambda: self.open_form('header'),
+                                  ('The current test\'s header in full: '
+                                   'change a field, or confirm what was '
+                                   'carried')))
 
     def _toggle_layout(self) -> None:
         self.layout_wanted.emit(self.layout_action.text() == 'Log Only')
@@ -1416,12 +1558,19 @@ class RunLogPanel(QWidget):
     # ---- the small forms ------------------------------------------------------
 
     def open_form(self, name: str) -> EntryForm | None:
-        """Open the small form `name` ('note', 'clock check', 'person in',
-        'person out', 'run start', 'run stop', 'cause found', 'correct',
-        'open test', 'roll', 'close test', 'release' or 'new log'), its
-        event time taken now."""
+        """Open the form `name`, its event time taken now: a small form
+        ('note', 'clock check', 'person in', 'person out', 'run start',
+        'run stop', 'cause found', 'correct', 'close test', 'release' or
+        'new log'), or a header form ('open test', 'roll' or
+        'header')."""
+        from . import run_log_forms as forms
+
         taken = self.clock()
         seen = self.snapshot
+        if name == 'header' and (seen is None or seen.status.test is None):
+            self.say('No test is open: open one first, and its header is '
+                     'here.')
+            return None
         builder = {
             'note': lambda: EntryForm('note', 'Note', [], taken,
                                       text='Note'),
@@ -1459,8 +1608,9 @@ class RunLogPanel(QWidget):
                 required=('cause',),
                 defaults={'refers_to': seen.open_aborts[-1]
                           if seen and seen.open_aborts else None}),
-            'open test': lambda: self._test_form('open test', taken),
-            'roll': lambda: self._test_form('roll', taken),
+            'open test': lambda: forms.header_form('open test', taken, seen),
+            'roll': lambda: forms.header_form('roll', taken, seen),
+            'header': lambda: forms.header_form('header', taken, seen),
             'close test': lambda: EntryForm(
                 'close test', 'Close the test to runs',
                 [('reason', 'Reason', 'text', None)], taken, text=''),
@@ -1489,33 +1639,6 @@ class RunLogPanel(QWidget):
         form.focus_first()
         return form
 
-    def _test_form(self, name: str, taken: datetime) -> EntryForm:
-        # The header fields the level row reads; the rest of a header is
-        # written by script or a header change until the header has a
-        # form of its own.
-        rolling = name == 'roll'
-        kinds = ('', *TEST_KINDS) if rolling else TEST_KINDS
-        fields = [('test_kind', 'Kind' + (' (blank: carried)' if rolling
-                                          else ''), 'choice', kinds),
-                  ('title', 'Title', 'text', None),
-                  ('article', 'Article', 'text', None),
-                  ('serial', 'Serial', 'text', None),
-                  ('configuration', 'Configuration', 'text', None),
-                  ('steps_db', 'Step schedule (dB)', 'numbers', None),
-                  ('hold_points_db', 'Hold points (dB)', 'numbers', None),
-                  ('sigma', 'Sigma', 'number', None),
-                  ('rated_current_peak', 'Peak current rating (A)', 'number',
-                   None),
-                  ('rated_current_rms', 'Continuous current rating (A)',
-                   'number', None),
-                  ('rail_voltage', 'Rail (V)', 'number', None)]
-        title = ('Roll to the next test (blank fields are carried)'
-                 if rolling else 'Open the next test')
-        if rolling:
-            fields.append(('reason', 'Why this test closes', 'text', None))
-        return EntryForm(name, title, fields, taken,
-                         required=() if rolling else ('test_kind',))
-
     def _correct_form(self, taken: datetime) -> EntryForm | None:
         item = self.day_list.currentItem()
         entry = item.data(Qt.ItemDataRole.UserRole) if item else None
@@ -1530,9 +1653,9 @@ class RunLogPanel(QWidget):
         for name in kind.fields:
             held = FIELD_TYPES.get(name, 'text')
             box = {'number': 'number', 'whole': 'whole', 'entry': 'entry',
-                   'flag': 'flag', 'numbers': 'numbers',
-                   'texts': 'texts'}.get(held, 'text')
-            if held in ('notches', 'answers', 'scalar') and name in \
+                   'flag': 'flag', 'numbers': 'numbers', 'texts': 'texts',
+                   'notches': 'notches'}.get(held, 'text')
+            if held in ('answers', 'scalar') and name in \
                     entry.fields and not isinstance(entry.fields[name], str):
                 continue          # not typed in a box; corrected by script
             choices = None
@@ -1594,21 +1717,8 @@ class RunLogPanel(QWidget):
                           done=lambda _entry: self._close_form(),
                           refused=self._form_refused)
             return
-        if name in ('open test', 'roll'):
-            header = dict(values)
-            test_kind = header.pop('test_kind', None)
-            reason = header.pop('reason', '')
-            if name == 'open test':
-                write: Callable[[RunLog], Any] = (
-                    lambda log: model_module.open_test(
-                        log, author=author, test_kind=test_kind,
-                        header=header, text=text, event_time=when))
-            else:
-                write = (lambda log: model_module.roll(
-                    log, author=author, test_kind=test_kind, header=header,
-                    reason=reason, text=text, event_time=when))
-            self._writing(write, done=lambda _entry: self._close_form(),
-                          refused=self._form_refused)
+        if name in ('open test', 'roll', 'header'):
+            self._write_header(name, values, text, when, author, test)
             return
         if name == 'close test':
             if test is None:
@@ -1625,18 +1735,92 @@ class RunLogPanel(QWidget):
                 event_time=when), done=lambda _entry: self._close_form(),
                 refused=self._form_refused)
 
+    def _write_header(self, name: str, values: dict[str, Any], text: str,
+                      when: datetime, author: str, test: int | None) -> None:
+        """A header form written: the test opened, the roll (only the
+        fields changed from the current header given, so the rest are
+        carried), or the current header's changes and confirmations. The
+        files are hashed on the worker as the entry is written."""
+        from .run_log_forms import header_changes
+
+        form = self.form
+        assert form is not None
+        values = dict(values)
+        paths = values.pop('files', None) or []
+        reason = values.pop('reason', '')
+        confirming = values.pop('confirm', False)
+        seen = self.snapshot
+        held = dict(seen.header) if seen is not None else {}
+        write: Callable[[RunLog], Any]
+        if name == 'open test':
+            test_kind = values.pop('test_kind')
+            write = (lambda log: model_module.open_test(
+                log, author=author, test_kind=test_kind, header=values,
+                text=text, event_time=when, files=hashed(paths)))
+        elif name == 'roll':
+            given = header_changes(values, held)
+            kind = given.pop('test_kind', None)
+            write = (lambda log: model_module.roll(
+                log, author=author, test_kind=kind, header=given,
+                reason=reason, text=text, event_time=when,
+                files=hashed(paths)))
+        else:
+            if test is None or seen is None:
+                form.say('No test is open.')
+                return
+            emptied = [form.labels[field].text() for field in held
+                       if field in form.boxes and field not in values]
+            if emptied:
+                form.say(', '.join(emptied) + ': a header field is changed '
+                         'to its new value, not emptied; put the value back '
+                         'or type the new one.')
+                return
+            changed = header_changes(values, held)
+            carried = ([field for field in seen.carried if field not in changed]
+                       if confirming else [])
+            if not changed and not carried:
+                form.say('Nothing was changed.' + (
+                    ' Tick Confirm to confirm the carried fields as they '
+                    'are.' if seen.carried else ''))
+                return
+
+            def write(log: RunLog) -> list[Entry]:
+                # every change checked before any is written, so a refusal
+                # never leaves half the form in the log
+                for field, value in changed.items():
+                    check_fields('header_change', {'field': field,
+                                                   'value': value})
+                written = [model_module.change_header(
+                    log, test, field, value, author=author, text=text,
+                    event_time=when) for field, value in changed.items()]
+                if carried:
+                    written += model_module.confirm(
+                        log, test, carried, author=author, event_time=when)
+                return written
+
+        self._writing(write, done=lambda _entry: self._close_form(),
+                      refused=self._form_refused)
+
     def _open(self, form: EntryForm) -> None:
         self._close_form()
         self.form = form
         form.cancelled.connect(self._close_form)
-        self.entry_stack.addWidget(form)
-        self.entry_stack.setCurrentWidget(form)
+        # a long form (the header has over thirty boxes) scrolls inside
+        # the entry, so the day above keeps its room
+        holder = QScrollArea()
+        holder.setWidgetResizable(True)
+        holder.setFrameShape(QFrame.Shape.NoFrame)
+        holder.setWidget(form)
+        self._form_holder = holder
+        self.entry_stack.addWidget(holder)
+        self.entry_stack.setCurrentWidget(holder)
 
     def _close_form(self) -> None:
-        form, self.form = self.form, None
-        if form is not None:
-            self.entry_stack.removeWidget(form)
-            form.deleteLater()
+        holder, self._form_holder = self._form_holder, None
+        self.form = None
+        if holder is not None:
+            self.entry_stack.removeWidget(holder)
+            holder.deleteLater()
         self.entry_stack.setCurrentWidget(self.level_row)
 
     def focus_level_row(self) -> None:

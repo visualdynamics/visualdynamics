@@ -122,10 +122,28 @@ and put away with **Esc**:
 | New Log, Open Log, Close Log | | the file: closing releases it for another writer |
 | Level Row | Ctrl+Shift+L | back to the level row |
 
+A second bar holds the header form:
+
+| Act | Key | Writes |
+|---|---|---|
+| Header | Ctrl+Shift+H | changes to the current test's header, and the carried fields confirmed |
+
 Every key has a modifier, so none is taken from a box being typed into.
-The test forms ask for the header fields the level row reads (the step
-schedule, the hold points, sigma, the current ratings and the rail);
-the rest of a header is written with a header change.
+
+**The header.** Open Test, Roll and Header show every field of the test
+header, in groups: what the test is (kind, title, class and purpose, the
+article, its serial and configuration), the governing documents and
+their revisions, the step schedule and hold points, the planned notches
+(`Z: 180-220 Hz, 6 dB; 400-450 Hz`, the axis and depth where the plan
+gives them), the limits and tolerances, the duration and its tolerance,
+the amplifier (sigma, the peak and continuous current ratings, the rail
+and the drive window), the projected headroom from the handover, and
+the pulse budget. Files named on the opening or the roll (the plan, the
+procedure, the profile) are attached by SHA-256, read and hashed on the
+log's own thread as the entry is written. Roll offers the current
+test's header as it stands; every field left as offered is carried, and
+the next test's Header form marks it **(carried)** until it is changed
+or confirmed with **Confirm**.
 
 A log already open for writing in another Visual Dynamics, or elsewhere,
 opens read-only, and the strip names who holds it; **Reload** reads

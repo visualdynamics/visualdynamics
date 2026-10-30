@@ -165,7 +165,8 @@ FIELD_TYPES: dict[str, str] = {
     'fact': 'text', 'agreed_by': 'text', 'owner': 'text',
     'disposition': 'text', 'by': 'text', 'what': 'text',
     'subject': 'text', 'setting': 'text', 'to': 'text',
-    'opinion': 'text',
+    'opinion': 'text', 'rate': 'text', 'span': 'text', 'effect': 'text',
+    'approval': 'text',
 }
 
 #: what a correction can change besides an entry's fields: its event
@@ -226,7 +227,9 @@ KINDS: dict[str, EntryKind] = _kinds(
     EntryKind('level_row', 'Level',
               optional=('level_db', 'voltage', 'current', 'drive_fraction',
                         'answer', 'channel_answers', 'go', 'agreed_by')),
-    EntryKind('sweep', 'Sweep', optional=('direction', 'n', 'of')),
+    EntryKind('sweep', 'Sweep',
+              optional=('direction', 'n', 'of', 'rate', 'span', 'level_db',
+                        'current')),
     EntryKind('shot', 'Shot',
               optional=('polarity', 'n', 'of', 'level_db', 'pulses',
                         'in_tolerance', 'within_stroke', 'peak_current',
@@ -246,7 +249,8 @@ KINDS: dict[str, EntryKind] = _kinds(
     EntryKind('notch', 'Notch',
               optional=('channel', 'band', 'depth_db', 'planned')),
     EntryKind('deviation', 'Deviation',
-              optional=('number', 'fact', 'agreed_by', 'refers_to')),
+              optional=('number', 'fact', 'cause', 'effect', 'approval',
+                        'agreed_by', 'refers_to')),
     EntryKind('anomaly_opened', 'Anomaly opened',
               optional=('number', 'fact', 'owner', 'refers_to')),
     EntryKind('anomaly_dispositioned', 'Anomaly dispositioned', ('number',),
@@ -709,7 +713,8 @@ def check_fields(kind: str, fields: Mapping[str, Any] | None,
     pass every box it has. Refused with `RunLogError`, each naming the
     kind and the field: a kind that is not in `KINDS`, a field the kind
     does not carry, a value of the wrong type or not finite, a required
-    field missing, and an abort's kind of stop not one of `STOPS`.
+    field missing, an abort's kind of stop not one of `STOPS`, and a
+    sweep's span that `band_hz` does not read as a band.
     """
     entry_kind = _kind(kind)
     if fields is None:
@@ -761,6 +766,8 @@ def _check_required(kind: EntryKind, fields: Mapping[str, Any]) -> None:
         if answer not in ANSWERS:
             raise RunLogError(f'channel {channel}: {answer!r} is not an '
                               'answer; it is one of: ' + ', '.join(ANSWERS))
+    if 'span' in fields:
+        band_hz(fields['span'], 'a sweep\'s span')
     if kind.name == 'header_change' and fields.get('field') not in \
             HEADER_FIELDS:
         raise RunLogError(f'{fields.get("field")!r} is not a field of a '

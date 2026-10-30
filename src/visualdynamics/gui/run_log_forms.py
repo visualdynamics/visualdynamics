@@ -1,9 +1,15 @@
-"""The Run Log's header forms: the test header in full, for a test opened,
-the roll to the next test and the current test.
+"""The Run Log's forms: the test header in full, the readings each kind
+of test takes, and the findings.
 
 Every form here is an `EntryForm` (`gui.run_log_dock`): its event time
 taken when it opens, Enter writing it, Esc putting it away, and nothing
-written when a box cannot be read.
+written when a box cannot be read. What a form computes from what is
+typed is shown under its boxes as it is typed (`EntryForm.live`): a
+sweep's current against the continuous rating, a shot's pulses against
+the budget, a notch's place in the plan. Each of those is read through
+the function the package keeps for it (`run_log_model.project`,
+`judge_pulses`, `notch_in_plan`), so a form says what the log will say
+once the entry is written.
 
 **The header** comes in three forms: the test opened, the roll to the
 next test (every field offered as it stands and carried unless
@@ -11,16 +17,27 @@ changed), and the current test's header, where each field changed is a
 header change and the fields carried from the last test are marked
 until they are confirmed. Its fields are grouped as `HEADER_GROUPS`
 lists them, and every field of `run_log.HEADER_FIELDS` is in one group.
+
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
-from ..core.run_log import HEADER_FIELDS
-from ..core.run_log_model import TEST_KINDS
+from ..core.run_log import (
+    DIRECTIONS,
+    HEADER_FIELDS,
+    SETTING_CLASSES,
+)
+from ..core.run_log_model import (
+    SHOT_CHECKS,
+    TEST_KINDS,
+    judge_pulses,
+    notch_in_plan,
+    project,
+)
 from .run_log_dock import EntryForm, Snapshot, notches_text
 
 #: the header's fields in the groups the header form shows them in:
@@ -69,6 +86,23 @@ HEADER_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
     ('Shock', (
         ('pulse_budget', 'Pulse budget', 'whole'),)),
 )
+
+#: the readings forms by name, with the kind of entry each writes
+READINGS = {
+    'sweep': 'sweep', 'shot': 'shot', 'result': 'run_stop',
+    'notch': 'notch', 'deviation': 'deviation', 'anomaly': 'anomaly_opened',
+    'disposition': 'anomaly_dispositioned',
+    'setting change': 'setting_change', 'opinion': 'opinion_given',
+}
+
+#: the readings forms that belong to one shape of run (`RUN_SHAPES`),
+#: shown only for a test whose runs hold it
+FOR_SHAPES = {
+    'sweep': ('sweeps', 'levels and sweeps', 'any'),
+    'shot': ('shots', 'any'),
+    'result': ('result', 'any'),
+}
+
 
 # ---- the header ----------------------------------------------------------------
 
@@ -152,3 +186,223 @@ def same(field: str, value: Any, held: Any) -> bool:
     if field == 'notches_planned':
         return held is not None and notches_text(value) == notches_text(held)
     return value == held
+
+
+# ---- the readings --------------------------------------------------------------
+
+
+def _typed(form: EntryForm, *names: str) -> dict[str, Any]:
+    found = {}
+    for name in names:
+        value = form.value(name)
+        if value is not None:
+            found[name] = value
+    return found
+
+
+def sweep_form(taken: datetime, seen: Snapshot | None) -> EntryForm:
+    """A sine sweep: its direction, n of N, rate, span, level and the
+    amplifier's rms current, judged live against the header's
+    continuous rating, which is what a sine test budgets. n is offered
+    as the next sweep of the run; N, the rate, the span and the level
+    as the last sweep had them."""
+    sweeps = seen.sweeps if seen is not None else ()
+    last = dict(sweeps[-1]) if sweeps else {}
+    header = dict(seen.header) if seen is not None else {}
+    defaults = {'n': len(sweeps) + 1,
+                **{name: last[name] for name in ('of', 'rate', 'span',
+                                                 'level_db') if name in last}}
+    fields = [('direction', 'Direction', 'choice', ('', *DIRECTIONS)),
+              ('n', 'Sweep n', 'whole', None),
+              ('of', 'of N', 'whole', None),
+              ('rate', 'Rate (oct/min or Hz/s)', 'text', None),
+              ('span', 'Span (Hz)', 'text', None),
+              ('level_db', 'Level (dB)', 'number', None),
+              ('current', 'Amplifier current, rms (A)', 'number', None)]
+    return EntryForm('sweep', 'Sweep', fields, taken, defaults=defaults,
+                     live=lambda form: sweep_text(header, form))
+
+
+def sweep_text(header: Mapping[str, Any], form: EntryForm) -> str:
+    """A sweep's rms current against the header's continuous rating, in
+    words (`run_log_model.project`'s rms current check): not judged,
+    with why, when the rating, the current or the level is missing."""
+    typed = _typed(form, 'n', 'of', 'level_db', 'current')
+    count = (f'Sweep {typed["n"]} of {typed["of"]}. '
+             if 'n' in typed and 'of' in typed else '')
+    rating = header.get('rated_current_rms')
+    if rating is None:
+        return (count + 'Continuous rating: not judged: the header gives no '
+                'continuous current rating')
+    if 'current' not in typed:
+        return count + 'Continuous rating: not judged: no current was read'
+    if 'level_db' not in typed:
+        return count + 'Continuous rating: not judged: no level is given'
+    projection = project(typed['level_db'], current=typed['current'],
+                         rated_current_rms=rating)
+    return count + 'Continuous rating: ' + \
+        projection.check('rms current').message
+
+
+def shot_form(taken: datetime, seen: Snapshot | None, axis: str | None
+              ) -> EntryForm:
+    """A shock shot: its polarity, n of N, level and pulses (one when
+    blank), and the four checks made after every shot. Live: which
+    checks are answered, and the pulses so far and with this shot
+    against the header's budget (`run_log_model.judge_pulses`)."""
+    fields = [('polarity', 'Polarity', 'choice', ('', 'positive',
+                                                  'negative')),
+              ('n', 'Shot n', 'whole', None),
+              ('of', 'of N', 'whole', None),
+              ('level_db', 'Level (dB)', 'number', None),
+              ('pulses', 'Pulses (1 when blank)', 'whole', None),
+              ('', 'The four checks', 'heading', None),
+              ('in_tolerance', ('Pulse or spectrum in tolerance, both '
+               'polarities'), 'flag', None),
+              ('within_stroke', ('Displacement and velocity within the '
+               'stroke'), 'flag', None),
+              ('peak_current', 'Amplifier current peak (A)', 'number', None),
+              ('peak_voltage', 'Amplifier voltage peak (V)', 'number', None),
+              ('prediction', 'Controller\'s prediction for the next level',
+               'text', None)]
+    return EntryForm('shot', 'Shot', fields, taken,
+                     live=lambda form: shot_text(seen, axis, form))
+
+
+def shot_text(seen: Snapshot | None, axis: str | None,
+              form: EntryForm) -> str:
+    """The four checks answered and owed, and the pulse count so far and
+    with the shot being typed, against the header's budget."""
+    owed = [label for _key, names, label in SHOT_CHECKS
+            if any(form.value(name) is None for name in names)]
+    answered = len(SHOT_CHECKS) - len(owed)
+    checks = f'Checks answered: {answered} of {len(SHOT_CHECKS)}'
+    if owed:
+        checks += '; owed: ' + '; '.join(label.lower() for label in owed)
+    counted = seen.pulses if seen is not None else None
+    if counted is None:
+        return checks + '\nPulses: no test is open'
+    pulses = form.value('pulses') or 1
+    by_axis = dict(counted.by_axis)
+    by_axis[axis] = by_axis.get(axis, 0) + pulses
+    after = judge_pulses(counted.test, by_axis, counted.budget)
+    return (f'{checks}\nPulses so far: {counted.message}\n'
+            f'With this shot: {after.message}')
+
+
+def result_form(taken: datetime) -> EntryForm:
+    """A survey or functional run's result and who ran it, written as
+    the run's stop."""
+    return EntryForm('result', 'Survey or functional result',
+                     [('result', 'Result', 'text', None),
+                      ('by', 'Run by', 'text', None),
+                      ('counter', 'Counter', 'text', None)], taken,
+                     required=('result',))
+
+
+def notch_form(taken: datetime, seen: Snapshot | None, axis: str | None
+               ) -> EntryForm:
+    """A notch: its axis, channel, band and depth. Live: whether it is
+    in the header's planned list (`run_log_model.notch_in_plan`, the
+    rule a written notch is held by)."""
+    header = dict(seen.header) if seen is not None else {}
+    fields = [('axis', 'Axis', 'text', None),
+              ('channel', 'Channel', 'text', None),
+              ('band', 'Band (Hz)', 'text', None),
+              ('depth_db', 'Depth (dB)', 'number', None)]
+    return EntryForm('notch', 'Notch', fields, taken, required=('band',),
+                     defaults={'axis': axis},
+                     live=lambda form: notch_text(header, form))
+
+
+def notch_text(header: Mapping[str, Any], form: EntryForm) -> str:
+    """A notch's place in the plan, in words."""
+    typed = _typed(form, 'band', 'depth_db')
+    planned, why = notch_in_plan(header.get('notches_planned'),
+                                 form.value('axis'), typed)
+    plan = (f'Planned: {why}' if planned else
+            f'Not planned: {why} Written, it holds the test until a '
+            'deviation names it.')
+    return plan
+
+
+# ---- the findings and the rest -------------------------------------------------
+
+
+def deviation_form(taken: datetime, seen: Snapshot | None) -> EntryForm:
+    """A deviation: the fact at the console, and its cause, effect and
+    approval when they are known (now, or later by correction); the
+    names typed are recorded as agreed at the console. It answers the
+    hold of the entry it names, offered as the latest an unplanned notch
+    or a change to the test raised."""
+    wanted = seen.deviation_wanted if seen is not None else ()
+    holds = seen.holds if seen is not None else ()
+    fields = [('fact', 'Fact at the console', 'text', None),
+              ('cause', 'Cause (when known)', 'text', None),
+              ('effect', 'Effect (when known)', 'text', None),
+              ('approval', 'Approval (when known)', 'text', None),
+              ('agreed_by', 'Agreed at the console by', 'text', None),
+              ('refers_to', 'Names entry #', 'entry', None)]
+
+    def live(form: EntryForm) -> str:
+        named = form.value('refers_to')
+        if named is None:
+            return ('Names no entry: a deviation answers a hold only when it '
+                    'names the entry that raised it')
+        hold = next((found for found in holds if found.entry.id == named
+                     and found.rule in ('unplanned-notch', 'plan-change')),
+                    None)
+        if hold is None:
+            return f'#{named} raises no hold that a deviation answers'
+        return f'Answers the hold at #{named}: {hold.message}'
+
+    return EntryForm('deviation', 'Deviation', fields, taken,
+                     defaults={'refers_to': wanted[-1] if wanted else None},
+                     note='The names typed are recorded as agreed at the '
+                          'console; the log does not track signatures or '
+                          'approvals.', live=live)
+
+
+def anomaly_form(taken: datetime) -> EntryForm:
+    """An anomaly opened, numbered across the log, with its owner."""
+    return EntryForm('anomaly', 'Anomaly opened',
+                     [('fact', 'What was seen', 'text', None),
+                      ('owner', 'Owner', 'text', None),
+                      ('refers_to', 'Names entry #', 'entry', None)], taken)
+
+
+def disposition_form(taken: datetime, seen: Snapshot | None) -> EntryForm:
+    """An anomaly dispositioned, by its number: the latest open one is
+    offered."""
+    open_ones: Sequence[str] = seen.open_anomalies if seen is not None else ()
+    return EntryForm('disposition', 'Anomaly dispositioned',
+                     [('number', 'Anomaly number', 'text', None),
+                      ('disposition', 'Disposition', 'text', None),
+                      ('by', 'By', 'text', None)], taken,
+                     required=('number',),
+                     defaults={'number': open_ones[-1] if open_ones
+                               else None},
+                     note=('Open: ' + ', '.join(open_ones) if open_ones
+                           else 'No anomaly is open.'))
+
+
+def setting_form(taken: datetime) -> EntryForm:
+    """A setting changed. A change to a limit, a tolerance or an abort
+    band is a change to the test and holds it until a deviation names
+    it."""
+    return EntryForm('setting change', 'Setting changed',
+                     [('setting', 'Setting', 'text', None),
+                      ('value', 'Now', 'text', None),
+                      ('was', 'Was', 'text', None),
+                      ('governs', 'Governs', 'choice',
+                       ('', *SETTING_CLASSES))], taken,
+                     required=('setting',),
+                     note='A limit, tolerance or abort band changed holds '
+                          'the test until a deviation names the change.')
+
+
+def opinion_form(taken: datetime) -> EntryForm:
+    """An opinion given to the customer in conversation, and to whom."""
+    return EntryForm('opinion', 'Opinion given',
+                     [('to', 'Given to', 'text', None),
+                      ('opinion', 'Opinion', 'text', None)], taken)

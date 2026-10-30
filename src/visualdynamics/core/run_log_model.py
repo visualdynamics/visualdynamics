@@ -236,6 +236,56 @@ def _same_level(a: Any, b: Any) -> bool:
             and abs(a - b) <= LEVEL_MATCH_DB)
 
 
+def notch_in_plan(planned: Sequence[Mapping[str, Any]] | None,
+                  axis: str | None, fields: Mapping[str, Any]
+                  ) -> tuple[bool, str]:
+    """Whether a notch with `fields` (its band, and its depth_db where
+    given) on `axis` is in the planned list `planned` (a header's
+    `notches_planned`), and why: on its axis (a planned notch with no
+    axis is on every axis), its band inside the planned band, and its
+    depth no deeper than the planned depth where the plan gives one.
+    What `RunLogModel.notch_planned` judges a written notch by, and what
+    an entry form shows before the notch is written. A typed `planned`
+    mark is not what decides it."""
+    planned = planned or []
+    marked = (' It is marked planned, but the header\'s list decides.'
+              if fields.get('planned') else '')
+    if 'band' not in fields:
+        return False, 'the notch gives no band, so it cannot be found in ' \
+                      'the planned list.' + marked
+    try:
+        low, high = band_hz(fields['band'], 'its band')
+    except RunLogError as error:
+        return False, f'{error}.' + marked
+    if not planned:
+        return False, 'the header plans no notches.' + marked
+    reasons = []
+    for number, notch in enumerate(planned, start=1):
+        if notch.get('axis') is not None and notch['axis'] != axis:
+            continue
+        try:
+            p_low, p_high = band_hz(notch['band'])
+        except RunLogError:
+            continue
+        if low < p_low or high > p_high:
+            continue
+        depth = notch.get('depth_db')
+        if depth is not None:
+            if 'depth_db' not in fields:
+                reasons.append(f'it is inside planned notch {number}, '
+                               'which has a depth, but it gives none')
+                continue
+            if abs(fields['depth_db']) > abs(depth) + LEVEL_MATCH_DB:
+                reasons.append(f'it is inside planned notch {number} but '
+                               f'deeper than its {abs(depth):g} dB')
+                continue
+        return True, f'inside planned notch {number}.'
+    why = '; '.join(reasons) if reasons else (
+        f'{low:g} to {high:g} Hz on axis {axis or "(none)"} is in no planned '
+        'notch')
+    return False, why + '.' + marked
+
+
 def full_level_factor(level_db: float) -> float:
     """The factor that takes a reading at `level_db` to full level:
     10^(-L/20), with L in dB relative to full level (-12 for twelve
@@ -838,6 +888,25 @@ class PulseCount:
     message: str
 
 
+def judge_pulses(test: int, by_axis: Mapping[str | None, int],
+                 budget: int | None) -> PulseCount:
+    """The pulses counted by axis (`by_axis`) judged against `budget`, a
+    test header's `pulse_budget`: what `RunLogModel.pulses` reports, and
+    what a shot form shows with the shot being typed counted in."""
+    by_axis = dict(by_axis)
+    count = sum(by_axis.values())
+    if budget is None:
+        return PulseCount(test, count, by_axis, None, 'not judged',
+                          f'{count} pulses; not judged: the header gives '
+                          'no pulse budget')
+    if count > budget:
+        return PulseCount(test, count, by_axis, budget, 'over',
+                          f'{count} pulses, over the budget of {budget} '
+                          f'by {count - budget}')
+    return PulseCount(test, count, by_axis, budget, 'within',
+                      f'{count} of {budget} pulses, {budget - count} left')
+
+
 @dataclass(frozen=True)
 class Finding:
     """A deviation or anomaly: its number, kind ('deviation' or
@@ -1122,43 +1191,8 @@ class RunLogModel:
         band, and its depth no deeper than the planned depth where the
         plan gives one. The typed `planned` mark is not what decides it."""
         entry = self._by_id.get(entry.id, entry)
-        planned = self.header_at(entry).get('notches_planned') or []
-        marked = (' It is marked planned, but the header\'s list decides.'
-                  if entry.fields.get('planned') else '')
-        if 'band' not in entry.fields:
-            return False, 'the notch gives no band, so it cannot be found in ' \
-                          'the planned list.' + marked
-        try:
-            low, high = band_hz(entry.fields['band'], 'its band')
-        except RunLogError as error:
-            return False, f'{error}.' + marked
-        if not planned:
-            return False, 'the header plans no notches.' + marked
-        reasons = []
-        for number, notch in enumerate(planned, start=1):
-            if notch.get('axis') is not None and notch['axis'] != entry.axis:
-                continue
-            try:
-                p_low, p_high = band_hz(notch['band'])
-            except RunLogError:
-                continue
-            if low < p_low or high > p_high:
-                continue
-            depth = notch.get('depth_db')
-            if depth is not None:
-                if 'depth_db' not in entry.fields:
-                    reasons.append(f'it is inside planned notch {number}, '
-                                   'which has a depth, but it gives none')
-                    continue
-                if abs(entry.fields['depth_db']) > abs(depth) + LEVEL_MATCH_DB:
-                    reasons.append(f'it is inside planned notch {number} but '
-                                   f'deeper than its {abs(depth):g} dB')
-                    continue
-            return True, f'inside planned notch {number}.'
-        why = '; '.join(reasons) if reasons else (
-            f'{low:g} to {high:g} Hz on axis {entry.axis or "(none)"} is in '
-            'no planned notch')
-        return False, why + '.' + marked
+        return notch_in_plan(self.header_at(entry).get('notches_planned'),
+                             entry.axis, entry.fields)
 
     # ---- holds ----------------------------------------------------------------
 
@@ -1623,18 +1657,7 @@ class RunLogModel:
                 axis = self._axis_of(found, shot)
                 by_axis[axis] = by_axis.get(axis, 0) + shot.fields.get(
                     'pulses', 1)
-        count = sum(by_axis.values())
-        budget = found.header.get('pulse_budget')
-        if budget is None:
-            return PulseCount(test, count, by_axis, None, 'not judged',
-                              f'{count} pulses; not judged: the header gives '
-                              'no pulse budget')
-        if count > budget:
-            return PulseCount(test, count, by_axis, budget, 'over',
-                              f'{count} pulses, over the budget of {budget} '
-                              f'by {count - budget}')
-        return PulseCount(test, count, by_axis, budget, 'within',
-                          f'{count} of {budget} pulses, {budget - count} left')
+        return judge_pulses(test, by_axis, found.header.get('pulse_budget'))
 
     def findings(self, test: Any = ALL) -> list[Finding]:
         """The deviations and anomalies, by number, each with the

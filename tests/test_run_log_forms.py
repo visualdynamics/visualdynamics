@@ -1,5 +1,8 @@
-"""The Run Log's header forms: the test header in full, its files
-hashed on the log's worker, and carried fields marked until confirmed.
+"""The Run Log's forms: the test header in full, carried fields marked
+until confirmed, the readings of each kind of test (a sweep against the
+continuous rating, a shot's four checks and its pulses against the
+budget, a survey's result), the notch against the plan and the
+findings.
 
 Every log is written under `tmp_path`, with a fixed login and machine
 name, on a clock the test sets. Each form is driven the way the keeper
@@ -98,16 +101,6 @@ def _opened(panel, tmp_path, **header):
 def _entries(path, kind=None):
     entries = RunLog.read(path).view()
     return [e for e in entries if kind is None or e.kind == kind]
-
-
-def test_the_header_form_has_its_key(panel, tmp_path):
-    from visualdynamics.gui.run_log_dock import KEYS
-
-    _opened(panel, tmp_path, **RANDOM)
-    assert KEYS['header'] == 'Ctrl+Shift+H'
-    assert len(set(KEYS.values())) == len(KEYS), 'no key is taken twice'
-    _key(panel.level_row.voltage_box, 'H')
-    assert panel.form is not None and panel.form.name == 'header'
 
 
 def _key(widget, letter):
@@ -298,7 +291,288 @@ def test_a_header_field_emptied_or_refused_writes_nothing(panel, tmp_path):
     assert not _entries(path, 'header_change')
 
 
+# ---- the readings ---------------------------------------------------------
+
+
+def test_a_sweep_writes_its_fields_and_reads_the_continuous_rating(
+        panel, tmp_path):
+    """At -12 dB the factor is 3.981, so 100 A rms is 398.1 A at full
+    level against a 400 A continuous rating; 420 A at full level is
+    over it."""
+    path = _opened(panel, tmp_path, test_kind='Sine Sweep',
+                   rated_current_rms='400')
+    _key(panel.level_row.voltage_box, 'W')
+    form = panel.form
+    assert form is not None and form.name == 'sweep'
+    assert form.box_text('n') == '1'
+    form.set_box('direction', 'up')
+    form.set_box('of', '3')
+    form.set_box('rate', '1 oct/min')
+    form.set_box('span', '5-2000 Hz')
+    form.set_box('level_db', '-12')
+    form.set_box('current', '100')
+    assert form.live_label.text() == (
+        'Sweep 1 of 3. Continuous rating: 398.1 A at full level, within the '
+        'continuous current rating of 400 A (100%)')
+    form.set_box('level_db', '0')
+    form.set_box('current', '420')
+    assert form.live_label.text().endswith(
+        '420 A at full level, above the continuous current rating of 400 A '
+        '(105%)')
+    _write(panel, form)
+    (sweep,) = _entries(path, 'sweep')
+    assert dict(sweep.fields) == {'direction': 'up', 'n': 1, 'of': 3,
+                                  'rate': '1 oct/min', 'span': '5-2000 Hz',
+                                  'level_db': 0.0, 'current': 420.0}
+    assert (sweep.test, sweep.axis, sweep.run) == (1, 'Z', 1)
+    form = panel.open_form('sweep')
+    assert [form.box_text(name) for name in ('n', 'of', 'rate', 'span',
+                                             'level_db', 'direction')] == [
+        '2', '3', '1 oct/min', '5-2000 Hz', '0', '']
+    form.set_box('span', 'wide')
+    assert _refused(panel, form) == ("a sweep's span 'wide' is not read as a "
+                                     'band: give it as low-high in Hz, such '
+                                     'as 180-220 Hz')
+    assert len(_entries(path, 'sweep')) == 1
+
+
+def test_a_sweep_with_no_rating_or_reading_says_why_it_is_not_judged(
+        panel, tmp_path):
+    _opened(panel, tmp_path, test_kind='Sine Sweep')
+    form = _form(panel, 'sweep', level_db='0', current='300')
+    assert form.live_label.text() == (
+        'Continuous rating: not judged: the header gives no continuous '
+        'current rating')
+    form.cancelled.emit()
+    _write(panel, _form(panel, 'header', rated_current_rms='400'))
+    form = _form(panel, 'sweep', level_db='0')
+    assert form.live_label.text() == ('Continuous rating: not judged: no '
+                                      'current was read')
+    form.set_box('level_db', '')
+    form.set_box('current', '300')
+    assert form.live_label.text() == ('Continuous rating: not judged: no '
+                                      'level is given')
+    form.set_box('level_db', '3')
+    assert 'above full level' in form.live_label.text()
+
+
+def test_a_shot_counts_its_pulses_against_the_budget_as_it_is_typed(
+        panel, tmp_path):
+    path = _opened(panel, tmp_path, test_kind='Shock', pulse_budget='3')
+    _key(panel.level_row.voltage_box, 'P')
+    form = panel.form
+    assert form is not None and form.name == 'shot'
+    lines = form.live_label.text().splitlines()
+    assert lines[0].startswith('Checks answered: 0 of 4; owed: the pulse or '
+                               'spectrum against its tolerance')
+    assert lines[1:] == ['Pulses so far: 0 of 3 pulses, 3 left',
+                         'With this shot: 1 of 3 pulses, 2 left']
+    for field, value in (('polarity', 'positive'), ('level_db', '-6'),
+                         ('in_tolerance', 'yes'), ('within_stroke', 'yes'),
+                         ('peak_current', '210'), ('peak_voltage', '120'),
+                         ('prediction', 'next level fits the stroke')):
+        form.set_box(field, value)
+    assert form.live_label.text().splitlines()[0] == 'Checks answered: 4 of 4'
+    _write(panel, form)
+    (shot,) = _entries(path, 'shot')
+    assert dict(shot.fields) == {
+        'polarity': 'positive', 'level_db': -6.0, 'in_tolerance': True,
+        'within_stroke': True, 'peak_current': 210.0, 'peak_voltage': 120.0,
+        'prediction': 'next level fits the stroke'}
+    assert (shot.axis, shot.run) == ('Z', 1)
+    form = _form(panel, 'shot', pulses='3', in_tolerance='no')
+    lines = form.live_label.text().splitlines()
+    assert lines[0].startswith('Checks answered: 1 of 4; owed: ')
+    assert lines[1:] == ['Pulses so far: 1 of 3 pulses, 2 left',
+                         'With this shot: 4 pulses, over the budget of 3 by 1']
+    _write(panel, form)
+    assert panel.snapshot.pulses.message == '4 pulses, over the budget of 3 ' \
+                                            'by 1'
+    second = _entries(path, 'shot')[-1]
+    assert any(text == f'The checks after shot #{second.id}: 3 of 4 owed'
+               for text in panel.owed_texts())
+
+
+def test_a_survey_result_is_written_as_its_runs_stop(panel, tmp_path):
+    from visualdynamics.core.run_log_model import RunLogModel
+
+    path = _opened(panel, tmp_path, test_kind='Functional')
+    _write(panel, _form(panel, 'result', result='passed, all channels',
+                        by='R. Analyst'))
+    with RunLog.read(path) as log:
+        (run,) = RunLogModel(log).runs(1)
+    assert (run.result, run.by, run.axis) == ('passed, all channels',
+                                             'R. Analyst', 'Z')
+    form = _form(panel, 'result')
+    assert _refused(panel, form) == 'Result is needed'
+
+
+def test_only_the_readings_a_test_takes_are_offered(panel, tmp_path):
+    acts = panel.actions_by_name
+
+    def offered():
+        return {name for name in ('sweep', 'shot', 'result')
+                if acts[name].isVisible()}
+
+    _new(panel, tmp_path)
+    assert offered() == set()
+    _write(panel, _form(panel, 'open test', test_kind='Random Vibration'))
+    assert offered() == set()
+    for kind, shown in (('Shock', {'shot'}), ('Sine Sweep', {'sweep'}),
+                        ('Random and Sine', {'sweep'}),
+                        ('Modal Test', {'result'}),
+                        ('Other', {'sweep', 'shot', 'result'})):
+        _write(panel, _form(panel, 'roll', test_kind=kind))
+        assert offered() == shown, kind
+
+
+def test_every_form_has_its_key(panel, tmp_path):
+    from visualdynamics.gui.run_log_dock import KEYS
+
+    _opened(panel, tmp_path, test_kind='Other')
+    wanted = ('header', 'sweep', 'shot', 'result', 'notch', 'deviation',
+              'anomaly', 'disposition', 'setting change', 'opinion')
+    letters = {name: KEYS[name].rsplit('+', 1)[1] for name in wanted}
+    assert all(KEYS[name] == f'Ctrl+Shift+{letters[name]}' for name in wanted)
+    assert len(set(KEYS.values())) == len(KEYS), 'no key is taken twice'
+    for name in wanted:
+        panel.focus_level_row()
+        _key(panel.level_row.voltage_box, letters[name])
+        assert panel.form is not None and panel.form.name == name, name
+    panel.focus_level_row()
+
+
+# ---- notches and deviations -----------------------------------------------
+
+
+def test_an_unplanned_notch_holds_and_a_deviation_naming_it_clears_it(
+        panel, tmp_path):
+    path = _opened(panel, tmp_path, **RANDOM,
+                   notches_planned='Z: 180-220 Hz, 6 dB')
+    form = _form(panel, 'notch', channel='12', band='190-210', depth_db='4')
+    assert form.box_text('axis') == 'Z'
+    assert form.live_label.text().splitlines()[0] == \
+        'Planned: inside planned notch 1.'
+    _write(panel, form)
+    assert panel.snapshot.holds == ()
+    form = _form(panel, 'notch', channel='12', band='400-450', depth_db='3')
+    assert form.live_label.text().splitlines()[0] == (
+        'Not planned: 400 to 450 Hz on axis Z is in no planned notch. '
+        'Written, it holds the test until a deviation names it.')
+    _write(panel, form)
+    notches = _entries(path, 'notch')
+    assert [e.fields['planned'] for e in notches] == [True, False]
+    unplanned = notches[1]
+    assert [hold.rule for hold in panel.snapshot.holds] == ['unplanned-notch']
+    assert panel.message.text() == (f'Notch #{unplanned.id} is not planned: '
+                                    'the test holds until a deviation names '
+                                    'it (Ctrl+Shift+D).')
+    _key(panel.level_row.voltage_box, 'D')
+    form = panel.form
+    assert form.name == 'deviation'
+    assert form.box_text('refers_to') == str(unplanned.id)
+    assert form.live_label.text().startswith(
+        f'Answers the hold at #{unplanned.id}: the notch at '
+        f'#{unplanned.id} is not planned')
+    for field, value in (
+            ('fact', 'limit channel 12 notched 400-450 Hz by 3 dB at -6 dB'),
+            ('cause', 'bracket mode, not in the prediction'),
+            ('effect', 'the article sees 3 dB less over 400-450 Hz'),
+            ('agreed_by', 'C. Rep, R. Analyst')):
+        form.set_box(field, value)
+    _write(panel, form)
+    (deviation,) = _entries(path, 'deviation')
+    assert dict(deviation.fields) == {
+        'number': 'D-1',
+        'fact': 'limit channel 12 notched 400-450 Hz by 3 dB at -6 dB',
+        'cause': 'bracket mode, not in the prediction',
+        'effect': 'the article sees 3 dB less over 400-450 Hz',
+        'agreed_by': 'C. Rep, R. Analyst', 'refers_to': unplanned.id}
+    assert deviation.test == 1 and deviation.run is None
+    assert panel.snapshot.holds == ()
+    assert panel.status.holds_button.text() == 'Holds: 0'
+    # the approval written later, when it is known, by correction
+    item = next(panel.day_list.item(i) for i in range(panel.day_list.count())
+                if panel.day_list.item(i).text().startswith(
+                    f'#{deviation.id} '))
+    panel.day_list.setCurrentItem(item)
+    _write(panel, _form(panel, 'correct', approval='the lab form, signed'))
+    assert _entries(path, 'deviation')[0].fields['approval'] == \
+        'the lab form, signed'
+
+
+def test_a_deviation_naming_nothing_says_it_answers_no_hold(panel, tmp_path):
+    _opened(panel, tmp_path, **RANDOM)
+    form = _form(panel, 'deviation')
+    assert form.box_text('refers_to') == ''
+    assert form.live_label.text().startswith('Names no entry')
+    form.set_box('refers_to', '1')
+    assert form.live_label.text() == '#1 raises no hold that a deviation ' \
+                                     'answers'
+
+
+def test_an_anomaly_opened_and_dispositioned(panel, tmp_path):
+    path = _opened(panel, tmp_path, **RANDOM)
+    _key(panel.level_row.voltage_box, 'M')
+    form = panel.form
+    form.set_box('fact', 'connector backshell loose after run 2')
+    form.set_box('owner', 'R. Analyst')
+    _write(panel, form)
+    assert panel.snapshot.open_anomalies == ('A-1',)
+    form = _form(panel, 'disposition', number='A-9')
+    assert _refused(panel, form) == 'A-9 is not an anomaly opened in this log'
+    form.cancelled.emit()
+    form = panel.open_form('disposition')
+    assert form.box_text('number') == 'A-1'
+    form.set_box('disposition', 'retorqued, functional passed')
+    form.set_box('by', 'R. Analyst')
+    _write(panel, form)
+    assert panel.snapshot.open_anomalies == ()
+    (opened,) = _entries(path, 'anomaly_opened')
+    (closed,) = _entries(path, 'anomaly_dispositioned')
+    assert dict(opened.fields) == {
+        'number': 'A-1', 'fact': 'connector backshell loose after run 2',
+        'owner': 'R. Analyst'}
+    assert dict(closed.fields) == {'number': 'A-1',
+                                   'disposition': 'retorqued, functional '
+                                                  'passed',
+                                   'by': 'R. Analyst'}
+    assert opened.test == closed.test == 1
+
+
+def test_a_limit_changed_holds_and_an_opinion_is_written(panel, tmp_path):
+    path = _opened(panel, tmp_path, **RANDOM)
+    _write(panel, _form(panel, 'setting change', setting='channel 12 limit',
+                        value='+3 dB', was='0 dB', governs='limit'))
+    (change,) = _entries(path, 'setting_change')
+    assert dict(change.fields) == {'setting': 'channel 12 limit',
+                                   'value': '+3 dB', 'was': '0 dB',
+                                   'governs': 'limit'}
+    assert [hold.rule for hold in panel.snapshot.holds] == ['plan-change']
+    assert panel.snapshot.deviation_wanted == (change.id,)
+    _write(panel, _form(panel, 'opinion', to='C. Rep',
+                        opinion='the bracket response looks like a loose '
+                                'joint'))
+    (opinion,) = _entries(path, 'opinion_given')
+    assert dict(opinion.fields) == {
+        'to': 'C. Rep',
+        'opinion': 'the bracket response looks like a loose joint'}
+
+
 # ---- drawn, and torn down -------------------------------------------------
+
+
+def test_a_form_with_a_live_line_stays_inside_the_dock(panel, tmp_path, pump):
+    """The line a form computes is placed in the form before it is
+    shown, so it never opens as a window of its own and takes the
+    keyboard from the dock."""
+    _opened(panel, tmp_path, test_kind='Shock')
+    form = panel.open_form('shot')
+    pump()
+    assert not form.live_label.isWindow()
+    assert form.live_label.isVisibleTo(form)
+    assert panel.window().isActiveWindow()
+    assert not panel.open_form('note').live_label.isVisibleTo(panel)
 
 
 def test_the_header_form_renders_headless_and_scrolls(panel, tmp_path, pump):
@@ -325,7 +599,7 @@ def test_the_window_closed_with_a_form_up_releases_the_log_and_dies(
     path = _new(panel, tmp_path)
     panel.open_form('open test').set_box('test_kind', 'Shock')
     panel.form.write()
-    panel.open_form('header')
+    panel.open_form('shot')
     ghost = weakref.ref(window)
     destroy_window(window, qt_app)
     del window, panel

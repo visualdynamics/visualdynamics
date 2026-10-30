@@ -122,13 +122,25 @@ and put away with **Esc**:
 | New Log, Open Log, Close Log | | the file: closing releases it for another writer |
 | Level Row | Ctrl+Shift+L | back to the level row |
 
-A second bar holds the header form:
+A second bar holds the forms for the header and the readings:
 
 | Act | Key | Writes |
 |---|---|---|
 | Header | Ctrl+Shift+H | changes to the current test's header, and the carried fields confirmed |
+| Sweep | Ctrl+Shift+W | a sine sweep: direction, n of N, rate, span, level and current |
+| Shot | Ctrl+Shift+P | a shock shot with its four checks and its pulses |
+| Result | Ctrl+Shift+F | a survey or functional run's result and who ran it |
+| Notch | Ctrl+Shift+T | a notch: axis, channel, band and depth |
+| Deviation | Ctrl+Shift+D | a deviation, the latest unanswered hold offered |
+| Anomaly, Disposition | Ctrl+Shift+M, Ctrl+Shift+X | an anomaly opened, with its owner, and dispositioned |
+| Setting | Ctrl+Shift+G | a setting changed, and what it governs |
+| Opinion | Ctrl+Shift+E | an opinion given to the customer, and to whom |
 
 Every key has a modifier, so none is taken from a box being typed into.
+Sweep, Shot and Result are offered only for a test whose runs hold
+them: Sweep for a sine test, Shot for a shock or transient test, Result
+for a modal, system identification or functional test, all three for a
+test of kind Other.
 
 **The header.** Open Test, Roll and Header show every field of the test
 header, in groups: what the test is (kind, title, class and purpose, the
@@ -144,6 +156,38 @@ log's own thread as the entry is written. Roll offers the current
 test's header as it stands; every field left as offered is carried, and
 the next test's Header form marks it **(carried)** until it is changed
 or confirmed with **Confirm**.
+
+**The readings.** Each form computes what the log will judge from what
+is typed, under its boxes, before anything is written:
+
+- **Sweep** reads the amplifier's rms current at the sweep's level
+  against the header's continuous current rating, which is what a sine
+  test budgets, projected to full level as the level row is:
+
+        Sweep 1 of 3. Continuous rating: 398.1 A at full level, within the continuous current rating of 400 A (100%)
+
+  The next sweep of the run is offered as n, with N, the rate, the span
+  and the level as the last sweep had them.
+- **Shot** lists the four checks made after every shot (the pulse or
+  spectrum against its tolerance in both polarities, the displacement
+  and velocity against the stroke, the amplifier's current and voltage
+  peaks, the controller's prediction for the next level), which are
+  answered and which owed, and counts the pulses against the header's
+  budget, so far and with this shot. Every shot counts, a missed one
+  too; a check left blank is listed as owed.
+- **Notch** says whether the notch is in the header's planned list on
+  its axis, band and depth, as the log will judge it; one that is not
+  holds the test until a deviation names it.
+
+**Findings.** A deviation carries the fact at the console; its cause,
+effect and approval are written when they are known, then or later by
+correction. The names typed into **Agreed at the console by** are
+recorded as that: the log does not track signatures or approvals and
+holds no deviation open waiting for one. A deviation answers a hold only
+when it names the entry that raised it, and the form offers the latest
+unplanned notch or change to the test still unanswered. Anomalies are
+opened with their owner and closed by a disposition naming their
+number.
 
 A log already open for writing in another Visual Dynamics, or elsewhere,
 opens read-only, and the strip names who holds it; **Reload** reads
@@ -216,7 +260,7 @@ later, by correction. A field left blank is left out.
 | `setup_step`, `post_test_step` | step | result |
 | `run_start` | | level_db, counter |
 | `level_row` | | level_db, voltage, current, drive_fraction, answer, channel_answers, go, agreed_by |
-| `sweep` | | direction, n, of |
+| `sweep` | | direction, n, of, rate, span, level_db, current |
 | `shot` | | polarity, n, of, level_db, pulses, in_tolerance, within_stroke, peak_current, peak_voltage, prediction |
 | `run_stop` | | counter, reason, scheduled, result, by |
 | `abort` | stop | channel, band, panel_fault, counter, called_by, heard, records_read, over_test, level_db |
@@ -224,7 +268,7 @@ later, by correction. A field left blank is left out.
 | `path_decided` | path | refers_to |
 | `restart` | | resume, counter_at_stop, counter_at_restart, cause, decided_by, refers_to |
 | `notch` | | channel, band, depth_db, planned |
-| `deviation` | | number, fact, agreed_by, refers_to |
+| `deviation` | | number, fact, cause, effect, approval, agreed_by, refers_to |
 | `anomaly_opened` | | number, fact, owner, refers_to |
 | `anomaly_dispositioned` | number | disposition, by |
 | `adjustment` | | what |
@@ -245,7 +289,9 @@ A few fields take one of a fixed set of words, and anything else is
 refused: an answer (and each channel's answer in `channel_answers`) is
 as predicted, explained or not explained; what a setting governs is
 limit, tolerance, abort band or other; a sweep's direction is up or
-down. A restart's `resume` is yes when the test continues with the time
+down. A sweep's span is a band (`5-2000 Hz`), refused when it cannot
+be read as one; its rate is written as the controller gives it, in
+octaves per minute or hertz per second. A restart's `resume` is yes when the test continues with the time
 already run counted, and no when it starts again.
 
 Deviations and anomalies are numbered across the whole log, D-1, D-2,

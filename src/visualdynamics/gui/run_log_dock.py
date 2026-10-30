@@ -39,9 +39,12 @@ What it takes:
   released, a clock check, a person in or out, a note, a run started or
   stopped, a cause found and a correction. Each takes its event time
   when it opens.
-- **The header forms** (`gui.run_log_forms`): the test header in full
-  for a test opened, the roll and the current test, with carried fields
-  marked until confirmed.
+- **The header and readings forms** (`gui.run_log_forms`): the test
+  header in full for a test opened, the roll and the current test, with
+  carried fields marked until confirmed; a sweep, a shot, a survey's
+  result, a notch, a deviation, an anomaly and its disposition, a
+  setting change and an opinion given, each computing what the log will
+  judge as it is typed.
 
 Every read and write of the file, and every rebuild of the model from
 it, runs on one worker thread of its own (`LogWorker`), in order, and
@@ -107,6 +110,7 @@ from ..core.run_log_model import (
     LEVEL_MATCH_DB,
     Hold,
     OwedList,
+    PulseCount,
     RunLogModel,
 )
 
@@ -134,6 +138,15 @@ KEYS = {
     'cause found': 'Ctrl+Shift+C',
     'level row': 'Ctrl+Shift+L',
     'header': 'Ctrl+Shift+H',
+    'sweep': 'Ctrl+Shift+W',
+    'shot': 'Ctrl+Shift+P',
+    'result': 'Ctrl+Shift+F',
+    'notch': 'Ctrl+Shift+T',
+    'deviation': 'Ctrl+Shift+D',
+    'anomaly': 'Ctrl+Shift+M',
+    'disposition': 'Ctrl+Shift+X',
+    'setting change': 'Ctrl+Shift+G',
+    'opinion': 'Ctrl+Shift+E',
 }
 
 
@@ -213,8 +226,14 @@ class Snapshot:
     aborts with no cause, `unreleased` the tests closed to runs and not
     yet released.
 
-    `carried` names the current header's fields carried from the last
-    test and not yet confirmed.
+    For the readings forms: `carried` names the current header's fields
+    carried from the last test and not yet confirmed; `sweeps` are the
+    fields of the sweeps already written in the run a sweep goes into;
+    `pulses` is the current test's pulse count against its budget (None
+    with no test open); `deviation_wanted` are the entries whose hold a
+    deviation naming them answers (an unplanned notch, a change to the
+    test), and `open_anomalies` the numbers of the anomalies with no
+    disposition.
     """
 
     path: str
@@ -235,6 +254,10 @@ class Snapshot:
     open_aborts: tuple[int, ...]
     unreleased: tuple[int, ...]
     carried: tuple[str, ...] = ()
+    sweeps: tuple[Mapping[str, Any], ...] = ()
+    pulses: PulseCount | None = None
+    deviation_wanted: tuple[int, ...] = ()
+    open_anomalies: tuple[str, ...] = ()
 
 
 def snapshot(log: RunLog, *, read_only: str = '') -> Snapshot:
@@ -262,6 +285,7 @@ def snapshot(log: RunLog, *, read_only: str = '') -> Snapshot:
     header: Mapping[str, Any] = {}
     run_number = None
     levels: tuple[float, ...] = ()
+    sweeps: tuple[Mapping[str, Any], ...] = ()
     if current is not None:
         header = dict(current.header.values)
         latest = max(current.runs, key=lambda run: run.number, default=None)
@@ -287,6 +311,7 @@ def snapshot(log: RunLog, *, read_only: str = '') -> Snapshot:
                 levels = tuple(float(entry.fields['level_db'])
                                for entry in latest.levels
                                if 'level_db' in entry.fields)
+                sweeps = tuple(dict(entry.fields) for entry in latest.sweeps)
     holds = tuple(model.holds())
     return Snapshot(
         path=log.path, title=log.header.title, writable=log.writable,
@@ -298,7 +323,14 @@ def snapshot(log: RunLog, *, read_only: str = '') -> Snapshot:
                           if hold.rule == 'abort-cause'),
         unreleased=tuple(test.number for test in model.tests()
                          if test.state == 'closed to runs'),
-        carried=tuple(current.header.carried) if current else ())
+        carried=tuple(current.header.carried) if current else (),
+        sweeps=sweeps,
+        pulses=model.pulses(current.number) if current else None,
+        deviation_wanted=tuple(hold.entry.id for hold in holds
+                               if hold.rule in ('unplanned-notch',
+                                                'plan-change')),
+        open_anomalies=tuple(found.number
+                             for found in model.open_anomalies()))
 
 
 def entry_line(entry: Entry) -> str:
@@ -709,7 +741,10 @@ class EntryForm(QWidget):
     cancels. What a box cannot hold is said on the form's message line,
     and nothing is written.
 
-    A field of kind 'heading' is a group's title, not a box."""
+    A field of kind 'heading' is a group's title, not a box. `live`, when
+    given, is read on every change to a box and shown under the boxes:
+    what the form computes from what is typed (a budget, a count, a place
+    in the plan), without writing anything."""
 
     written = Signal()
     cancelled = Signal()
@@ -722,7 +757,8 @@ class EntryForm(QWidget):
                  fields: Sequence[tuple[str, str, str, Any]], taken: datetime,
                  *, required: Sequence[str] = (), text: str = 'Note',
                  note: str = '', defaults: Mapping[str, Any] | None = None,
-                 with_time: bool = True) -> None:
+                 with_time: bool = True,
+                 live: Callable[[EntryForm], str] | None = None) -> None:
         super().__init__()
         self.name: str = name
         self.taken: datetime = taken
@@ -736,6 +772,7 @@ class EntryForm(QWidget):
         self.labels: dict[str, QLabel] = {}
         #: the groups' titles, in order
         self.headings: list[str] = []
+        self.live: Callable[[EntryForm], str] | None = live
         self._kinds: dict[str, str] = {}
         self._labels: dict[str, str] = {}
         column = QVBoxLayout(self)
@@ -786,6 +823,15 @@ class EntryForm(QWidget):
             self.text_box = QLineEdit()
             grid.addWidget(QLabel(text), row, 0)
             grid.addWidget(self.text_box, row, 1)
+        self.live_label: QLabel = QLabel('')
+        self.live_label.setWordWrap(True)
+        self.live_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        # placed before it is hidden or shown: a label shown with no
+        # parent is a window of its own
+        column.addWidget(self.live_label)
+        if live is None:
+            self.live_label.hide()
         self.message: QLabel = QLabel('')
         self.message.setWordWrap(True)
         column.addWidget(self.message)
@@ -801,7 +847,22 @@ class EntryForm(QWidget):
         column.addStretch(1)
         for widget in self._inputs():
             widget.installEventFilter(self)
+            if isinstance(widget, QLineEdit):
+                widget.textChanged.connect(self.refresh)
+            elif isinstance(widget, QComboBox):
+                widget.currentTextChanged.connect(self.refresh)
         _scaled(self, TYPE_SCALE)
+        self.refresh()
+
+    def refresh(self, *_args: Any) -> None:
+        """Read `live` again from what the boxes hold now."""
+        if self.live is None:
+            return
+        try:
+            said = self.live(self)
+        except RunLogError as error:
+            said = f'not read: {error}'
+        self.live_label.setText(said)
 
     def _box(self, kind: str, choices: Any, default: Any) -> QWidget:
         if kind == 'choice':
@@ -1298,11 +1359,30 @@ class RunLogPanel(QWidget):
                   'Back to the level row')
         forms = self.forms_bar
         forms.setMovable(False)
-        forms.addAction(self._act('header', 'Header',
-                                  lambda: self.open_form('header'),
-                                  ('The current test\'s header in full: '
-                                   'change a field, or confirm what was '
-                                   'carried')))
+        for name, label, tip in (
+                ('header', 'Header', ('The current test\'s header in full: '
+                                      'change a field, or confirm what was '
+                                      'carried')),
+                ('sweep', 'Sweep', ('A sine sweep: direction, n of N, rate, '
+                                    'span, and the current against the '
+                                    'continuous rating')),
+                ('shot', 'Shot', ('A shock shot and its four checks, the '
+                                  'pulses counted against the budget')),
+                ('result', 'Result', ('A survey or functional run\'s result, '
+                                      'and who ran it')),
+                ('notch', 'Notch', ('A notch: axis, band and depth, planned '
+                                    'or not')),
+                ('deviation', 'Deviation', ('A deviation: the fact at the '
+                                            'console, and cause, effect and '
+                                            'approval when known')),
+                ('anomaly', 'Anomaly', 'An anomaly opened, with its owner'),
+                ('disposition', 'Disposition', 'An anomaly dispositioned'),
+                ('setting change', 'Setting', 'A setting changed'),
+                ('opinion', 'Opinion', ('An opinion given to the customer in '
+                                        'conversation'))):
+            forms.addAction(self._act(name, label,
+                                      lambda name=name: self.open_form(name),
+                                      tip))
 
     def _toggle_layout(self) -> None:
         self.layout_wanted.emit(self.layout_action.text() == 'Log Only')
@@ -1561,8 +1641,9 @@ class RunLogPanel(QWidget):
         """Open the form `name`, its event time taken now: a small form
         ('note', 'clock check', 'person in', 'person out', 'run start',
         'run stop', 'cause found', 'correct', 'close test', 'release' or
-        'new log'), or a header form ('open test', 'roll' or
-        'header')."""
+        'new log'), a header form ('open test', 'roll' or 'header'), or a
+        readings form ('sweep', 'shot', 'result', 'notch', 'deviation',
+        'anomaly', 'disposition', 'setting change' or 'opinion')."""
         from . import run_log_forms as forms
 
         taken = self.clock()
@@ -1611,6 +1692,15 @@ class RunLogPanel(QWidget):
             'open test': lambda: forms.header_form('open test', taken, seen),
             'roll': lambda: forms.header_form('roll', taken, seen),
             'header': lambda: forms.header_form('header', taken, seen),
+            'sweep': lambda: forms.sweep_form(taken, seen),
+            'shot': lambda: forms.shot_form(taken, seen, self._axis()),
+            'result': lambda: forms.result_form(taken),
+            'notch': lambda: forms.notch_form(taken, seen, self._axis()),
+            'deviation': lambda: forms.deviation_form(taken, seen),
+            'anomaly': lambda: forms.anomaly_form(taken),
+            'disposition': lambda: forms.disposition_form(taken, seen),
+            'setting change': lambda: forms.setting_form(taken),
+            'opinion': lambda: forms.opinion_form(taken),
             'close test': lambda: EntryForm(
                 'close test', 'Close the test to runs',
                 [('reason', 'Reason', 'text', None)], taken, text=''),
@@ -1720,6 +1810,11 @@ class RunLogPanel(QWidget):
         if name in ('open test', 'roll', 'header'):
             self._write_header(name, values, text, when, author, test)
             return
+        from .run_log_forms import READINGS
+
+        if name in READINGS:
+            self._write_reading(name, values, text, when, author)
+            return
         if name == 'close test':
             if test is None:
                 self.form.say('No test is open to runs.')  # type: ignore[union-attr]
@@ -1801,6 +1896,57 @@ class RunLogPanel(QWidget):
         self._writing(write, done=lambda _entry: self._close_form(),
                       refused=self._form_refused)
 
+    def _write_reading(self, name: str, values: dict[str, Any], text: str,
+                       when: datetime, author: str) -> None:
+        """A readings form written as its kind of entry
+        (`run_log_forms.READINGS`). A run's entries go to the current
+        run on the axis; a finding that names an entry goes to that
+        entry's test, a disposition to its anomaly's; a notch is marked
+        planned or not as the header's list has it when written."""
+        from .run_log_forms import READINGS
+
+        kind = READINGS[name]
+        values = dict(values)
+        test, axis, run = self._place()
+        if name == 'notch':
+            axis = values.pop('axis', None)
+        in_run = kind in model_module.RUN_KINDS
+
+        def write(log: RunLog) -> Entry:
+            model = RunLogModel(log)
+            fields = dict(values)
+            owner = test
+            named = fields.get('refers_to')
+            if named is not None:
+                # an entry the log does not hold is refused by the log,
+                # with its number, when the entry is written
+                with contextlib.suppress(KeyError):
+                    owner = log.current(named).test
+            if kind == 'anomaly_dispositioned':
+                owner = next((entry.test for entry in model.entries
+                              if entry.kind == 'anomaly_opened'
+                              and entry.fields.get('number')
+                              == fields.get('number')), test)
+            model_module.admit(model, kind, owner)
+            if kind == 'notch' and owner is not None:
+                fields['planned'] = model_module.notch_in_plan(
+                    model.test(owner).header.get('notches_planned'), axis,
+                    fields)[0]
+            return log.append(kind, author=author, test=owner,
+                              axis=axis if in_run else None,
+                              run=run if in_run else None, fields=fields,
+                              text=text, event_time=when)
+
+        self._writing(write, done=self._read_written,
+                      refused=self._form_refused)
+
+    def _read_written(self, entry: Entry) -> None:
+        self._close_form()
+        if entry.kind == 'notch' and self.snapshot is not None \
+                and entry.id in self.snapshot.deviation_wanted:
+            self.say(f'Notch #{entry.id} is not planned: the test holds until '
+                     f'a deviation names it ({KEYS["deviation"]}).')
+
     def _open(self, form: EntryForm) -> None:
         self._close_form()
         self.form = form
@@ -1851,6 +1997,16 @@ class RunLogPanel(QWidget):
         self.level_row.setEnabled(writable)
         self.initials_box.setEnabled(writable)
         self.axis_box.setEnabled(writable)
+        # a test's runs hold level rows, sweeps, shots or a result, and
+        # only the forms its runs take are offered (a hidden act's key
+        # does nothing either)
+        from .run_log_forms import FOR_SHAPES
+
+        shape = (model_module.RUN_SHAPES.get(seen.status.kind)
+                 if seen is not None and seen.status.test is not None
+                 else None)
+        for name, shapes in FOR_SHAPES.items():
+            self.actions_by_name[name].setVisible(shape in shapes)
         if seen is None:
             self.run_label.setText('')
             self.tests_bar.blockSignals(True)

@@ -2,11 +2,11 @@
 window again.
 
 On Windows, making the VTK view's native window re-shows the main
-window, whose showEvent asks the scene pane for a plotter again while
-the first QtInteractor is half-built — and the first launch of
-0.1.0a1 died in that loop, reading `renderers` off an interactor that
-had none yet (the release smoke test, 2026-09-14). The pane refuses
-the nested request; only the outer construction lands.
+window, and anything that asks the scene pane for a plotter while the
+first QtInteractor is half-built would build a second — the first
+launch of 0.1.0a1 died in that loop, reading `renderers` off an
+interactor that had none yet (the release smoke test, 2026-09-14). The
+pane refuses the nested request; only the outer construction lands.
 """
 
 from __future__ import annotations
@@ -16,7 +16,8 @@ def test_a_nested_request_while_building_answers_none(window, monkeypatch):
     from visualdynamics.gui import panes
 
     pane = window.scene
-    pane.plotter = None             # as on screen: not built yet
+    pane._offscreen = False         # as on screen: not built yet
+    pane.plotter = None
     seen = {'nested': None, 'built': 0}
 
     class Interactor:

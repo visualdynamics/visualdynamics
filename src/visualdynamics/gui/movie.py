@@ -445,15 +445,20 @@ def check(path: str | Path) -> tuple[int, str]:
     -------
     tuple of (int, str)
         0 and what was written when the file is H.264 with every frame;
-        2 and the reason when the machine has no H.264 encoder; 1 and
-        what went wrong otherwise.
+        2 and the reason when the machine has no H.264 encoder, or no
+        OpenGL to render with (`opengl.ready`); 1 and what went wrong
+        otherwise.
     """
-    import pyvista as pv
+    from .opengl import refusal, three_d_view
 
     reason = unavailable_reason()
     if reason is not None:
         return 2, reason
-    plotter = pv.Plotter(off_screen=True, window_size=(320, 240))
+    plotter = three_d_view(offscreen=True, window_size=(320, 240))
+    if plotter is None:
+        return 2, refusal()
+    import pyvista as pv
+
     try:
         sphere = pv.Sphere()
         plotter.add_mesh(sphere, scalars=np.arange(sphere.n_points) % 7,

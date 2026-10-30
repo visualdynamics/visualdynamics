@@ -70,6 +70,14 @@ models, the BARC and the Frame-Wing. Unzip one, then use File →
 Import… or drag the `.vdyn` onto the window. A project imported into
 an empty window becomes the window's project.
 
+The 3-D views (a geometry, the 3-D form of a plot, the MAC as bars)
+are drawn with OpenGL 3.2 or later, and nothing of them is loaded until
+the first one is shown, so the window opens without them. On Windows,
+that first 3-D view checks the graphics driver first. A machine that
+cannot draw it, such as a Remote Desktop session or a virtual machine
+without a graphics driver, is told what is missing, once; the window
+goes on without 3-D views, drawing the flat form of each plot.
+
 The window follows the platform's light or dark appearance. Where the
 platform does not say (a Linux desktop Qt cannot read, for example) or
 you want something else, **File → Appearance** chooses Light, Dark or

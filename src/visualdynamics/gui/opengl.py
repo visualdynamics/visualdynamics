@@ -1,12 +1,20 @@
-"""Whether this machine can draw the 3-D view, asked before it is built.
+"""Whether this machine can draw the 3-D view, asked before the first
+one is built, and the one place a 3-D view is built.
 
 The 3-D view is VTK, and VTK draws with OpenGL 3.2 or later. On Windows
 it asks the system's `opengl32.dll` for a pixel format. A machine with no
 graphics driver (a Remote Desktop session, a virtual machine without
 one, a server) has only Windows' own OpenGL 1.1, and VTK, refused, looks
 for Mesa's off-screen library and dies with an access violation before
-a window appears. So the launcher asks the same `opengl32.dll` first, in
-the same way, and a machine that cannot draw is told what is missing.
+anything is drawn. So the same `opengl32.dll` is asked first, in the
+same way, and a machine that cannot draw is told what is missing.
+
+It is asked when the first 3-D view is about to be built, not at
+launch: a window that never shows a 3-D view never pays for the check
+or for importing VTK. Every 3-D view is built by `three_d_view`, which
+asks `ready` first; `ready` runs the check once per process and keeps
+its answer, so a machine that cannot draw is told once and every 3-D
+view after is refused without building anything.
 
 The question is put to Windows directly, not through Qt: Qt can fall
 back to its own software renderer where VTK cannot, and would answer
@@ -21,10 +29,11 @@ import ctypes
 import re
 import sys
 from ctypes import wintypes
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from PySide6.QtGui import QSurfaceFormat
+    from PySide6.QtWidgets import QWidget
 
 #: the least OpenGL VTK's renderer accepts
 NEEDED = (3, 2)
@@ -149,7 +158,7 @@ def missing() -> str | None:
     """Why this machine cannot draw the 3-D view, or None when it can,
     when the platform is not one that is asked (`judge` on Windows), or
     when the probe itself failed: a check that cannot run is no reason
-    to refuse a launch, and the failure goes to stderr."""
+    to refuse a 3-D view, and the failure goes to stderr."""
     # Asked since 2026-10-18: a release run on a driverless Windows
     # runner (2026-09-01) died with 0xC0000005 before a window, and a
     # user over Remote Desktop got the same crash rather than a sentence
@@ -161,6 +170,81 @@ def missing() -> str | None:
         sys.stderr.write(f'the OpenGL check could not run ({failure}); '
                          'starting anyway\n')
         return None
+
+
+#: what `ready` found, kept for the life of the process: empty until the
+#: first 3-D view is asked for, then the one answer (the reason this
+#: machine cannot draw, or None)
+_found: list[str | None] = []
+
+
+def ready() -> bool:
+    """Whether a 3-D view may be built here, asked once per process.
+
+    The first call runs the check (`missing`), and a machine that fails
+    it is told why (`say`). Every later call returns the same answer
+    without asking again or saying it again, so the check runs once,
+    before the first 3-D view, however many views are built after it.
+    """
+    if not _found:
+        # recorded before it is said: on Windows the message box runs
+        # an event loop of its own, which can deliver an event that asks
+        # for a 3-D view again, and that ask must find the answer, not
+        # run the check a second time
+        _found.append(missing())
+        if _found[0] is not None:
+            say(_found[0])
+    return _found[0] is None
+
+
+def refusal() -> str | None:
+    """Why 3-D views are refused here, or None: either the check found
+    nothing missing, or it has not run yet. Never runs the check."""
+    return _found[0] if _found else None
+
+
+def require() -> None:
+    """Raise RuntimeError, with the reason, when this machine cannot draw
+    a 3-D view (`ready`). For a script that opens a 3-D window, which has
+    no window of its own to fall back on."""
+    if not ready():
+        raise RuntimeError(refusal())
+
+
+def three_d_view(parent: QWidget | None = None, *,
+                 offscreen: bool = False, **options: Any) -> Any:
+    """Build a 3-D view, or None when this machine cannot draw one.
+
+    Every 3-D view the application builds is made here, so the check
+    (`ready`) runs before the first of them, and VTK is first imported
+    here, not at launch. On screen it is a pyvistaqt `QtInteractor` in
+    `parent`, rendering synchronously (`viz.undeferred`), refusing drops
+    and smoothed with FXAA; with `offscreen`, a PyVista `Plotter` that
+    renders off screen, built with `options`.
+    """
+    if not ready():
+        return None
+    if offscreen:
+        import pyvista as pv
+
+        return pv.Plotter(off_screen=True, **options)
+    from pyvistaqt import QtInteractor
+
+    from ..viz import undeferred
+
+    view = undeferred(QtInteractor(parent, **options))
+    # pyvistaqt takes drops and answers them with `pyvista.read`, so a
+    # .vdyn dropped on a 3-D view, aimed at the window and landing
+    # here, came back as "not able to be automatically read by pyvista"
+    # and was never imported. Qt routes drags only to widgets that say
+    # they take them, so refusing here sends the drop up to the window,
+    # which knows what a .vdyn is.
+    view.setAcceptDrops(False)
+    # cheap post-process pass: smooths the model's edges without the
+    # supersampling alternative, which shrinks points and lines because
+    # their sizes are in pixels
+    view.enable_anti_aliasing('fxaa')
+    return view
 
 
 def check() -> tuple[int, str]:
@@ -256,11 +340,13 @@ def one_graphics_system() -> None:
 
 
 def say(reason: str) -> None:
-    """Show `reason` to the person starting the application, without
-    Qt: on Windows through its own message box, since a QApplication
-    built on a machine with no OpenGL is what crashes on the way out
-    (and its crash dialog held a release runner for forty minutes,
-    2026-10-18); elsewhere through Qt, which this never reaches."""
+    """Show `reason` to the person about to see a 3-D view: on Windows
+    through its own message box, which needs nothing of Qt; elsewhere
+    through Qt, which this never reaches, since only Windows is asked."""
+    # Win32's box rather than Qt's: when the check ran before any Qt, a
+    # QApplication built on a machine with no OpenGL crashed on the way
+    # out, and its crash dialog held a release runner for forty minutes
+    # (2026-10-18)
     if sys.platform == 'win32':
         ctypes.windll.user32.MessageBoxW(None, reason, 'Visual Dynamics',
                                          0x10)       # MB_ICONERROR

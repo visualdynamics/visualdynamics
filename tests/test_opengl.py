@@ -1,10 +1,11 @@
-"""The launcher's OpenGL check: a machine that cannot draw the 3-D view
-is told so before the window is built, instead of dying in VTK.
+"""The OpenGL check: a machine that cannot draw the 3-D view is told so
+before the first 3-D view is built, instead of dying in VTK.
 
 The probe itself is Windows calls and runs only there (the release smoke
 test runs it with and without Mesa beside the exe). What can be pinned
-everywhere is the judgment of what the probe reads, and that the
-launcher stops on it before building a window.
+everywhere is the judgment of what the probe reads, and `--check-gl`
+answering before any Qt. When the check runs in a session, and what a
+window does when it fails, is `test_first_3d_view.py`.
 """
 
 from __future__ import annotations
@@ -58,9 +59,8 @@ def test_only_windows_is_asked(monkeypatch):
 
 def _no_qt(monkeypatch):
     """Fail the test the moment the launcher touches Qt: the binding
-    check, a QApplication, or the window. A machine with no OpenGL must
-    not build a QApplication at all, since that is what crashed on the
-    way out behind Windows' crash dialog (the 0.1.0a56 release run)."""
+    check, a QApplication, or the window. `--check-gl` is the packaged
+    build's self-check and answers with no Qt at all."""
     import PySide6.QtWidgets as widgets
 
     from visualdynamics import gui
@@ -74,23 +74,10 @@ def _no_qt(monkeypatch):
     monkeypatch.setattr(main_window, 'MainWindow', refuse)
 
 
-def test_the_launcher_says_what_is_missing_before_touching_qt(monkeypatch):
-    """The reason is said through `opengl.say` and the launcher returns 2
-    with no QApplication, no binding check and no window."""
-    _no_qt(monkeypatch)
-    from visualdynamics import gui
-
-    said = []
-    monkeypatch.setattr(opengl, 'missing', lambda: 'no OpenGL here')
-    monkeypatch.setattr(opengl, 'say', said.append)
-    assert gui.main(['--no-disclaimer']) == 2
-    assert said == ['no OpenGL here']
-
-
-def test_a_probe_that_cannot_run_does_not_refuse_the_launch(monkeypatch,
-                                                            capsys):
+def test_a_probe_that_cannot_run_does_not_refuse_the_view(monkeypatch,
+                                                          capsys):
     """A missing Win32 name raised inside the probe on the release
-    runner. The check reports it; the launch goes on, since a check
+    runner. The check reports it; the 3-D view goes on, since a check
     that could not run is no finding about the machine."""
     def broken():
         raise AttributeError("module 'ctypes.wintypes' has no attribute 'X'")

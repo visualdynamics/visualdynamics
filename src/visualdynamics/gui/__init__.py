@@ -5,7 +5,8 @@ still works) or `python -m visualdynamics`. Files named on the command
 line are imported once the window is open, `--theme dark` or
 `--theme light` sets the theme, and `--no-disclaimer` skips the alpha
 notice. On Windows, a machine without the OpenGL the 3-D view needs is
-told so before the window is built (`opengl`).
+told so before the first 3-D view is built (`opengl`); the launch itself
+neither checks OpenGL nor imports VTK.
 """
 
 from __future__ import annotations
@@ -158,23 +159,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     qInstallMessageHandler(_quiet_message_handler)
 
     argv = list(sys.argv[1:] if argv is None else argv)
-    # Before anything Qt. The GL check is Win32 calls, and a machine
-    # that fails it must never build a QApplication: built on a
-    # Windows machine with no OpenGL, the application crashed on the
-    # way out behind Windows' crash dialog (the 0.1.0a56 release run,
-    # 2026-10-18)
-    from . import opengl
-
     if '--check-gl' in argv:
-        # the packaged build's other self-check: can this machine draw
-        # the 3-D view? (gui.opengl.check — 0 yes, 2 no, 1 unknown)
+        # the packaged build's other self-check, before anything Qt: can
+        # this machine draw the 3-D view? (gui.opengl.check — 0 yes, 2
+        # no, 1 unknown)
+        from . import opengl
+
         code, message = opengl.check()
         print(message, flush=True)
         return code
-    reason = opengl.missing()
-    if reason is not None:
-        opengl.say(reason)
-        return 2
+    # The launch itself does not ask: the check runs, once, before the
+    # first 3-D view is built (`opengl.ready`, through
+    # `opengl.three_d_view`), so a window that shows no 3-D view never
+    # pays for it or for importing VTK.
 
     import signal
 

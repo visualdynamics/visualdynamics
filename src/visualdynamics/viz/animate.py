@@ -428,6 +428,12 @@ def _play(geometry: Geometry, build: Any, *, colors: Any, title: str,
     rate, so it reads the same however fast the machine renders —
     wrapping at `period`, in `whole` steps for an index. Still when
     `per_second` is zero."""
+    from ..gui.opengl import require
+
+    # a window of its own, so the same check as every 3-D view the app
+    # builds, before VTK opens one: a machine that cannot draw it is told
+    # why, and the script gets the reason as an error
+    require()
     from pyvistaqt import BackgroundPlotter
 
     from . import undeferred

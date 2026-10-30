@@ -44,8 +44,14 @@ def scene_window(draw: Callable[[Any], Any], *, theme: Any = None,
     fitted to the scene. With
     `show` and no event loop already running, this runs the event loop
     and returns when the window is closed. Returns the pane; its
-    `.plotter` is the PyVista plotter.
+    `.plotter` is the PyVista plotter. Raises RuntimeError, saying what
+    is missing, on a machine that cannot draw a 3-D view.
     """
+    from .opengl import require
+
+    # before any window: a machine that cannot draw the 3-D view is told
+    # why (`opengl.ready`), and the script gets the reason as an error
+    require()
     app = _application()
     pane = ScenePane(theme)
     pane.setWindowTitle(title or '3D View')

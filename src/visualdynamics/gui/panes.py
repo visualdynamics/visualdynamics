@@ -2039,7 +2039,8 @@ class DataPane(QWidget):
         The filter view does not change this; its preview is drawn in
         3-D too. While the specification sheet is open, `flat_only`
         keeps the drawing flat whatever the toggle says, because the
-        sheet's handles are on the flat plot.
+        sheet's handles are on the flat plot. On a machine that cannot
+        draw a 3-D view (`opengl.ready`) it is never shown.
         """
         # The filter view used to outrank this and force the drawing
         # flat: my judgment that two overlaid ribbons would occlude each
@@ -2049,7 +2050,13 @@ class DataPane(QWidget):
         # view choice is exactly what this interface does not do. The
         # preview is stage geometry now, so both readings stand.
         # `flat_only` for the specification sheet: Brandon, 2026-09-06.
-        return self.waterfall_action.isChecked() and not self.flat_only
+        # Asked last, so the OpenGL check runs only when the 3-D form
+        # would be drawn, and a machine that cannot draw it gets the
+        # flat one instead
+        from .opengl import ready
+
+        return (self.waterfall_action.isChecked() and not self.flat_only
+                and ready())
 
     #: the flat plot only, whatever the 3D toggle says — set by the
     #: window while the specification sheet is open, since the sheet's
@@ -2064,7 +2071,8 @@ class DataPane(QWidget):
         the drawing will be plain curves. The toggle is offered whenever
         the current reading has both forms, and hidden only where one
         does not exist: the kurtosis bars and the statistics' rows are
-        flat, with nothing to put along a depth axis, and while `flat_only` is set. The scalogram
+        flat, with nothing to put along a depth axis, while `flat_only` is set, and on a machine
+        that cannot draw a 3-D view (`opengl.refusal`). The scalogram
         has both forms, and in 3-D it is drawn as a surface.
         """
         # Offering the toggle wherever both forms exist is the *setting*
@@ -2074,7 +2082,9 @@ class DataPane(QWidget):
         # by whether a reading is up, not wanted: the choice is sticky
         # across a selection it is not offered for, such as a spectrum,
         # which keeps its 3-D form
-        flat = self.flat_only or any(
+        from .opengl import refusal
+
+        flat = self.flat_only or refusal() is not None or any(
             reading.flat and self.showing(reading.key)
             for reading in self._READINGS)
         self.waterfall_action.setVisible(offered and not flat)
@@ -2155,26 +2165,20 @@ class DataPane(QWidget):
         `ScenePane.create_plotter`. No callback is needed here, because
         the only thing that asks for it is a toggle on this pane's own
         bar, which cannot be clicked before the pane is on screen.
-        Returns the plotter, or None when it was already built.
+        Returns the plotter, or None when it was already built or this
+        machine cannot draw it (`opengl.ready`).
         """
         if self.waterfall_plotter is not None:
             return None
-        if self.offscreen:
-            import pyvista as pv
+        from .opengl import three_d_view
 
-            self.waterfall_plotter = pv.Plotter(off_screen=True)
+        plotter = three_d_view(self, offscreen=self.offscreen)
+        if plotter is None:
+            return None     # this machine cannot draw it; said once
+        self.waterfall_plotter = plotter
+        if self.offscreen:
             self._waterfall_page = QLabel('3D view disabled (offscreen mode)')
         else:
-            from pyvistaqt import QtInteractor
-
-            from ..viz import undeferred
-
-            self.waterfall_plotter = undeferred(QtInteractor(self))
-            # same refusal as the scene pane: pyvistaqt answers drops
-            # with pyvista.read, which cannot read a .vdyn — the window
-            # can, and gets the drop by this widget refusing it
-            self.waterfall_plotter.setAcceptDrops(False)
-            self.waterfall_plotter.enable_anti_aliasing('fxaa')
             self._waterfall_page = self.waterfall_plotter
         self._waterfall_page.hide()
         # beside the graphics, same stretch, so the swap keeps the size
@@ -2611,16 +2615,17 @@ class ScenePane(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.toolbar)
-        if offscreen:
-            import pyvista as pv
-            self.plotter: Any = pv.Plotter(off_screen=True)
-            self._page = QLabel('3D view disabled (offscreen mode)')
-        else:
-            # On macOS, building the VTK widget before the window is mapped
-            # leaves the whole window 0x0 and never shown; it is created in
-            # create_plotter() instead, once the pane is on screen.
-            self.plotter = None
-            self._page = QLabel('Loading 3D view...')
+        # The VTK view is built the first time something asks for it
+        # (`plotter`), not here: a window that never shows a 3-D view
+        # never imports VTK or runs the OpenGL check. Until then the
+        # page is an empty one in the scene's colors.
+        self._offscreen: bool = offscreen
+        self._plotter: Any = None
+        self._released: bool = False
+        self._page: QWidget = QLabel(
+            '3D view disabled (offscreen mode)' if offscreen else '')
+        self._page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._page.setWordWrap(True)
         self._creating_plotter: bool = False
         # the settings panels sit beside the view rather than under
         # it, the data pane's own arrangement: the rigid-body table is
@@ -2756,10 +2761,10 @@ class ScenePane(QWidget):
         when the view is not built yet."""
         from PySide6.QtWidgets import QApplication
 
-        if self.plotter is None:
+        if self._plotter is None:
             self.copied.emit('The 3-D view is not built yet')
             return False
-        image = image_of(self.plotter.screenshot(return_img=True))
+        image = image_of(self._plotter.screenshot(return_img=True))
         QApplication.clipboard().setImage(image)
         self.copied.emit(f'3-D view copied to the clipboard '
                          f'({image.width()} × {image.height()})')
@@ -2797,51 +2802,96 @@ class ScenePane(QWidget):
 
     # ---- the render window ------------------------------------------------
 
+    @property
+    def plotter(self) -> Any:
+        """The VTK view, built the first time it is asked for; None while
+        it cannot be built yet, or on a machine that cannot draw it.
+
+        Asking is what builds it, so whatever draws into the scene
+        builds it on the way, and a window that never draws one never
+        imports VTK. On screen it is built only once the pane's window
+        is shown (`create_plotter`); off screen, whenever it is asked
+        for. `built_plotter` reads it without building it.
+        """
+        if self._plotter is None and not self._released:
+            if self._offscreen:
+                self._build_offscreen()
+            elif self.window().isVisible():
+                self.create_plotter()
+        return self._plotter
+
+    @plotter.setter
+    def plotter(self, plotter: Any) -> None:
+        # let go (None) once, and it is never built again: a window
+        # closing lets go of its view, and an event delivered after
+        # that must not build a new one into a window being torn down
+        self._released = plotter is None
+        self._plotter = plotter
+
+    @property
+    def built_plotter(self) -> Any:
+        """The VTK view if it has been built, else None; never builds it."""
+        return self._plotter
+
+    def _build_offscreen(self) -> None:
+        """The off-screen plotter a headless window draws into; the page
+        goes on saying the view is off screen."""
+        from .opengl import three_d_view
+
+        self._plotter = three_d_view(offscreen=True)
+        if self._plotter is None:
+            self._refused()
+        else:
+            # in the theme the pane already wears, as the on-screen view
+            # is when it is built
+            self.apply_background()
+
+    def _refused(self) -> None:
+        """Say on the page why there is no 3-D view on this machine."""
+        from .opengl import refusal
+
+        if isinstance(self._page, QLabel):
+            self._page.setText(refusal() or '')
+
     def create_plotter(self) -> Any:
         """Build the embedded VTK view, once the pane is on screen.
 
         On macOS, building it before the window is shown leaves the
         window with no size. Returns the plotter, or None if it was
-        already built (or is being built), so the caller knows whether
-        it has a new view to draw into.
+        already built (or is being built), or when this machine cannot
+        draw it (`opengl.ready`, which says why the first time), so the
+        caller knows whether it has a new view to draw into.
         """
-        if self.plotter is not None or self._creating_plotter:
+        if self._plotter is not None or self._creating_plotter:
             return None
-        from pyvistaqt import QtInteractor
-
-        from ..viz import undeferred
+        if self._offscreen:
+            self._build_offscreen()
+            return self._plotter
+        from .opengl import three_d_view
 
         placeholder = self._page
         # Re-entrant on Windows: making the VTK view's native window
-        # re-shows the main window, whose showEvent lands here again
-        # while the first QtInteractor is half-built — and built a
+        # re-shows the main window, whose showEvent landed here again
+        # while the first QtInteractor was half-built — and built a
         # second, then read `renderers` off the first before it had
         # any. The first Windows launch of 0.1.0a1 died in that loop
         # (the release smoke test, 2026-09-14). One construction at a
         # time; the nested call answers None and the outer one draws.
         self._creating_plotter = True
         try:
-            self.plotter = undeferred(QtInteractor(self))
+            view = three_d_view(self)
         finally:
             self._creating_plotter = False
-        # pyvistaqt takes drops and answers them with `pyvista.read`, so a
-        # .vdyn dropped on the 3D view — aimed at the window, landing
-        # here — comes back as "not able to be automatically read by
-        # pyvista" and is never imported. Qt routes drags only to widgets
-        # that say they take them, so refusing here sends the drop up to
-        # the window, which knows what a .vdyn is. Adding a mesh to a
-        # scene by dropping a file on it was never a thing this offers.
-        self.plotter.setAcceptDrops(False)
-        # cheap post-process pass: smooths the model's edges without the
-        # supersampling alternative, which shrinks points and lines because
-        # their sizes are in pixels
-        self.plotter.enable_anti_aliasing('fxaa')
-        self._page = self.plotter
+        if view is None:
+            self._refused()
+            return None
+        self._plotter = view
+        self._page = view
         self.apply_background()
-        self.view_split.replaceWidget(0, self.plotter)
+        self.view_split.replaceWidget(0, view)
         self.view_split.setStretchFactor(0, 1)
         placeholder.deleteLater()
-        return self.plotter
+        return view
 
     def set_home_view(self, view: Any, owner: Any = None) -> None:
         """Set the view Reset View returns to, and `owner`, the geometry
@@ -2858,29 +2908,29 @@ class ScenePane(QWidget):
         turns to the home view. Otherwise it is only refitted, so a turn
         the user made is kept when stepping from a geometry to the
         shapes drawn on it."""
-        if self.plotter is None:
+        if self._plotter is None:
             return
         if self.home_view is not None and \
                 self._home_owner is not self._framed_owner:
             self._framed_owner = self._home_owner
             self.reset_view()
         else:
-            self.plotter.reset_camera()
+            self._plotter.reset_camera()
 
     def reset_view(self) -> None:
         """Turn the camera to the home view and fit the scene."""
-        if self.plotter is None or self.home_view is None:
+        if self._plotter is None or self.home_view is None:
             return
         from ..viz.geometry import place_view
 
-        place_view(self.plotter, self.home_view)
+        place_view(self._plotter, self.home_view)
 
     def clear(self) -> None:
         self.set_home_view(None)
-        if self.plotter is not None:
-            self.plotter.clear()
+        if self._plotter is not None:
+            self._plotter.clear()
             self.apply_background()
-            self.plotter.render()
+            self._plotter.render()
 
     # ---- how the scene is dressed ----------------------------------------
 
@@ -2897,20 +2947,30 @@ class ScenePane(QWidget):
     def apply_annotations(self) -> None:
         """Draw the annotations again in place, so the camera keeps its
         position."""
-        if self.plotter is None:
+        if self._plotter is None:
             return
-        annotate_scene(self.plotter, self.axis_unit,
+        annotate_scene(self._plotter, self.axis_unit,
                        resolve_theme(self.theme_name), self.bounds_visible,
                        self.orientation_visible)
-        self.plotter.render()
+        self._plotter.render()
 
     def apply_background(self) -> None:
         """Set the view's background to the theme's, so an empty 3-D
-        view matches the theme instead of VTK's white default."""
-        if self.plotter is not None:
-            colors = resolve_theme(self.theme_name)
-            self.plotter.set_background(colors['scene_background'],
+        view matches the theme instead of VTK's white default. Before
+        the view is built, the page standing in for it wears the same
+        colors, so the scene looks the same either way."""
+        colors = resolve_theme(self.theme_name)
+        if self._plotter is not None:
+            self._plotter.set_background(colors['scene_background'],
                                         top=colors['scene_background_top'])
+        if isinstance(self._page, QLabel):
+            # VTK's gradient runs from `top` at the top to the background
+            # at the bottom
+            self._page.setStyleSheet(
+                'QLabel { background: qlineargradient(x1:0, y1:0, x2:0, '
+                f"y2:1, stop:0 {colors['scene_background_top']}, "
+                f"stop:1 {colors['scene_background']}); "
+                f"color: {colors['scene_text']}; padding: 24px; }}")
 
     def apply_theme(self, name: str) -> None:
         self.theme_name = name

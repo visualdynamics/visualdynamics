@@ -3134,7 +3134,14 @@ class MainWindow(QMainWindow):
         # after super(): the style polishes the widget on first show and
         # assigns it a palette, discarding anything set in __init__
         _keep_selection_vivid(self.table)
-        if self.scene.create_plotter() is not None:
+        # The scene's VTK view is not built here but the first time
+        # something is drawn in it (`ScenePane.plotter`), so a window
+        # that shows no 3-D view never imports VTK or runs the OpenGL
+        # check; built here, every launch paid for both. What was
+        # selected before the window was on screen is drawn now, which
+        # builds the view if the selection has a 3-D part.
+        if not getattr(self, '_drawn_on_screen', False):
+            self._drawn_on_screen = True
             self.render_current()
         # once, so it opens fitting its content; after that the width is
         # the user's and nothing here touches it again
@@ -3183,7 +3190,7 @@ class MainWindow(QMainWindow):
         # destroyed is the gate's stall (ReportEditor.stand_down)
         if self.report_editor is not None:
             self.report_editor.stand_down()
-        plotters = [self.scene.plotter, self.data_pane.waterfall_plotter,
+        plotters = [self.scene.built_plotter, self.data_pane.waterfall_plotter,
                     self._mac_bars_plotter_obj]
         self.scene.plotter = None
         self.data_pane.waterfall_plotter = None
@@ -7235,7 +7242,7 @@ class MainWindow(QMainWindow):
 
     def _begin_rotating(self):
         """Draw the rings and watch the mouse ahead of the camera."""
-        interactor = getattr(self.scene.plotter, 'iren', None)
+        interactor = getattr(self.scene.built_plotter, 'iren', None)
         self._draw_rings()
         if interactor is None or self._rotate_observers:
             return
@@ -7251,7 +7258,7 @@ class MainWindow(QMainWindow):
                             10.0)]
 
     def _end_rotating(self):
-        interactor = getattr(self.scene.plotter, 'iren', None)
+        interactor = getattr(self.scene.built_plotter, 'iren', None)
         if interactor is not None:
             for observer in self._rotate_observers:
                 with contextlib.suppress(Exception):
@@ -7260,7 +7267,7 @@ class MainWindow(QMainWindow):
         self._rotating = None
         self._sliding = None
         self._gizmo_hovered = None
-        if self.scene.plotter is not None:
+        if self.scene.built_plotter is not None:
             for axis in range(3):
                 for kind in ('ring', 'arrow', 'head'):
                     self.scene.plotter.remove_actor(f'rotate-{kind}-{axis}',
@@ -7664,7 +7671,7 @@ class MainWindow(QMainWindow):
     def _end_mesh_drag(self, said: str) -> None:
         """A drag of the box is over: the outline goes, and the full
         preview and its reading come back once."""
-        if self.scene.plotter is not None:
+        if self.scene.built_plotter is not None:
             self.scene.plotter.remove_actor('mesh-outline', render=False)
         self._show_gizmo_reading(None)
         self._mesh_refresh()
@@ -7962,7 +7969,7 @@ class MainWindow(QMainWindow):
         self._hovered = None
         if self._pick_observers:
             return
-        interactor = getattr(self.scene.plotter, 'iren', None)
+        interactor = getattr(self.scene.built_plotter, 'iren', None)
         if interactor is None:
             return          # offscreen plotter in tests: picking is exercised
         self._pick_observers = [                     # directly, not by mouse
@@ -7970,7 +7977,7 @@ class MainWindow(QMainWindow):
             interactor.add_observer('LeftButtonPressEvent', self._on_click)]
 
     def _end_picking(self):
-        interactor = getattr(self.scene.plotter, 'iren', None)
+        interactor = getattr(self.scene.built_plotter, 'iren', None)
         for observer in self._pick_observers:
             with contextlib.suppress(Exception):
                 interactor.remove_observer(observer)
@@ -7979,7 +7986,7 @@ class MainWindow(QMainWindow):
         self._hover_mesh = self._picked_mesh = None
 
     def _cursor_position(self):
-        interactor = getattr(self.scene.plotter, 'iren', None)
+        interactor = getattr(self.scene.built_plotter, 'iren', None)
         if interactor is None:
             return None
         return interactor.interactor.GetEventPosition()
@@ -8089,7 +8096,7 @@ class MainWindow(QMainWindow):
                         | Qt.KeyboardModifier.ControlModifier
                         | Qt.KeyboardModifier.MetaModifier):
             return True
-        interactor = getattr(self.scene.plotter, 'iren', None)
+        interactor = getattr(self.scene.built_plotter, 'iren', None)
         if interactor is None:
             return False
         vtk_interactor = interactor.interactor
@@ -10349,7 +10356,13 @@ class MainWindow(QMainWindow):
                 and not any(entry['components'] or entry['entities']
                             for entry in geometries.values()))
         self.scene.offer_modes(lone)
-        deflection = self._deflection_for(geometries, series, shapes)
+        # the first selection that draws in the scene builds its VTK
+        # view here (`ScenePane.plotter`); on a machine that cannot draw
+        # one (`opengl.ready`, which says why) the scene keeps its page
+        # saying so, and the rest of the selection is drawn without it
+        drawable = not geometries or self.scene.plotter is not None
+        deflection = (self._deflection_for(geometries, series, shapes)
+                      if drawable else None)
         parts = []
         synthesis_note = ''
         if deflection is not None:
@@ -10361,7 +10374,7 @@ class MainWindow(QMainWindow):
                     chosen=('selected' if animated is series
                             else self._cursor_dimension)))
         else:
-            if geometries:
+            if geometries and drawable:
                 parts.append(self._render_geometries(list(geometries.items())))
             if sine_specs or sine_levels:
                 parts.append(self._render_sine(
@@ -10835,7 +10848,7 @@ class MainWindow(QMainWindow):
         if [row, column] in committed.pairs:
             self.table.selectRow(committed.pairs.index([row, column]))
         self._render_cross_mac((a_name, a), (b_name, b), matrix)
-        if self.mac_bars_action.isChecked():
+        if self._mac_bars_wanted():
             # the bars drew their own marks; the overlay below belongs
             # to the flat grid, which was not rebuilt
             self._update_pairs_action()
@@ -12775,7 +12788,7 @@ class MainWindow(QMainWindow):
 
     def _render_geometries(self, geometries, ignored=0):
         if self.scene.plotter is None:
-            return ''  # not on screen yet; showEvent will build and render
+            return ''  # not on screen yet, or no 3-D view on this machine
         colors = resolve_theme(self.theme_name)
         # framing is for new content: redrawing what is already on screen
         # must not throw away a view the user set up
@@ -17318,7 +17331,7 @@ class MainWindow(QMainWindow):
     def _begin_mate_clicks(self) -> None:
         """Watch clicks ahead of the camera: one on a node of the side
         being picked adds or removes it, anywhere else turns the view."""
-        interactor = getattr(self.scene.plotter, 'iren', None)
+        interactor = getattr(self.scene.built_plotter, 'iren', None)
         if interactor is None or self.__dict__.get('_mate_observer') is not None:
             return
         self._mate_observer = interactor.interactor.AddObserver(
@@ -17441,14 +17454,14 @@ class MainWindow(QMainWindow):
             return
         name = self._mating['name']
         self._mating = None
-        interactor = getattr(self.scene.plotter, 'iren', None)
+        interactor = getattr(self.scene.built_plotter, 'iren', None)
         for attribute in ('_mate_observer', '_mate_hover_observer'):
             observer = self.__dict__.get(attribute)
             if interactor is not None and observer is not None:
                 with contextlib.suppress(Exception):
                     interactor.interactor.RemoveObserver(observer)
             setattr(self, attribute, None)
-        if self.scene.plotter is not None:
+        if self.scene.built_plotter is not None:
             self.scene.plotter.remove_actor('mate-hover', render=False)
         item = self._item_for_object(name)
         if item is not None:
@@ -17809,7 +17822,7 @@ class MainWindow(QMainWindow):
         observers hear neither the drag nor the release. Listening there,
         no click ever toggled a surface, and the press left behind ended
         the hover's light for good (Brandon, 2026-10-22)."""
-        interactor = getattr(self.scene.plotter, 'iren', None)
+        interactor = getattr(self.scene.built_plotter, 'iren', None)
         if interactor is None or self.__dict__.get('_plan_observers'):
             return
         raw = interactor.interactor
@@ -18270,7 +18283,7 @@ class MainWindow(QMainWindow):
     def _begin_merge_clicks(self) -> None:
         """Watch clicks ahead of the camera: one on a mark toggles it,
         anywhere else turns the view as usual."""
-        interactor = getattr(self.scene.plotter, 'iren', None)
+        interactor = getattr(self.scene.built_plotter, 'iren', None)
         if interactor is None or self._merge_observer is not None:
             return
         self._merge_observer = interactor.interactor.AddObserver(
@@ -18432,7 +18445,7 @@ class MainWindow(QMainWindow):
         if self._merging is None:
             return
         self._merging = None
-        interactor = getattr(self.scene.plotter, 'iren', None)
+        interactor = getattr(self.scene.built_plotter, 'iren', None)
         if interactor is not None and self._merge_observer is not None:
             with contextlib.suppress(Exception):
                 interactor.interactor.RemoveObserver(self._merge_observer)
@@ -18580,7 +18593,7 @@ class MainWindow(QMainWindow):
         self._draw_plane_preview(None)
         if editing is not None:
             self._mark_pencils([self._item_for_object(editing[0])])
-        if self.scene.plotter is not None:
+        if self.scene.built_plotter is not None:
             self.scene.plotter.render()
 
     def _gizmo_projector(self):
@@ -20501,28 +20514,34 @@ class MainWindow(QMainWindow):
         else:
             self.render_current()
 
+    def _mac_bars_wanted(self):
+        """Whether the MAC is drawn as bars: the toggle is checked and
+        this machine can draw a 3-D view (`opengl.ready`, asked last so
+        the check runs only when the bars would be drawn). Otherwise
+        the flat grid is drawn."""
+        from .opengl import ready
+
+        return self.mac_bars_action.isChecked() and ready()
+
     def _mac_bars_plotter(self):
         """The 3-D MAC surface, built on first use.
 
         The same lazy deferral as the data pane's, and safe for the same
         reason: the only thing that asks for it is the toggle on the
         table bar, which cannot be clicked before the window is mapped.
+        Drawn only where `_mac_bars_wanted`, so this machine can draw it.
         """
         if self._mac_bars_plotter_obj is None:
-            if self._offscreen_3d:
-                import pyvista as pv
+            from .opengl import three_d_view
 
-                self._mac_bars_plotter_obj = pv.Plotter(off_screen=True)
+            self._mac_bars_plotter_obj = three_d_view(
+                self, offscreen=self._offscreen_3d)
+            if self._mac_bars_plotter_obj is None:
+                return None     # this machine cannot draw it; said once
+            if self._offscreen_3d:
                 self._mac_bars_page = QLabel(
                     '3D view disabled (offscreen mode)')
             else:
-                from pyvistaqt import QtInteractor
-
-                from ..viz import undeferred
-
-                self._mac_bars_plotter_obj = undeferred(QtInteractor(self))
-                self._mac_bars_plotter_obj.setAcceptDrops(False)
-                self._mac_bars_plotter_obj.enable_anti_aliasing('fxaa')
                 self._mac_bars_page = self._mac_bars_plotter_obj
             self._mac_bars_page.hide()
             # a third splitter child beside the flat MAC's frame; the
@@ -20631,7 +20650,7 @@ class MainWindow(QMainWindow):
             action.setVisible(False)
         self._hide_shape_values()
         self.mac_bars_action.setVisible(True)
-        if self.mac_bars_action.isChecked():
+        if self._mac_bars_wanted():
             # the key carries the grid size: a cursor-stop redraw (same
             # size) keeps whatever view the user set, and confirming a
             # mode — which grows the grid — reframes for the new
@@ -23992,7 +24011,7 @@ class MainWindow(QMainWindow):
         # controls besides — restored here because the fit hides them
         self.mode_table_action.setVisible(True)
         self.mac_bars_action.setVisible(True)
-        if self.mac_bars_action.isChecked():
+        if self._mac_bars_wanted():
             # the comparison's marks, gathered the way the flat grid's
             # overlay block gathers them: the picked pairs, the animated
             # one, and the pairs already committed to the matched table
@@ -24052,7 +24071,7 @@ class MainWindow(QMainWindow):
         self.mac_bars_action.setVisible(shown['mac'])
         if not shown['mac']:
             self._hide_mac()
-        elif self.mac_bars_action.isChecked():
+        elif self._mac_bars_wanted():
             self._draw_mac_bars(shapes.frequency, shapes.auto_mac(),
                                 key=('auto', name, shapes.num_shapes))
         else:

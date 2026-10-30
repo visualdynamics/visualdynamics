@@ -403,7 +403,7 @@ def _report_payload(report, objects, unit_system=None, edit=False,
                 # a drafted chronology, marked, under the owed section
                 from .runs import mark_drafted
 
-                mark_drafted(payload['blocks'], report)
+                mark_drafted(payload['blocks'], report, objects)
         # numbered again in the order the page now shows them
         figures = tables = 0
         for built in payload['blocks']:

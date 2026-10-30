@@ -792,3 +792,28 @@ def test_a_project_saved_before_schema_3_opens_and_takes_a_log(tmp_path):
     again = Project.open(tmp_path / 'later.vdyn')
     assert again[name] == project[name]
     assert again['Predictions'].comment == 'schema exercise predictions'
+
+
+def test_a_report_cites_the_extract_with_its_badge(tmp_path):
+    path = tmp_path / 'article.vdlog'
+    two_tests(path)
+    project = Project('Article 7')
+    name = project.attach_run_log(path, test=1)
+    extract = project[name]
+    assert extract_module.held(project) == [(name, extract)]
+    assert extract_module.held({'other': 1}) == []
+    plain = (f"the run log 'Article 7', test 1, to entry #{extract.upto} "
+             f'(test head {extract.head[:12]})')
+    assert extract.cited() == plain
+    append_note(path, test=2)
+    assert extract.cited() == f'{plain} [newer entries in the log]'
+    assert extract.cited(extract.status()) == extract.cited()
+    os.remove(path)
+    assert extract.cited() == f'{plain} [log not found]'
+    # the pieces of the chronology draft a report feature reuses
+    assert extract.interruption_lines()[0] == ('| Entry | Time | Stop | Cause '
+                                               '| Path | Restart |')
+    assert extract.credit_lines() == [f'- Axis Z: {credit.message}'
+                                      for credit in extract.credited()]
+    for line in extract.interruption_lines() + extract.credit_lines():
+        assert line in extract.draft_chronology().text

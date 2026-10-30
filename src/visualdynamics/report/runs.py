@@ -25,15 +25,26 @@ time history cannot be the report of the test. With the feature on:
   (`skeleton.write`), and the outcome of each run and the explanation of
   each interruption are left to the author.
 
-A run log, when there is one, is a second source of outcomes and
-explanations. It feeds `outcomes`, and nothing else here changes.
+A run log brought into the project (`Project.attach_run_log`) is a
+second, optional source (`read_log`): the outcome of each run as the
+log records it, the cause of each interruption where the record and the
+log agree on how many there were, and, under the table, the log's own
+interruptions with their cause, path and restart and the time credited
+on each axis. A record is matched to the log's run by its run number and
+axis; a record the log does not hold, or holds more than once, keeps its
+Outcome blank and the draft says why. Without an extract nothing here
+changes, and a project with an extract but no time history is offered
+the log's own chronology (`RunLogExtract.draft_chronology`). The draft
+says which log, test and entry it was drawn from, with the extract's
+badge when the log has newer entries, and the editing page marks it as
+drafted from the run log until the author accepts it.
 """
 
 from __future__ import annotations
 
 import html
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ..core.runs import (
@@ -53,7 +64,8 @@ from ..core.runs import (
 # P27 of the report-features plan (Kevin Cross, 2026-10-24): run
 # identity on each record, the Results section per run, and the
 # chronology offered as draft text the author accepts or edits. Built
-# from the records alone; the run log is a later source (`outcomes`).
+# from the records alone; the run log is a later, optional source
+# (`read_log`), added once the log could be brought into a project.
 
 #: the feature's key in `report.features`
 FEATURE = 'run_sections'
@@ -349,17 +361,141 @@ class Outcome:
     explanations: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class LogSource:
+    """What the run log extracts in a project say of its runs
+    (`read_log`): the outcome of each run by record name, a note on each
+    record the log could not answer for, the Markdown the chronology
+    draft carries under its table, and the extracts read, by name. Empty
+    when the project holds no extract."""
+
+    outcomes: Mapping[str, Outcome] = field(default_factory=dict)
+    notes: tuple[str, ...] = ()
+    lines: tuple[str, ...] = ()
+    logs: tuple[str, ...] = ()
+
+
+def _run_number(text: str) -> int | None:
+    """A record's run identifier as the log numbers runs (a whole number
+    from 1), or None when it is not one."""
+    text = text.strip()
+    if not text.isascii() or not text.isdigit() or int(text) < 1:
+        return None
+    return int(text)
+
+
+def _same_axis(said: str, logged: str | None) -> bool:
+    """Whether a record's axis and a logged run's axis can be the same
+    run's: equal, ignoring case, or one of them not known."""
+    if not said or not logged:
+        return True
+    return said.strip().upper() == logged.strip().upper()
+
+
+def _logged_outcome(run: Any, upto: int) -> str:
+    """A logged run's outcome in a few words: 'completed at 10:00' with
+    the counter at its stop, or that no stop is logged."""
+    if run.outcome == 'running':
+        return f'no stop logged by entry #{upto}'
+    return f'{run.outcome} at {run.counter}' if run.counter else run.outcome
+
+
+def _explained(stop: Any) -> str:
+    """A logged interruption as the explanation beside the record's: what
+    stopped, the entry, and the cause as logged."""
+    from ..core.run_log_extract import _stop
+
+    cause = stop.cause.fields.get('cause') if stop.cause else None
+    return (f'{_stop(stop)} (log entry #{stop.entry.id}), '
+            + (f'cause: {cause}' if cause else 'cause not logged'))
+
+
+def read_log(objects: Mapping[str, Any],
+             object_groups: Sequence[Mapping[str, Any]] | None = None
+             ) -> LogSource:
+    """What the run log extracts in the project say of its runs.
+
+    Each run of the project (each time history not computed from
+    another) is matched to a run of an extract by its run number and,
+    where both are known, its axis. A record matched to one logged run
+    gets that run's outcome and an explanation for each of the run's
+    logged interruptions, in order. A record with no run number, one the
+    logs do not hold, and one they hold more than once (two tests, or
+    two axes when the record's axis is not known) get no outcome and a
+    note naming them. Under the table go, for each extract, which log,
+    test and entry it holds (with its badge when the log has newer
+    entries), its interruptions with their cause, path and restart, and
+    the time credited on each axis; a log with no interruption says it
+    holds none and leaves to the author whether the test ran without
+    one.
+
+    Empty when the project holds no extract, so the chronology is then
+    the records' alone.
+    """
+    from ..core.run_log_extract import held
+
+    extracts = held(objects)
+    if not extracts:
+        return LogSource()
+    groups = _groups(objects, object_groups)
+    logged = [(name, extract, run) for name, extract in extracts
+              for run in extract.runs()]
+    found: dict[str, Outcome] = {}
+    notes: list[str] = []
+    for record in histories(objects):
+        who = identity(objects, record, groups)
+        number = _run_number(who.run)
+        if number is None:
+            said = (f'run {who.run!r} is not a run number the log keeps'
+                    if who.run else 'no run number')
+            notes.append(f'{record}: {said}, so the run log cannot say its '
+                         'outcome; enter it.')
+            continue
+        matched = [(name, extract, run) for name, extract, run in logged
+                   if run.number == number and _same_axis(who.axis, run.axis)]
+        on = f' on {who.axis}' if who.axis else ''
+        if not matched:
+            notes.append(f'{record}: the run log holds no run {number}{on}, '
+                         'so its outcome is left to the author.')
+            continue
+        if len(matched) > 1:
+            told = '; '.join(f'{name}, axis {run.axis or "not given"}'
+                             for name, _extract, run in matched)
+            notes.append(f'{record}: the run log holds run {number}{on} '
+                         f'{len(matched)} times ({told}), so its outcome is '
+                         'left to the author; enter the axis.')
+            continue
+        _name, extract, run = matched[0]
+        mine = {entry.id for entry in run.entries}
+        stops = [stop for stop in extract.interruptions()
+                 if stop.entry.id in mine]
+        found[record] = Outcome(_logged_outcome(run, extract.upto),
+                                tuple(_explained(stop) for stop in stops))
+    lines: list[str] = []
+    for _name, extract in extracts:
+        lines += ['', f'From {extract.cited()}:']
+        stops = extract.interruption_lines()
+        if stops:
+            lines += ['', *stops]
+        else:
+            lines += ['', (f'The log holds no abort, trip or scheduled stop '
+                           f'of test {extract.test} by entry '
+                           f'#{extract.upto}; whether the test ran without '
+                           "one is the author's to say.")]
+        credits = extract.credit_lines()
+        if credits:
+            lines += ['', *credits]
+    return LogSource(found, tuple(notes), tuple(lines),
+                     tuple(name for name, _extract in extracts))
+
+
 def outcomes(objects: Mapping[str, Any]) -> dict[str, Outcome]:
     """The outcome of each run, by record name, from a source other than
-    the record.
-
-    This is the one place such a source is read. A run log kept beside
-    the test is the planned one; until there is a source, no run has an
-    outcome here, and the chronology leaves the Outcome column and the
-    explanation of each interruption to the author.
-    """
-    del objects
-    return {}
+    the record: the run log extracts in the project (`read_log`). Empty
+    when the project holds none, and the chronology then leaves the
+    Outcome column and the explanation of each interruption to the
+    author."""
+    return dict(read_log(objects).outcomes)
 
 
 # ---- the chronology -----------------------------------------------------
@@ -384,6 +520,10 @@ class Chronology:
     rows: tuple[RunRow, ...]
     ordered_by: str
     notes: tuple[str, ...] = ()
+    #: what the run logs add under the table (`LogSource.lines`), and
+    #: the extracts they came from, by name; empty without a run log
+    logged: tuple[str, ...] = ()
+    logs: tuple[str, ...] = ()
 
 
 def chronology(objects: Mapping[str, Any],
@@ -393,7 +533,8 @@ def chronology(objects: Mapping[str, Any],
                progress: Callable[[int, int], None] | None = None
                ) -> Chronology:
     """The runs of the project in the order they were run, each with its
-    identity and what its record shows.
+    identity and what its record shows, and what the run log extracts
+    in the project say of them (`read_log`) when there are any.
 
     Raises `ValueError` when the project holds no time history, when
     the order cannot be read from the identities (naming the records
@@ -411,12 +552,26 @@ def chronology(objects: Mapping[str, Any],
     identities = [(name, identity(objects, name, groups)) for name in names]
     ordered = order(identities)
     by_name = dict(identities)
-    told = outcomes(objects)
+    log = read_log(objects, groups)
     rows, notes = [], []
     for done, name in enumerate(ordered, start=1):
         found = by_name[name]
         reading = read_record(objects, name, groups, window_s, drop_db, min_s)
-        rows.append(RunRow(name, found, reading, told.get(name, Outcome())))
+        outcome = log.outcomes.get(name, Outcome())
+        logged = len(outcome.explanations)
+        seen = len(reading.interruptions)
+        if logged and (reading.not_read or logged != seen):
+            # which logged stop is which drop cannot be read one way, so
+            # none is placed on the record's; the log's table lists them
+            outcome = replace(outcome, explanations=())
+            notes.append(
+                f"{name}: the record's interruptions are not read, so the "
+                "run log's are listed under the runs." if reading.not_read
+                else f'{name}: the record shows {seen} interruption'
+                f'{"s" * (seen != 1)} and the run log {logged} for its run, '
+                "so the log's are listed under the runs rather than beside "
+                "the record's.")
+        rows.append(RunRow(name, found, reading, outcome))
         for field_name, why in found.refused:
             notes.append(f'{name}: {why}, so the {FIELD_NAMES[field_name]} '
                          'is not read; enter it.')
@@ -429,7 +584,8 @@ def chronology(objects: Mapping[str, Any],
     ordered_by = ('' if len(identities) < 2
                   else 'start' if all(found.start for _n, found in identities)
                   else 'run number')
-    return Chronology(tuple(rows), ordered_by, tuple(notes))
+    return Chronology(tuple(rows), ordered_by, (*notes, *log.notes),
+                      log.lines, log.logs)
 
 
 def _cell(text: str) -> str:
@@ -477,14 +633,20 @@ def draft(found: Chronology) -> str:
     least = settings.get('min_s', MIN_S)
     ordered = (f'The runs are in the order of their {found.ordered_by}. '
                if found.ordered_by else '')
+    left = ('The outcome of each run and the cause of each interruption are '
+            'for the author to enter.' if not found.logs else
+            'The outcome of each run is as the run log records it, and the '
+            "cause of an interruption is the log's where the record and the "
+            'log agree on how many there were; what they mean for the test '
+            "is the author's to say.")
     lines += [
         '',
         (f'{ordered}The time at level is read from the running RMS of each '
          f"record's control channels over {window:g} s, within 3 dB of the "
          f"run's level. An interruption is a drop of at least {drop:g} dB "
          f'below that level for at least {least:g} s, between reaching level '
-         'and leaving it, timed on the record. The outcome of each run and '
-         'the cause of each interruption are for the author to enter.')]
+         f'and leaving it, timed on the record. {left}')]
+    lines += found.logged
     if found.notes:
         lines += [''] + [f'- {note}' for note in found.notes]
     return '\n'.join(lines)
@@ -621,10 +783,12 @@ def finish(blocks: Sequence[dict[str, Any]]) -> None:
         if title is not None:
             block['html'] = f'<h3 class="run">{html.escape(title)}</h3>'
         offered = block.pop('drafted', None)
+        mark = block.pop('drafted_mark', DRAFTED)
         if offered is not None:
             block['html'] = (block.get('html', '')
-                             + f'<div class="drafted"><strong>{DRAFTED}'
-                             f'</strong>{to_html(offered, tables=True)}</div>')
+                             + f'<div class="drafted"><strong>'
+                             f'{html.escape(mark)}</strong>'
+                             f'{to_html(offered, tables=True)}</div>')
 
 
 # ---- the drafted chronology ---------------------------------------------
@@ -637,18 +801,31 @@ def finish(blocks: Sequence[dict[str, Any]]) -> None:
 #: what a drafted chronology is marked with on the editing page
 DRAFTED = 'DRAFTED FROM THE RECORDS, NOT YET ACCEPTED'
 
+#: what a chronology drafted from the records and a run log is marked
+#: with; one drafted from a run log alone carries the extract's own mark
+#: (`core.run_log_extract.DRAFTED`)
+DRAFTED_WITH_LOG = 'DRAFTED FROM THE RECORDS AND THE RUN LOG, NOT YET ACCEPTED'
+
+#: what the mark says of a run log extract the draft came from that is
+#: no longer in the project
+GONE = 'its run log extract is no longer in the project'
+
 #: the section the draft is offered to
 SECTION = 'chronology'
 
 
-def offer(report: Any, text: str) -> int:
+def offer(report: Any, text: str, logs: Sequence[str] = (),
+          mark: str = DRAFTED) -> int:
     """Offer `text` as the drafted chronology of `report`, and return the
     index of the Chronology section's block.
 
     The draft is kept on the section's block as 'draft', apart from the
     section's words, which do not change: the section stays owed, and
     the editing page shows the draft under the owed card, marked as
-    drafted. A new draft replaces the one on offer.
+    drafted. A new draft replaces the one on offer. `logs` names the run
+    log extracts the draft drew on, so the editing page can show their
+    badge when a log has grown since, and `mark` is what it is marked
+    with; both are kept only for a draft that drew on a run log.
     """
     from .skeleton import write
 
@@ -656,7 +833,14 @@ def offer(report: Any, text: str) -> int:
         raise TypeError(f'a drafted chronology is text, not '
                         f'{type(text).__name__}')
     index = write(report, SECTION)
-    report.blocks[index]['draft'] = text
+    block = report.blocks[index]
+    block['draft'] = text
+    block.pop('draft_logs', None)
+    block.pop('draft_mark', None)
+    if logs:
+        block['draft_logs'] = [str(name) for name in logs]
+    if mark != DRAFTED:
+        block['draft_mark'] = str(mark)
     return index
 
 
@@ -684,22 +868,49 @@ def accept(report: Any, text: str | None = None) -> int:
                          'one from the runs first')
     index = write(report, SECTION, offered if text is None else text)
     for held in blocks_of(report, SECTION):
-        report.blocks[held].pop('draft', None)
+        for key in ('draft', 'draft_logs', 'draft_mark'):
+            report.blocks[held].pop(key, None)
     return index
 
 
-def mark_drafted(blocks: Sequence[dict[str, Any]], report: Any) -> None:
+def _mark(report: Any, objects: Mapping[str, Any] | None) -> str:
+    """What the chronology on offer is marked with: drafted from the
+    records, or from a run log, with each run log's badge in brackets
+    when the log has grown or changed since its extract was taken, or
+    the extract is gone."""
+    from ..core.run_log_extract import RunLogExtract
+    from .skeleton import blocks_of
+
+    held = next((report.blocks[index] for index in blocks_of(report, SECTION)
+                 if report.blocks[index].get('draft')), {})
+    mark = str(held.get('draft_mark', DRAFTED))
+    for name in held.get('draft_logs', ()) if objects is not None else ():
+        extract = objects.get(name)
+        badge = (extract.status().badge if isinstance(extract, RunLogExtract)
+                 else GONE)
+        if badge:
+            mark += f' [{name}: {badge}]'
+    return mark
+
+
+def mark_drafted(blocks: Sequence[dict[str, Any]], report: Any,
+                 objects: Mapping[str, Any] | None = None) -> None:
     """Put the chronology on offer on the Chronology head the skeleton
     laid out, while that section is owed, for `finish` to draw marked
     as drafted. Once the author has written the section, a draft left
-    on its block is not shown."""
+    on its block is not shown. With `objects`, a draft that drew on a
+    run log is marked with the badge of each extract whose log has
+    grown or changed since, or that is no longer in the project."""
     offered = drafted(report)
     if not offered:
         return
+    mark = _mark(report, objects)
     for block in blocks:
         meta = block.get('skeleton', {})
         if meta.get('key') == SECTION and meta.get('state') == 'owed':
             block['drafted'] = offered
+            if mark != DRAFTED:
+                block['drafted_mark'] = mark
 
 
 # ---- the Results section, repeated for each run ---------------------------

@@ -47,7 +47,7 @@ import json
 import ntpath
 import os
 import posixpath
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -160,6 +160,15 @@ def _whole_number(value: Any, what: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise RunLogError(f'{what} is a whole number from 1, not {value!r}')
     return value
+
+
+def held(objects: Mapping[str, Any]) -> list[tuple[str, RunLogExtract]]:
+    """The run log extracts among `objects` (a project, or any mapping of
+    names to objects), as (name, extract), in their order. Empty when
+    there are none, so a report feature that reads a run log changes
+    nothing in a project without one."""
+    return [(name, obj) for name, obj in objects.items()
+            if isinstance(obj, RunLogExtract)]
 
 
 def take(path: str | os.PathLike, test: int | None = None,
@@ -564,6 +573,27 @@ class RunLogExtract:
         return (f'the run log{title}, test {self.test}, to entry #{self.upto} '
                 f'(test head {self.head[:12]})')
 
+    def cited(self, status: LogStatus | None = None) -> str:
+        """Which log, test and entry the extract holds, as a report cites
+        it, with the badge in brackets when the live log holds newer
+        entries, has changed, cannot be read or is not found: "the run
+        log 'Article 7', test 1, to entry #12 (test head 3f2a...) [newer
+        entries in the log]".
+
+        Parameters
+        ----------
+        status : LogStatus, optional
+            The live log's state, when it has been asked already;
+            `status()` is asked when omitted.
+
+        Returns
+        -------
+        str
+            The citation.
+        """
+        badge = (self.status() if status is None else status).badge
+        return self._source() + (f' [{badge}]' if badge else '')
+
     def _time(self, entry: Entry) -> tuple[str, bool]:
         """An entry's time as the draft prints it, on the recorders' clock
         when a clock check comes before it, and whether it was."""
@@ -602,29 +632,17 @@ class RunLogExtract:
             lines.append('| ' + ' | '.join(_cell(cell) for cell in (
                 run.number, run.axis or '', started, _held(run),
                 run.counter or '', run.outcome)) + ' |')
-        stops = self.interruptions()
+        stops, on_computer = self._interruption_table()
+        computer |= on_computer
         if stops:
-            lines += ['', '| Entry | Time | Stop | Cause | Path | Restart |',
-                      '|---|---|---|---|---|---|']
-            for stop in stops:
-                when, on_recorders = self._time(stop.entry)
-                computer |= not on_recorders
-                lines.append('| ' + ' | '.join(_cell(cell) for cell in (
-                    f'#{stop.entry.id}', when, _stop(stop),
-                    stop.cause.fields.get('cause') if stop.cause
-                    else 'not logged',
-                    stop.path.fields.get('path') if stop.path
-                    else 'not logged', _restart(stop))) + ' |')
+            lines += ['', *stops]
         else:
             notes.append(f'The log holds no abort, trip or scheduled stop of '
                          f'test {self.test}; whether the test ran without '
                          'one is the author\'s to say.')
-        credits = self.credited()
+        credits = self.credit_lines()
         if credits:
-            lines.append('')
-            lines += [f'- Axis {credit.axis}: {credit.message}'
-                      if credit.axis else f'- {credit.message}'
-                      for credit in credits]
+            lines += ['', *credits]
         clock = ('Times are on the log computer\'s clock where no clock check '
                  'comes before them, and on the recorders\' clock otherwise.'
                  if computer else 'Times are on the recorders\' clock.')
@@ -634,6 +652,43 @@ class RunLogExtract:
                   'author\'s to say.')]
         return Draft(CHRONOLOGY_SECTION, '\n'.join(lines), self._source(),
                      tuple(notes))
+
+    def _interruption_table(self) -> tuple[list[str], bool]:
+        """The interruptions as a Markdown table, and whether any time in
+        it is on the log computer's clock; no lines when there are
+        none."""
+        stops = self.interruptions()
+        if not stops:
+            return [], False
+        computer = False
+        lines = ['| Entry | Time | Stop | Cause | Path | Restart |',
+                 '|---|---|---|---|---|---|']
+        for stop in stops:
+            when, on_recorders = self._time(stop.entry)
+            computer |= not on_recorders
+            lines.append('| ' + ' | '.join(_cell(cell) for cell in (
+                f'#{stop.entry.id}', when, _stop(stop),
+                stop.cause.fields.get('cause') if stop.cause
+                else 'not logged',
+                stop.path.fields.get('path') if stop.path
+                else 'not logged', _restart(stop))) + ' |')
+        return lines, computer
+
+    def interruption_lines(self) -> list[str]:
+        """The test's interruptions as a Markdown table: the entry, its
+        time (on the recorders' clock where a clock check comes before
+        it), the stop, and the cause, path and restart the log records,
+        each 'not logged' or 'none logged' until it is. No lines when
+        the log holds no interruption of the test, never a line saying
+        there was none."""
+        return self._interruption_table()[0]
+
+    def credit_lines(self) -> list[str]:
+        """The time credited on each axis of the test against the
+        duration and its tolerance, one Markdown list item per axis; no
+        lines when the test has no run."""
+        return [f'- Axis {credit.axis}: {credit.message}' if credit.axis
+                else f'- {credit.message}' for credit in self.credited()]
 
     def draft_findings(self) -> Draft:
         """The test's deviations and anomalies from the log, as draft text

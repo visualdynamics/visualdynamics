@@ -7094,6 +7094,16 @@ class Project(dict):
         section (`report_section`). The outcome of each run and the
         cause of each interruption are left for the author.
 
+        With a run log brought into the project (`attach_run_log`), the
+        draft also carries what the log records: each run's outcome,
+        matched by run number and axis, the cause of each interruption
+        where the record and the log count the same, and under the table
+        the log's interruptions with their cause, path and restart and
+        the time credited on each axis, with which log, test and entry
+        they come from. A project with an extract and no time history is
+        offered the log's own chronology. Without an extract, the draft
+        is the records' alone.
+
         Parameters
         ----------
         name : str
@@ -7116,22 +7126,48 @@ class Project(dict):
         ------
         ValueError
             When the report does not have `run_sections` enabled, the
-            project holds no time history, the order of the runs cannot
-            be read (the records with neither a start nor a run number
-            are named), or a setting is not one the reading can use.
+            project holds no time history (and no run log extract with a
+            run), the order of the runs cannot be read (the records with
+            neither a start nor a run number are named), or a setting is
+            not one the reading can use.
         TypeError
             When `name` is not a report.
         """
+        from .core.run_log_extract import DRAFTED as FROM_LOG
+        from .core.run_log_extract import held
         from .report.features import enabled
-        from .report.runs import FEATURE, chronology, draft, offer
+        from .report.runs import (
+            DRAFTED,
+            DRAFTED_WITH_LOG,
+            FEATURE,
+            chronology,
+            draft,
+            histories,
+            offer,
+        )
 
         report = self._report(name)
         if FEATURE not in enabled(report):
             raise ValueError(f'report {report.title!r} does not have Runs and '
                              'chronology enabled')
-        text = draft(chronology(self, self.object_groups, window_s, drop_db,
-                                min_s, progress))
-        offer(report, text)
+        logs = held(self)
+        if logs and not histories(self):
+            # a lab that analyzes elsewhere still gets the log's own
+            # chronology; the records' reading has nothing to read
+            drafts = [extract.draft_chronology() for _name, extract in logs]
+            if not any(drafts):
+                said = ' '.join(note for found in drafts
+                                for note in found.notes)
+                raise ValueError(f'the project holds no time history, and no '
+                                 f'run log extract holds a run: {said}')
+            text = '\n\n'.join(found.text for found in drafts if found)
+            offer(report, text, [name for name, _extract in logs], FROM_LOG)
+            return text
+        found = chronology(self, self.object_groups, window_s, drop_db,
+                           min_s, progress)
+        text = draft(found)
+        offer(report, text, found.logs,
+              DRAFTED_WITH_LOG if found.logs else DRAFTED)
         return text
 
     def accept_chronology(self, name: str, text: str | None = None) -> None:

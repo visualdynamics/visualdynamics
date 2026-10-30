@@ -144,7 +144,9 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         'the file name or the comparison and entered where it cannot be; '
         'the Results grouped by run; and a chronology of the runs with '
         'their time at level and the interruptions found, offered as '
-        'draft text for the author to accept or edit.',
+        'draft text for the author to accept or edit. A run log brought '
+        "into the project adds each run's outcome, the causes logged and "
+        'the time credited on each axis.',
         requires=('skeleton_sections',)),
     ReportFeature(
         'test_requirement', 'Requirement and results', 'Results',

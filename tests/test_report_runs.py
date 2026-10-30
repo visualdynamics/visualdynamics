@@ -7,7 +7,9 @@ running RMS, checked against hand values and against noise at the
 default settings), and the feature on a project: the identity with the
 comparison's level, the chronology offered as a draft the author
 accepts, the Results grouped by run and repeated for every run, the
-editor's panels, and the page unchanged with the feature off.
+editor's panels, and the page unchanged with the feature off; and a
+run log brought into the project as a second source of outcomes,
+causes and credited duration, the draft unchanged without one.
 """
 
 from __future__ import annotations
@@ -21,9 +23,11 @@ import warnings
 import numpy as np
 import pytest
 from conftest import fixture_path
+from test_run_log_extract import HEADER, writer
 
 import visualdynamics
 from visualdynamics.core import compliance
+from visualdynamics.core import run_log_model as model
 from visualdynamics.core import runs as cr
 from visualdynamics.core.data import Psd, TimeHistory
 from visualdynamics.core.report import Report
@@ -638,12 +642,14 @@ def test_one_run_nothing_identifies_gets_no_heading():
 
 
 def test_the_seam_for_a_later_source_of_outcomes(two_runs, monkeypatch):
-    """A run log, when there is one, feeds `outcomes`; the chronology
-    carries what it says, and nothing else changes."""
+    """A later source feeds `read_log`; the chronology carries what it
+    says where the record and the source count the same interruptions,
+    and nothing else changes."""
     project, _name, first, other = two_runs
-    monkeypatch.setattr(rr, 'outcomes', lambda _objects: {
-        other: rr.Outcome('completed after a restart',
-                          ('amplifier trip',))})
+    monkeypatch.setattr(rr, 'read_log', lambda _objects, _groups=None:
+                        rr.LogSource({other: rr.Outcome(
+                            'completed after a restart',
+                            ('amplifier trip',))}))
     text = rr.draft(rr.chronology(project))
     assert ('at 10.0 s for 4.0 s, to zero: amplifier trip | completed after a '
             'restart |') in text
@@ -889,3 +895,251 @@ def test_one_figure_is_one_figure(two_runs):
         {'kind': 'plot', 'source': '@basis:TimeHistory', 'mode': 'curves',
          'caption': 'Time'}], features=FEATURES))
     assert project.report_runs(lone) == [f'{other}: 1 figure added']
+
+
+# ---- a run log as a second source -----------------------------------------
+
+
+def _random_log(path, *, abort=True):
+    """A random test on Z: run 1 to full level and a stop at 10:00; run 2
+    at full level with an abort at 2:00 (its cause, path and a resume
+    logged) and a stop at 8:00, or with no abort. Returns the abort's
+    id (None without one)."""
+    with writer(path) as log:
+        model.open_test(log, author='AB', test_kind='Random Vibration',
+                        header=HEADER)
+        model.append(log, 'run_start', author='AB', test=1, axis='Z', run=1,
+                     fields={'counter': '0:00'})
+        for level in (-12.0, 0.0):
+            model.append(log, 'level_row', author='AB', test=1, axis='Z',
+                         run=1, fields={'level_db': level})
+        model.append(log, 'run_stop', author='AB', test=1, axis='Z', run=1,
+                     fields={'counter': '10:00'})
+        model.append(log, 'run_start', author='AB', test=1, axis='Z', run=2,
+                     fields={'counter': '0:00'})
+        model.append(log, 'level_row', author='AB', test=1, axis='Z', run=2,
+                     fields={'level_db': 0.0})
+        stop = None
+        if abort:
+            stop = model.append(log, 'abort', author='AB', test=1, axis='Z',
+                                run=2, fields={'stop': 'controller ramp',
+                                               'counter': '2:00'})
+            model.append(log, 'cause_found', author='AB', test=1,
+                         fields={'cause': 'a loose cable',
+                                 'refers_to': stop.id})
+            model.append(log, 'path_decided', author='AB', test=1,
+                         fields={'path': 'resume', 'refers_to': stop.id})
+            model.append(log, 'restart', author='AB', test=1, axis='Z', run=2,
+                         fields={'resume': True, 'counter_at_restart': '2:00',
+                                 'refers_to': stop.id})
+        model.append(log, 'run_stop', author='AB', test=1, axis='Z', run=2,
+                     fields={'counter': '8:00'})
+        return stop.id if stop is not None else None
+
+
+def test_without_a_run_log_the_chronology_and_page_are_as_before(two_runs,
+                                                                 tmp_path):
+    project, name, _first, _other = two_runs
+    assert rr.read_log(project) == rr.LogSource()
+    text = project.report_chronology(name)
+    edit = _render(project, name, edit=True)
+    assert 'run log' not in text.lower()
+    assert text.endswith('for the author to enter.')
+    # attached and taken out again: the draft and the page byte for byte
+    path = tmp_path / 'article.vdlog'
+    _random_log(path)
+    attached = project.attach_run_log(path)
+    project.detach_run_log(attached)
+    assert project.report_chronology(name) == text
+    assert _render(project, name, edit=True) == edit
+    assert 'draft_logs' not in str(project[name].blocks)
+
+
+def test_the_run_log_gives_outcomes_causes_and_the_credited_time(two_runs,
+                                                                 tmp_path):
+    project, name, first, other = two_runs
+    report = project[name]
+    path = tmp_path / 'article.vdlog'
+    abort = _random_log(path)
+    attached = project.attach_run_log(path)
+    extract = project[attached]
+    text = project.report_chronology(name)
+    lines = text.splitlines()
+    assert lines[2].endswith(f'| {first} | 28.0 s | none found | completed '
+                             'at 10:00 |')
+    assert lines[3].endswith(
+        f'| {other} | 24.0 s | at 10.0 s for 4.0 s, to zero: controller ramp '
+        f'(log entry #{abort}), cause: a loose cable | completed at 8:00 |')
+    assert 'The outcome of each run is as the run log records it' in text
+    assert f'From {extract.cited()}:' in text
+    assert "the run log 'Article 7', test 1, to entry #" in text
+    assert (f'| #{abort} | 2026-10-30 08:09:00 | controller ramp | a loose cable '
+            '| resume | resumed at 2:00 |') in text
+    assert [line for line in lines if line.startswith('- Axis Z: ')] == [
+        f'- Axis Z: {extract.credited()[0].message}']
+    # offered, never placed: the section stays owed until accepted
+    assert sk.words(report, 'chronology') == ''
+    assert '7. Chronology: not yet written' in [
+        str(item) for item in sk.check(report, project, project.object_groups)]
+    edit = _render(project, name, edit=True)
+    assert rr.DRAFTED_WITH_LOG in edit and rr.DRAFTED not in edit
+    assert rr.DRAFTED_WITH_LOG not in _render(project, name)
+    project.accept_chronology(name)
+    assert sk.words(report, 'chronology') == text
+    assert rr.DRAFTED_WITH_LOG not in _render(project, name, edit=True)
+    assert 'draft_logs' not in str(report.blocks)
+
+
+def test_the_badge_shows_when_the_log_grew_after_the_draft(two_runs,
+                                                           tmp_path):
+    project, name, _first, _other = two_runs
+    path = tmp_path / 'article.vdlog'
+    _random_log(path)
+    attached = project.attach_run_log(path)
+    project.report_chronology(name)
+    assert f'{rr.DRAFTED_WITH_LOG}<' in _render(project, name, edit=True)
+    with writer(path) as log:
+        log.append('note', author='AB', test=1, text='later')
+    edit = _render(project, name, edit=True)
+    assert (f'{rr.DRAFTED_WITH_LOG} [{attached}: newer entries in the log]'
+            in edit)
+    # drafted again, the draft names the badge where it cites its source
+    assert '[newer entries in the log]:' in project.report_chronology(name)
+    project.detach_run_log(attached)
+    assert f'[{attached}: {rr.GONE}]' in _render(project, name, edit=True)
+
+
+def test_a_record_the_log_cannot_answer_for_is_named(two_runs, tmp_path):
+    project, name, first, other = two_runs
+    path = tmp_path / 'article.vdlog'
+    _random_log(path)
+    project.attach_run_log(path)
+    project.set_run_identity(other, run=3)
+    text = project.report_chronology(name)
+    assert (f'- {other}: the run log holds no run 3 on Z, so its outcome is '
+            'left to the author.') in text
+    project.set_run_identity(other, run='2b')
+    assert (f"- {other}: run '2b' is not a run number the log keeps, so the "
+            'run log cannot say its outcome; enter it.') in rr.draft(
+                rr.chronology(project))
+    # run 1 in two tests, on two axes, the record's axis not known
+    with writer(path) as log:
+        model.roll(log, author='AB')
+        model.append(log, 'level_row', author='AB', test=2, axis='X', run=1,
+                     fields={'level_db': 0.0})
+    second = project.attach_run_log(path, test=2)
+    found = rr.read_log(project)
+    assert first in found.outcomes, 'its axis tells the two apart'
+    project.set_run_identity(first, axis='')
+    found = rr.read_log(project)
+    assert first not in found.outcomes
+    assert (f'{first}: the run log holds run 1 2 times (Run Log, Test 1, axis '
+            f'Z; {second}, axis X), so its outcome is left to the author; '
+            'enter the axis.') in found.notes
+    assert found.logs == ('Run Log, Test 1', second)
+
+
+def test_the_logged_causes_stay_off_a_record_that_counts_otherwise(
+        two_runs, tmp_path):
+    project, _name, first, _other = two_runs
+    path = tmp_path / 'article.vdlog'
+    with writer(path) as log:
+        model.open_test(log, author='AB', test_kind='Random Vibration',
+                        header=HEADER)
+        model.append(log, 'level_row', author='AB', test=1, axis='Z', run=1,
+                     fields={'level_db': 0.0})
+        model.append(log, 'abort', author='AB', test=1, axis='Z', run=1,
+                     fields={'stop': 'amplifier trip', 'counter': '1:00'})
+    project.attach_run_log(path)
+    found = rr.chronology(project)
+    row = next(row for row in found.rows if row.name == first)
+    assert row.outcome == rr.Outcome('aborted at 1:00')
+    assert (f'{first}: the record shows 0 interruptions and the run log 1 for '
+            "its run, so the log's are listed under the runs rather than "
+            "beside the record's.") in found.notes
+    text = rr.draft(found)
+    assert '| amplifier trip | not logged | not logged | none logged |' in text
+
+
+def test_a_log_with_no_abort_offers_no_none(two_runs, tmp_path):
+    project, name, _first, _other = two_runs
+    path = tmp_path / 'article.vdlog'
+    _random_log(path, abort=False)
+    project.attach_run_log(path)
+    text = project.report_chronology(name)
+    assert ('The log holds no abort, trip or scheduled stop of test 1 by entry '
+            "#8; whether the test ran without one is the author's to say."
+            in text)
+    assert 'No interruptions' not in text and 'no aborts' not in text.lower()
+
+
+def test_a_log_and_no_record_offers_the_log_chronology(tmp_path):
+    from visualdynamics.core.run_log_extract import DRAFTED as FROM_LOG
+
+    project = visualdynamics.Project()
+    name = project.add('Report', Report('Report', [], features=FEATURES))
+    empty = tmp_path / 'empty.vdlog'
+    with writer(empty) as log:
+        model.open_test(log, author='AB', test_kind='Random Vibration',
+                        header=HEADER)
+    held = project.attach_run_log(empty)
+    with pytest.raises(ValueError, match='no run log extract holds a run: The '
+                       'log holds no runs of test 1 by entry #1'):
+        project.report_chronology(name)
+    assert rr.drafted(project[name]) == ''
+    project.detach_run_log(held)
+    path = tmp_path / 'article.vdlog'
+    _random_log(path)
+    attached = project.attach_run_log(path)
+    text = project.report_chronology(name)
+    assert text == project[attached].draft_chronology().text
+    assert FROM_LOG in _render(project, name, edit=True)
+    assert sk.words(project[name], 'chronology') == ''
+
+
+def test_two_logged_stops_against_one_found_stay_in_the_log_table(two_runs,
+                                                                   tmp_path):
+    project, _name, _first, other = two_runs
+    path = tmp_path / 'article.vdlog'
+    with writer(path) as log:
+        model.open_test(log, author='AB', test_kind='Random Vibration',
+                        header=HEADER)
+        model.append(log, 'level_row', author='AB', test=1, axis='Z', run=2,
+                     fields={'level_db': 0.0})
+        for counter in ('1:00', '3:00'):
+            model.append(log, 'abort', author='AB', test=1, axis='Z', run=2,
+                         fields={'stop': 'controller ramp',
+                                 'counter': counter})
+            model.append(log, 'restart', author='AB', test=1, axis='Z',
+                         run=2, fields={'resume': True})
+    project.attach_run_log(path)
+    found = rr.chronology(project)
+    row = next(row for row in found.rows if row.name == other)
+    assert row.outcome.explanations == ()
+    assert (f'{other}: the record shows 1 interruption and the run log 2 for '
+            "its run, so the log's are listed under the runs rather than "
+            "beside the record's.") in found.notes
+
+
+def test_a_record_not_read_keeps_the_logged_stops_in_the_log_table(
+        tmp_path):
+    project = visualdynamics.Project()
+    project.import_file(fixture_path('plate', 'shock.nc4'))
+    history = rr.histories(project)[0]
+    project.set_run_identity(history, run=1)
+    path = tmp_path / 'article.vdlog'
+    with writer(path) as log:
+        model.open_test(log, author='AB', test_kind='Shock',
+                        header={'title': 'Release shock'})
+        model.append(log, 'shot', author='AB', test=1, axis='Z', run=1,
+                     fields={'polarity': 'positive', 'n': 1, 'of': 3})
+        model.append(log, 'abort', author='AB', test=1, axis='Z', run=1,
+                     fields={'stop': 'stop word'})
+    project.attach_run_log(path)
+    found = rr.chronology(project)
+    assert found.rows[0].outcome == rr.Outcome('aborted')
+    assert (f"{history}: the record's interruptions are not read, so the run "
+            "log's are listed under the runs.") in found.notes
+    text = rr.draft(found)
+    assert '| not read | not read | aborted |' in text
+    assert '| stop word | not logged | not logged | none logged |' in text

@@ -403,6 +403,51 @@ project.accept_chronology('Report', 'Runs 1 to 4 on X, then ...')
 `report_chronology` takes `window_s`, `drop_db` and `min_s` to read
 with a different window, depth or least duration.
 
+**From a run log.** The records stay the first source: a lab with no
+log gets the chronology above. With a run log brought into the project
+(`project.attach_run_log`, [The run log file](run-log.md#in-a-project)),
+the draft also carries what the log records. Each record is matched to
+the log's run by its run number and, where both are known, its axis,
+and its Outcome column says how the run ended as the log has it
+(*completed at 10:00*, *aborted at 2:00*, or *no stop logged* when none
+is). Where the record and the log count the same interruptions in the
+run, each interruption found carries the logged stop and its cause.
+Under the table go, for each extract, which log, test and entry it was
+taken to, the log's interruptions with their cause, path and restart,
+and the time credited on each axis against the duration:
+
+```text
+| 2 | Z |  | 2026-10-11 10:00:00 | Time History (2) | 24.0 s | at 10.0 s for 4.0 s, to zero: controller ramp (log entry #8), cause: a loose cable | completed at 8:00 |
+
+From the run log 'Article 7', test 1, to entry #12 (test head e66a35552c07):
+
+| Entry | Time | Stop | Cause | Path | Restart |
+|---|---|---|---|---|---|
+| #8 | 2026-10-30 08:09:00 | controller ramp | a loose cable | resume | resumed at 2:00 |
+
+- Axis Z: 18:00 credited is over 11:00, the most the tolerance allows on 10:00
+```
+
+A record the log does not hold, one with no run number, and one the
+log holds more than once (two tests, or two axes when the record's axis
+is not known) keep a blank Outcome, and a line under the draft says
+why; so does a run whose record and log count the interruptions
+differently, whose logged causes stay in the log's table rather than
+beside the record's. A log with no abort, trip or scheduled stop says
+so and leaves to the author whether the test ran without one; it never
+writes "none". The meaning of an outcome or a cause for the test stays
+the author's.
+
+The draft is marked *drafted from the records and the run log, not yet
+accepted* on the editing page, and the section stays owed until it is
+accepted. When the log has newer entries than the extract, the citation
+carries the extract's badge, *[newer entries in the log]*, and so does
+the mark on the editing page while the draft waits;
+`project.refresh_run_log(name)` takes the newer entries, and drafting
+again reads them. A
+project with an extract and no time history is offered the log's own
+chronology, marked *drafted from the run log, not yet accepted*.
+
 ## Findings register
 
 **Findings register** (group Results, needs Skeleton sections) writes

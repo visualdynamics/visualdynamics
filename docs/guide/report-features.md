@@ -1130,6 +1130,34 @@ project.report_check('Flash')                                   # []
 project.issue_report('Flash', 'FR-0037-1.pdf')
 ```
 
+**From the run log.** With a run log brought into the project
+(`project.attach_run_log`, [The run log file](run-log.md#in-a-project)),
+the page gains a short part before What Happens Next, read from the
+extract as it was taken and kept to what the page does not already
+say: which log, test and entry it holds, with the extract's badge,
+*[newer entries in the log]*, when the log has grown since; the runs so
+far with how each ended; the holds open; the anomalies open that the
+findings register does not hold, with their owners; the opinions given
+at the console that the page does not record in the same words, each
+with who gave it and to whom; and the checklists with lines still owed.
+
+```text
+Runs so far: run 1 (Z) completed at 10:00; run 2 (Z) completed at 10:00; run 3 (Z) completed at 10:00
+Still owed: the first minute of abort #20, 1 of 9
+The log holds no open hold, open anomaly or opinion by entry #31.
+```
+
+A list longer than three stops there and says how many more the run
+log holds. A kind the log holds none of is said to be held none of by
+the log at the extract's last entry, never to have been none. The
+page's own parts are still the author's: an opinion in the log fills
+nothing in Opinions Recorded as Opinions, which stays owed until the
+author records the opinions or sets them to None, and the same holds
+for the condition on release and what happens next. So that a day with
+a run log still prints on one sheet, the part is set small and the
+page's spacing a little tighter while the part is on it; a flash
+report without a run log keeps its own style.
+
 `report_flash` refuses, changing nothing, an opinion without its words
 or without who gave it, opinions entered while they are set to None
 (`opinions_none=True`), and a value of the wrong type. What it holds is

@@ -225,7 +225,10 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         'off the result table for each run so far, the findings by '
         'number with their owners, and owed lines for what only the '
         'author can write: the condition on release, the opinions, what '
-        'happens next and the report date.',
+        'happens next and the report date. A run log brought into the '
+        'project adds, on the same sheet, what the page does not already '
+        'say: the runs so far, the holds and anomalies open, the opinions '
+        'logged and the lines still owed.',
         requires=('test_requirement', 'report_identity', 'findings')),
     ReportFeature(
         'record_captions', 'Record captions', 'Figures',

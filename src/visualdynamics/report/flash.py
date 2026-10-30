@@ -29,6 +29,24 @@ the project already holds, in the order its reader asks:
   attributed;
 - what happens next, with the date the test report is due.
 
+With a run log brought into the project (`Project.attach_run_log`),
+the page gains a short part of its own, From the Run Log, before what
+happens next, kept to what the page does not already say: for each
+extract, which log, test and entry it holds (with its badge when the
+log has newer entries), the runs so far with how each ended, the holds
+open, the anomalies open that the findings register does not hold,
+with their owners, the opinions given at the console that the page
+does not record in the same words, and the checklists with lines still
+owed. A long list stops at `LISTED` and says how many more the log
+holds. Each is read from the extract as it was taken (only the badge
+looks at the live file), and a kind the log holds none of is said to be
+held none of by the log at its entry, never to have been none. The
+page's own parts stay the author's: the opinions the page records, the
+condition on release and what happens next are still typed, and still
+owed until they are. So a day with a run log still prints on one
+sheet, the part is set small and the page a little tighter while it is
+on it (`LOG_CSS`); a page without a run log keeps its own style.
+
 Nothing on the page is invented. The condition on release, the
 opinions, what happens next and the report's date are typed by the
 author (`enter`) and kept with the report's identity, so a report
@@ -103,6 +121,13 @@ HELD = 'flash'
 OPINIONS_OWED = ('the opinions given at the console, each with who gave it, '
                  'or None.')
 NO_OPINIONS = 'No opinions were given.'
+
+#: the heading over what the run log holds
+FROM_LOG = 'From the Run Log'
+
+#: the most lines a part of the run log's block lists before it says
+#: how many more the log holds
+LISTED = 3
 
 #: the headline's owed line
 NO_HEADLINE = ('no requirement is read against a run the project holds; '
@@ -420,6 +445,120 @@ def _typed(page: Mapping[str, Any], key: str) -> str:
             f'{fr._escape(given)}</p>')
 
 
+def _capped(items: Sequence[str], most: int = LISTED) -> list[str]:
+    """`items`, the first `most` of them and then how many more the run
+    log holds, so a long day keeps the page to one sheet."""
+    if len(items) <= most:
+        return list(items)
+    return [*items[:most], f'and {len(items) - most} more, in the run log.']
+
+
+def log_lines(report: Any, extract: Any) -> tuple[list[tuple[str, list[str]]],
+                                                  list[str]]:
+    """What a run log extract adds to `report`'s flash page, kept to what
+    the page does not say already: ([(title, lines)], [kinds held none
+    of]).
+
+    The parts are the runs so far with how each ended, the holds open
+    (by what each asks), the anomalies open that the findings register
+    does not hold under their number, with their owners, the opinions
+    given at the console that the page does not record in the same
+    words, and the checklists with lines still owed, each with how many.
+    A part with more than `LISTED` lines lists that many and says how
+    many more the log holds. A part the log holds none of is not drawn;
+    its kind is named in the second list, so the page says the log
+    holds none by its last entry, never that there was none.
+    """
+    from ..core.run_log_model import HOLD_RULES
+    from .runs import _logged_outcome
+
+    upto = extract.upto
+    runs = [f'run {run.number}' + (f' ({run.axis})' if run.axis else '')
+            + f' {_logged_outcome(run, upto)}'
+            for run in sorted(extract.runs(), key=lambda run: run.entries[0].id)]
+    holds = [f'{HOLD_RULES.get(hold.rule, hold.message)} (#{hold.entry.id})'
+             for hold in extract.holds()]
+    entered = {entry['number'] for entry in fr.register(report)}
+    anomalies = [f'{found.number}, owner {found.owner or "not logged"}: '
+                 f'{found.fact or "fact not logged"}'
+                 for found in extract.open_anomalies()
+                 if found.number not in entered]
+    typed = {opinion['text'] for opinion in held(report).get('opinions', [])}
+    opinions = []
+    for entry in extract.entries:
+        if entry.kind != 'opinion_given':
+            continue
+        words = entry.fields.get('opinion') or entry.text or 'not logged'
+        if words in typed:
+            continue
+        to = entry.fields.get('to')
+        opinions.append(f'by {entry.author}' + (f' to {to}' if to else '')
+                        + f': {words}')
+    owed = [f'{found.title.lower()}, {len(found.owed)} of {len(found.lines)}'
+            for found in extract.owed()]
+    parts = (('Runs so far', runs, 'run'), ('Holds open', holds, 'open hold'),
+             ('Anomalies open', anomalies, 'open anomaly'),
+             ('Opinions logged', opinions, 'opinion'),
+             ('Still owed', owed, 'line still owed'))
+    shown = [(title, _capped(lines)) for title, lines, _none in parts if lines]
+    return shown, [none for _title, lines, none in parts if not lines]
+
+
+def _nothing(kinds: Sequence[str], upto: int) -> str:
+    """'The log holds no open hold or opinion by entry #8.': what the log
+    holds none of, said of the log."""
+    said = kinds[0] if len(kinds) == 1 else \
+        f'{", ".join(kinds[:-1])} or {kinds[-1]}'
+    return f'The log holds no {said} by entry #{upto}.'
+
+
+def log_html(report: Any, objects: Mapping[str, Any]) -> str:
+    """The run log's part of `report`'s flash page, drawn as HTML: for
+    each run log extract in `objects`, a line citing its log, test and
+    entry (with the extract's badge when the log has newer entries),
+    then a line for each part of `log_lines` and one for what the log
+    holds none of. '' when `objects` holds no extract, so the page is
+    as it was."""
+    from ..core.run_log_extract import held as extracts_in
+
+    extracts = extracts_in(objects)
+    if not extracts:
+        return ''
+    out = [_head(FROM_LOG)]
+    for _name, extract in extracts:
+        shown, none = log_lines(report, extract)
+        lines = [f'<strong>{html.escape(title)}:</strong> '
+                 f'{html.escape("; ".join(items))}' for title, items in shown]
+        if none:
+            lines.append(html.escape(_nothing(none, extract.upto)))
+        out.append(f'<p class="flash-log-source">'
+                   f'{html.escape(f"As recorded in {extract.cited()}.")}</p>'
+                   + ''.join(f'<p class="flash-log">{line}</p>'
+                             for line in lines))
+    return ''.join(out)
+
+
+#: the run log part's style, added to the page only when the part is
+#: drawn: set smaller and tighter than the page's own lines, so a day
+#: with a run log still prints on one sheet
+LOG_CSS = """
+body { font-size: 12px; line-height: 1.2; }
+h1 { font-size: 1.15rem; margin: 0 0 .25rem; }
+p.flash-preliminary { padding: .2rem .6rem; }
+table.identity th, table.identity td { padding: 0 .4rem; font-size: .74rem;
+  line-height: 1.15; }
+.authorized { margin-top: .2rem; }
+.signature .line { margin-top: .45rem; }
+h2.flash { font-size: .92rem; margin: .1rem 0 .1rem; }
+.flash-line, .flash-note, .flash-finding, .flash-typed, .flash-opinion,
+p.finding-none, .authorized p.label { margin: .03rem 0; }
+p.endmark { margin-top: .25rem; }
+p.flash-log-source, p.flash-log { white-space: normal; margin: .03rem 0;
+  font-size: .74rem; line-height: 1.18; }
+p.flash-log-source { color: var(--faint); font-style: italic; }
+"""
+
+
 def page_blocks(report: Any, objects: Mapping[str, Any],
                 object_groups: Sequence[Mapping[str, Any]] | None = None
                 ) -> list[dict[str, Any]]:
@@ -427,7 +566,9 @@ def page_blocks(report: Any, objects: Mapping[str, Any],
     drawn as HTML (joined with no white space between tags, since the
     page keeps a text block's white space): the PRELIMINARY line across
     the top, the identification, the headline, the deviations, what is
-    open, the opinions, and what happens next closed by the end mark."""
+    open, the opinions, what the run log holds (`log_html`, only with a
+    run log extract in the project), and what happens next closed by the
+    end mark."""
     entries = fr.register(report)
     said = cf.declared(skeleton.words(report, fr.SECTION))
     page = held(report)
@@ -465,4 +606,7 @@ def page_blocks(report: Any, objects: Mapping[str, Any],
          + _typed(page, 'report_date')
          + f'<p class="endmark">{html.escape(ri.end_mark(report))}</p>'),
     ]
+    logged = log_html(report, objects)
+    if logged:
+        parts.insert(-1, logged)
     return [{'kind': 'text', 'html': part} for part in parts]

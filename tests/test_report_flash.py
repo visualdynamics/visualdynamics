@@ -6,19 +6,25 @@ findings by number with their owners, and owed lines for what only the
 author writes. Off, the page is the page it was. Then the empty
 project, the report with no requirement and the empty register; the
 typed parts and their refusals; issue, the check and the verb; the
-project file and the template; and a real PDF of one page.
+project file and the template; and a real PDF of one page. Last, what a
+run log brought into the project adds, read from its extract, saying
+that the log holds none of a kind and never that there was none, and
+the page unchanged without one.
 """
 
 from __future__ import annotations
 
 import html
 import json
+import os
 
 import numpy as np
 import pytest
 from test_requirement import reference, run
+from test_run_log_extract import HEADER, writer
 
 import visualdynamics
+from visualdynamics.core import run_log_model as model
 from visualdynamics.core.data import TimeHistory
 from visualdynamics.core.report import Report
 from visualdynamics.report import features as rf
@@ -416,3 +422,243 @@ def test_the_flash_report_prints_on_one_page(tmp_path, qt_app):
     assert 'Report FR-0037-1, Revision 0, Preliminary (issued)' in text
     assert findings.register(project[name])[0]['number'] == 'D-1'
     assert 'End of report.' in text
+
+
+# ---- what a run log brought into the project adds ---------------------------
+
+
+def _floor_log(path):
+    """A random test on Z: run 1 completed at 10:00, run 2 aborted at 2:00
+    with no cause logged (a hold), an anomaly open with its owner, an
+    opinion given to the customer, and the setup before the first low
+    level never logged (owed)."""
+    with writer(path) as log:
+        model.open_test(log, author='AB', test_kind='Random Vibration',
+                        header=HEADER)
+        model.append(log, 'run_start', author='AB', test=1, axis='Z', run=1,
+                     fields={'counter': '0:00'})
+        model.append(log, 'level_row', author='AB', test=1, axis='Z', run=1,
+                     fields={'level_db': 0.0})
+        model.append(log, 'run_stop', author='AB', test=1, axis='Z', run=1,
+                     fields={'counter': '10:00'})
+        model.append(log, 'run_start', author='AB', test=1, axis='Z', run=2,
+                     fields={'counter': '0:00'})
+        model.append(log, 'abort', author='AB', test=1, axis='Z', run=2,
+                     fields={'stop': 'amplifier trip', 'counter': '2:00'})
+        model.append(log, 'anomaly_opened', author='AB', test=1,
+                     fields={'fact': 'a rattle at 300 Hz', 'owner': 'CD'})
+        model.append(log, 'opinion_given', author='AB', test=1,
+                     fields={'to': 'EF', 'opinion': 'the rattle looks like '
+                             'the cable tie, not the article'})
+
+
+def _flash_with_log(tmp_path, log=_floor_log):
+    project, name = _project()
+    path = tmp_path / 'article.vdlog'
+    log(path)
+    held = project.attach_run_log(path)
+    return project, name, held, path
+
+
+def _log_part(project, name):
+    return next(text for text in _texts(project, name)
+                if text.startswith(f'<h2 class="flash">{fl.FROM_LOG}</h2>'))
+
+
+def test_without_a_run_log_the_flash_page_is_as_before(tmp_path):
+    project, name = _project()
+    _complete(project, name)
+    before = _render(project, name)
+    path = tmp_path / 'article.vdlog'
+    _floor_log(path)
+    held = project.attach_run_log(path)
+    with_log = _render(project, name)
+    assert fl.FROM_LOG in with_log and fl.LOG_CSS in with_log
+    project.detach_run_log(held)
+    assert _render(project, name) == before
+    assert fl.LOG_CSS not in before
+    assert fl.log_html(project[name], project) == ''
+
+
+def test_what_the_log_adds_and_what_the_page_already_says_is_not_repeated(
+        tmp_path):
+    project, name, held, _path = _flash_with_log(tmp_path)
+    extract = project[held]
+    texts = _texts(project, name)
+    assert len(texts) == 8
+    assert texts[-2].startswith(f'<h2 class="flash">{fl.FROM_LOG}</h2>')
+    assert texts[-1].startswith('<h2 class="flash">What Happens Next</h2>')
+    part = texts[-2]
+    assert ('<p class="flash-log-source">'
+            + html.escape(f'As recorded in {extract.cited()}.') + '</p>'
+            in part)
+    assert _part('Runs so far', 'run 1 (Z) completed at 10:00; run 2 (Z) '
+                 'aborted at 2:00') in part
+    holds = extract.holds()
+    assert len(holds) == 2
+    assert _part('Holds open', 'an abort with no cause written (#6); an '
+                 'abort whose over-test question is unanswered (#6)') in part
+    assert _part('Anomalies open', 'A-1, owner CD: a rattle at 300 Hz') in part
+    assert _part('Opinions logged', 'by AB to EF: the rattle looks like the '
+                 'cable tie, not the article') in part
+    assert html.escape('before the first low level, 8 of 8') in part
+    # the page's own parts stay the author's: the logged opinion fills
+    # nothing, and the check still owes the page's opinions
+    assert 'Opinions: neither recorded nor set to None' in fl.check(
+        project[name], project, project.object_groups)
+    assert fl.OPINIONS_OWED in ''.join(texts)
+    # what the page already says is left out: the anomaly once the
+    # register holds it, the opinion once the page records it
+    project.report_finding(name, kind='anomaly', fact='A rattle at 300 Hz.')
+    project.report_flash(name, opinions=[
+        ('AB', 'the rattle looks like the cable tie, not the article')])
+    part = _log_part(project, name)
+    assert 'Anomalies open' not in part and 'Opinions logged' not in part
+    assert ('<p class="flash-log">The log holds no open anomaly or opinion by '
+            'entry #8.</p>') in part
+    assert all('\n' not in text for text in _texts(project, name))
+
+
+def _part(title, text):
+    return (f'<p class="flash-log"><strong>{html.escape(title)}:</strong> '
+            f'{html.escape(text)}</p>')
+
+
+def test_a_long_list_is_capped_with_what_the_log_holds_more(tmp_path):
+    def many(path):
+        with writer(path) as log:
+            model.open_test(log, author='AB', test_kind='Random Vibration',
+                            header=HEADER)
+            for run in range(1, 6):
+                model.append(log, 'run_stop', author='AB', test=1, axis='Z',
+                             run=run, fields={'counter': f'{run}:00'})
+
+    project, name, _held, _path = _flash_with_log(tmp_path, many)
+    assert fl.LISTED == 3
+    assert _part('Runs so far', 'run 1 (Z) completed at 1:00; run 2 (Z) '
+                 'completed at 2:00; run 3 (Z) completed at 3:00; and 2 more, '
+                 'in the run log.') in _log_part(project, name)
+    assert fl._capped(['a', 'b', 'c']) == ['a', 'b', 'c']
+
+
+def test_the_log_part_carries_the_badge_when_the_log_grew(tmp_path):
+    project, name, _held, path = _flash_with_log(tmp_path)
+    with writer(path) as log:
+        log.append('note', author='AB', test=1, text='later')
+    assert '[newer entries in the log].' in _log_part(project, name)
+    os.remove(path)
+    assert '[log not found].' in _log_part(project, name)
+
+
+def test_an_empty_test_says_the_log_holds_none_never_that_there_was_none(
+        tmp_path):
+    def opened(path):
+        with writer(path) as log:
+            model.open_test(log, author='AB', test_kind='Random Vibration',
+                            header=HEADER)
+
+    project, name, _held, _path = _flash_with_log(tmp_path, opened)
+    part = _log_part(project, name)
+    for title in ('Runs so far', 'Holds open', 'Anomalies open',
+                  'Opinions logged'):
+        assert f'<strong>{title}:' not in part
+    assert html.escape('The log holds no run, open hold, open anomaly or '
+                       'opinion by entry #1.') in part
+    assert fl.NO_OPINIONS not in part and 'No anomalies' not in part
+    assert 'Anomalies: neither entered nor set to None' in fl.check(
+        project[name], project, project.object_groups)
+    assert fl._nothing(['run'], 4) == 'The log holds no run by entry #4.'
+
+
+def test_a_typical_day_with_a_run_log_still_prints_on_one_page(tmp_path,
+                                                               qt_app):
+    """The flash report is a day on one sheet, and a run log attached
+    keeps it there: the log's part says only what the page does not, and
+    the page is set tighter while the part is on it."""
+    from test_report_identity import _pdf_pages
+
+    project, name, _held, _path = _flash_with_log(tmp_path, _typical_day)
+    project.report_finding(name, kind='anomaly', status='open',
+                           fact='M1 clipped.', approval='Open, owner CD.')
+    _complete(project, name)
+    path = tmp_path / 'FR-0037-1.pdf'
+    project.issue_report(name, path)
+    pages = _pdf_pages(path)
+    assert len(pages) == 1
+    [text] = pages
+    assert 'Page 1 of 1' in text and 'From the Run Log' in text
+    assert 'End of report.' in text
+    assert 'Runs so far: run 1 (Z) completed at 10:00' in text
+    # what the page says already is not said twice
+    assert 'Anomalies open' not in text and 'Opinions logged' not in text
+
+
+def test_the_runs_so_far_are_in_the_order_they_were_started(tmp_path):
+    def interleaved(path):
+        # run 1 starts, run 2 starts and stops, then run 1 stops: the
+        # runs are listed by their first entry
+        with writer(path) as log:
+            model.open_test(log, author='AB', test_kind='Random Vibration',
+                            header=HEADER)
+            for run, counter in ((1, None), (2, None), (2, '1:00'),
+                                 (1, '5:00')):
+                if counter is None:
+                    model.append(log, 'run_start', author='AB', test=1,
+                                 axis='Z', run=run)
+                else:
+                    model.append(log, 'run_stop', author='AB', test=1,
+                                 axis='Z', run=run,
+                                 fields={'counter': counter})
+
+    project, name, _held, _path = _flash_with_log(tmp_path, interleaved)
+    assert _part('Runs so far', 'run 1 (Z) completed at 5:00; run 2 (Z) '
+                 'completed at 1:00') in _log_part(project, name)
+
+
+def _typical_day(path):
+    """A typical day on one axis: the setup logged, three runs (the second
+    tripped, its cause, path and restart logged), an anomaly the author
+    has also entered in the register, and an opinion the page records in
+    the same words; the release checklist still to do."""
+    with writer(path) as log:
+        log.append('clock_check', author='AB', fields={'offset_s': 0.0})
+        model.open_test(log, author='AB', test_kind='Random Vibration',
+                        header=HEADER)
+        for step, _label in model.BEFORE_LOW_LEVEL:
+            model.append(log, 'setup_step', author='AB', test=1, axis='Z',
+                         fields={'step': step})
+        for run, ends in ((1, 'run_stop'), (2, 'abort'), (3, 'run_stop')):
+            model.append(log, 'run_start', author='AB', test=1, axis='Z',
+                         run=run, fields={'counter': '0:00'})
+            for level in (-12.0, -6.0, 0.0):
+                model.append(log, 'level_row', author='AB', test=1, axis='Z',
+                             run=run, fields={'level_db': level})
+            if ends == 'abort':
+                stop = model.append(log, 'abort', author='AB', test=1,
+                                    axis='Z', run=run,
+                                    fields={'stop': 'amplifier trip',
+                                            'counter': '3:00',
+                                            'called_by': 'AB',
+                                            'heard': 'a clunk',
+                                            'records_read': 'all',
+                                            'over_test': 'no',
+                                            'channel': 'amplifier',
+                                            'band': 'all',
+                                            'panel_fault': 'fan'})
+                model.append(log, 'cause_found', author='AB', test=1,
+                             fields={'cause': 'a fan fault',
+                                     'refers_to': stop.id})
+                model.append(log, 'path_decided', author='AB', test=1,
+                             fields={'path': 'restart',
+                                     'refers_to': stop.id})
+                model.append(log, 'restart', author='AB', test=1, axis='Z',
+                             run=run, fields={'resume': False,
+                                              'cause': 'a fan fault',
+                                              'refers_to': stop.id})
+            model.append(log, 'run_stop', author='AB', test=1, axis='Z',
+                         run=run, fields={'counter': '10:00'})
+        model.append(log, 'anomaly_opened', author='AB', test=1,
+                     fields={'fact': 'M1 clipped.', 'owner': 'CD'})
+        model.append(log, 'opinion_given', author='AB', test=1,
+                     fields={'to': 'EF',
+                             'opinion': 'The Z peak looks like the bracket.'})

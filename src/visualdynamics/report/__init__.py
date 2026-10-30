@@ -161,6 +161,14 @@ def render_html(report: Report, objects: Mapping[str, Any],
         from .identity import page_css
 
         css = page_css(report)
+    if 'flash_report' in active:
+        from ..core.run_log_extract import held
+        from .flash import LOG_CSS
+
+        if held(objects or {}):
+            # the run log's part of the flash page, set tight; a page
+            # without a run log keeps its stylesheet as it was
+            css += LOG_CSS
     return _page_html(payload, edit, channel_js, active, css)
 
 

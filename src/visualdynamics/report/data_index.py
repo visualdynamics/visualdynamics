@@ -13,6 +13,17 @@ object, the verb that computed it and what from, read off the
 project's provenance), and each attached text file printed whole: a
 CSV as a table, anything else as it was written.
 
+A run log brought into the project (`Project.attach_run_log`) adds a
+table under the index: each test's extract, the entry it was taken to,
+the head hash of the test's chain there, and what the live log says
+now (the extract's badge). The log file itself is not indexed, since
+its checksum changes with every entry; the head hash is what anchors
+the test's entries outside the file. The files the log names are
+indexed through the index's own entry point
+(`Project.index_run_log_files`), each checked against the SHA-256 the
+log records, and a line names any the log names that are not in the
+index yet. Without an extract the page is as before.
+
 What stays the author's: where the archive is, who keeps it, and what
 the contract says travels with the report. With the skeleton sections
 on, the index is placed under section 12, Record and Data Package,
@@ -70,6 +81,13 @@ UNKNOWN = ('This page was drawn from the objects alone, without the '
 
 #: the heading the index goes under when the skeleton is off
 HEADING = 'Record and Data Package'
+
+#: the run log table's columns and caption
+LOG_HEADERS = ('Run log', 'Test', 'Taken to', 'Test head hash', 'Log now')
+LOG_CAPTION = ('Run log: each test brought into the project, with the hash '
+               "of its chain at the entry it was taken to. The log file "
+               'grows with every entry, so its own checksum is not indexed; '
+               "the test head hash anchors the test's entries.")
 
 
 def _when(stamp: str) -> str:
@@ -197,6 +215,59 @@ def _html(markup: str) -> dict[str, Any]:
     return {'kind': 'text', 'html': markup}
 
 
+def _log_now(status: Any) -> tuple[str, str]:
+    """What the Log now column says of the live log, and its mark: the
+    extract's badge, in capitals and marked as a failure when the log
+    has changed, cannot be read or is not found, so it reads in a
+    monochrome copy."""
+    if status.state == 'current':
+        return 'current', ''
+    if status.state == 'newer':
+        return status.badge, 'unchecked'
+    return status.badge.upper(), 'changed'
+
+
+def run_logs(objects: Mapping[str, Any],
+             index: DataIndex | None) -> list[dict[str, Any]]:
+    """The run log blocks under the index: a table of the run log
+    extracts in `objects`, each with its test, the entry it was taken
+    to, the test's head hash and what the live log says now; then a line
+    naming each file the logs name that `index` does not hold by its
+    SHA-256 (the log file itself is never indexed). Empty when `objects`
+    holds no extract."""
+    from ..core.run_log_extract import held
+
+    extracts = held(objects)
+    if not extracts:
+        return []
+    rows, marks, missing = [], [], []
+    held_sums = {entry.sha256 for entry in index} if index is not None \
+        else set()
+    for _name, extract in extracts:
+        now, mark = _log_now(extract.status())
+        rows.append([os.path.basename(extract.path),
+                     f'{extract.test}, {extract.title}',
+                     f'entry #{extract.upto}', extract.head, now])
+        marks.append(['', '', '', 'hash', mark])
+        log_name = os.path.basename(extract.path)
+        for row in extract.files():
+            told = f'{row.file.name} (entry #{row.entry.id})'
+            # the log named in its own entry is the file whose checksum
+            # moves with every entry: the head hash stands for it
+            if (row.file.sha256 not in held_sums and told not in missing
+                    and row.file.name != log_name):
+                missing.append(told)
+    out = [{'kind': 'table', 'caption': LOG_CAPTION,
+            'headers': list(LOG_HEADERS), 'rows': rows, 'marks': marks}]
+    if missing:
+        count = len(missing)
+        said = (f'The run log names {count} file{"s" * (count != 1)} not in '
+                f'the data index: {", ".join(missing)}. Index the files of '
+                'the run log to check them against the checksums it records.')
+        out.append(_html(f'<p class="index-check">{html.escape(said)}</p>'))
+    return out
+
+
 def page_blocks(objects: Mapping[str, Any], heading: bool = False,
                 index: DataIndex | None = None) -> list[dict[str, Any]]:
     """The page blocks the feature adds, in order.
@@ -225,6 +296,7 @@ def page_blocks(objects: Mapping[str, Any], heading: bool = False,
         out.append(table(index))
         out.append(_html(f'<p class="index-check">'
                          f'{html.escape(checked(index))}</p>'))
+    out.extend(run_logs(objects, index))
     out.append(_html(f'<p class="index-analysis">{html.escape(analysis(
         index, bool(getattr(objects, "file", None))))}</p>'))
     made = recipe(getattr(objects, 'provenance', None) or {}, objects)

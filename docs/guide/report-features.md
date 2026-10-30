@@ -206,6 +206,34 @@ Any other source of files adds its entries the same way, naming itself
 in `source`, so a project keeps a single index. `project.export_report` checks the index before it
 writes, as Export does.
 
+**A run log.** With a run log brought into the project
+(`project.attach_run_log`, [The run log file](run-log.md#in-a-project)),
+a second table under the index lists each extract: the log's file, the
+test, the entry it was taken to, the head hash of the test's chain at
+that entry, and what the live log says now: *current*, *newer entries
+in the log*, or, in capitals, *LOG CHANGED*, *LOG UNREADABLE* or *LOG
+NOT FOUND*. The log file itself is not indexed: its checksum changes
+with every entry, so it would never match. The head hash is what
+anchors the test's entries outside the file, the same hash the log
+prints at the test's close.
+
+The files the log's entries name (a settings list, a controller's
+data file) are indexed with `index_run_log_files`, through the same
+entry point as any other file. Each is looked for by its name in the
+folders given, then beside the log, then beside the project file, and
+hashed; it is indexed only when its SHA-256 is the one the
+log recorded, and the line for each file says what happened:
+
+```python
+project.index_run_log_files(search=['/archive/test-0037'])
+# ['settings.txt: indexed.', 'run1.csv: indexed.']
+```
+
+A file found with other contents, or not found, is not indexed, and its
+line says so. Until each file the log names is in the index, a line
+under the run log table names those still missing, with the entry that
+named each.
+
 ## Check blocks
 
 **Check blocks** (group Results) puts the checks Visual Dynamics reads

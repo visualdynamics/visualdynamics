@@ -6635,6 +6635,98 @@ class Project(dict):
                                    role=role, source=source, objects=names,
                                    progress=progress)
 
+    def index_run_log_files(self, run_log: str | None = None, *,
+                            search: Sequence[str | os.PathLike] = (),
+                            progress: Any | None = None) -> list[str]:
+        """Add the files a run log extract names to the project's data
+        index, each checked against the SHA-256 the log records.
+
+        Each file is looked for by its name in each folder of `search`,
+        then beside the log, then beside the project's own file. Found,
+        it is hashed; when its SHA-256 is the one the log
+        records it is indexed through the index's own entry point
+        (`DataIndex.add`, source 'run log'), saying which entry named
+        it. A file found but not the one the log records, and a file
+        not found, are not indexed, and each has a line saying so. The
+        log itself is never indexed: its checksum changes with every
+        entry, and the test's head hash, which the report's data index
+        prints beside the extract, stands for it.
+
+        Parameters
+        ----------
+        run_log : str, optional
+            The run log extract; the project's one extract when
+            omitted.
+        search : sequence of str, optional
+            Folders to look in first, for example the archive copy.
+        progress : callable, optional
+            Called as ``progress(bytes read, bytes in the file)`` while
+            each file is hashed.
+
+        Returns
+        -------
+        list of str
+            One line per file the log names, in the order first named:
+            'run11.nc4: indexed', or why it was not; or one line saying
+            the log names no file.
+
+        Raises
+        ------
+        ValueError
+            When the project holds no run log extract, or holds several
+            and `run_log` does not name one.
+        TypeError
+            When `run_log` is not a run log extract.
+        """
+        from .io import format_of
+
+        _held, extract = self._one_run_log(run_log)
+        log = os.path.normcase(os.path.abspath(extract.path))
+        folders = [os.path.expanduser(str(folder)) for folder in search]
+        folders.append(os.path.dirname(extract.path))
+        if self.file:
+            folders.append(os.path.dirname(self.file))
+        rows = extract.files()
+        if not rows:
+            return [(f'The run log names no file in test {extract.test} by '
+                     f'entry #{extract.upto}; nothing is indexed.')]
+        lines: list[str] = []
+        seen: set[tuple[str, str]] = set()
+        for row in rows:
+            ref = row.file
+            if (ref.name, ref.sha256) in seen:
+                continue
+            seen.add((ref.name, ref.sha256))
+            where = next((os.path.join(folder, ref.name) for folder in folders
+                          if os.path.isfile(os.path.join(folder, ref.name))),
+                         None)
+            if where is not None and os.path.normcase(
+                    os.path.abspath(where)) == log:
+                lines.append(f"{ref.name}: the run log itself, whose checksum "
+                             "changes with every entry; the test's head hash "
+                             'stands for it, so it is not indexed.')
+                continue
+            if where is None:
+                lines.append(f'{ref.name}: not found (looked in '
+                             f'{", ".join(folders)}); not indexed.')
+                continue
+            # the checksum decides: the same SHA-256 is the same bytes, so
+            # the size the log may record adds nothing to it
+            size, sha = digest_file(where, progress)
+            if sha != ref.sha256:
+                lines.append(f'{ref.name}: found at {where}, but it is not the '
+                             'file the run log records (its checksum '
+                             'differs); not indexed.')
+                continue
+            title = f' {extract.log_title!r}' if extract.log_title else ''
+            self.data_index.add(
+                where, f'named in the run log{title}, test {extract.test}, '
+                f'entry #{row.entry.id} ({row.entry.label})',
+                format=format_of(where), source='run log',
+                checksum=(size, sha))
+            lines.append(f'{ref.name}: indexed.')
+        return lines
+
     def unindex_file(self, name: str) -> IndexEntry:
         """Take a file out of the data index (the report editor's
         Insert, Remove from Index).
@@ -9003,6 +9095,7 @@ _JOURNALED_VERBS = (
     'generate_report', 'report_features', 'report_section',
     'report_test_date', 'predict', 'report_prediction', 'export_report',
     'index_file', 'unindex_file', 'verify_data_index', 'report_check_block',
+    'index_run_log_files',
     'attach_run_log', 'detach_run_log', 'refresh_run_log',
     'report_identity', 'export_report_pdf', 'issue_report', 'amend_report',
     'set_run_identity', 'report_runs', 'report_chronology',

@@ -5,6 +5,9 @@ refusals, the check against the files, what an import records and how
 the entries follow the objects, persistence in the project file, the
 page with the feature on (alone and under the skeleton) and off, the
 attachments printed, and the app's import, Attached File and Export.
+Last, a run log brought into the project: its test's head hash listed,
+the files its entries name indexed against the checksums it records,
+and the page unchanged without one.
 """
 
 from __future__ import annotations
@@ -17,10 +20,12 @@ import os
 import numpy as np
 import pytest
 from conftest import fixture_path
+from test_run_log_extract import HEADER, writer
 
 import visualdynamics
 from visualdynamics import io
 from visualdynamics.core import data_index as di
+from visualdynamics.core import run_log_model as model
 from visualdynamics.core.data import TimeHistory
 from visualdynamics.core.report import Report
 from visualdynamics.project import Project, holds
@@ -1136,3 +1141,157 @@ def test_the_window_checks_once_and_asks_before_a_pdf(act, start, editing,
                                  'indexed; 1 changed.')
     else:
         assert ri.value(report, 'status') == 'issued'
+
+
+# ---- a run log brought into the project ---------------------------------------
+
+
+def _logged(tmp_path):
+    """A project with a data-index report and one run log extract of a
+    random test whose entries name two files: a data file and a settings
+    list, each beside the log. Returns the project, the report's name,
+    the extract's name and the log's path."""
+    data = _file(tmp_path, 'run1.csv', b'1,2,3\n')
+    settings = _file(tmp_path, 'settings.txt', b'limits as planned\n')
+    path = tmp_path / 'article.vdlog'
+    with writer(path) as log:
+        model.open_test(log, author='AB', test_kind='Random Vibration',
+                        header=HEADER, files=[settings])
+        model.append(log, 'run_stop', author='AB', test=1, axis='Z', run=1,
+                     fields={'counter': '1:00'}, files=[data])
+    project = Project('P')
+    name = project.add('Report', Report('Report', [], features=['data_index']))
+    held = project.attach_run_log(path)
+    return project, name, held, path
+
+
+def _log_table(html_text):
+    return next(block for block in _payload(html_text)['blocks']
+                if block.get('caption') == rdi.LOG_CAPTION)
+
+
+def test_without_a_run_log_the_index_page_is_as_before(tmp_path):
+    project, name, held, _path = _logged(tmp_path)
+    project.detach_run_log(held)
+    before = _render(project, name)
+    assert rdi.LOG_CAPTION not in before
+    assert rdi.run_logs(project, project.data_index) == []
+    with pytest.raises(ValueError, match='holds no run log extract'):
+        project.index_run_log_files()
+    project.attach_run_log(tmp_path / 'article.vdlog')
+    project.detach_run_log('Run Log, Test 1')
+    assert _render(project, name) == before
+
+
+def test_the_extract_and_its_head_hash_are_listed_and_its_files_named(
+        tmp_path):
+    project, name, held, _path = _logged(tmp_path)
+    extract = project[held]
+    page_text = _render(project, name)
+    found = _log_table(page_text)
+    assert found['headers'] == list(rdi.LOG_HEADERS)
+    assert found['rows'] == [['article.vdlog', '1, Random, Z',
+                              f'entry #{extract.upto}', extract.head,
+                              'current']]
+    assert found['marks'] == [['', '', '', 'hash', '']]
+    # the head hash, never the log file's own checksum
+    assert digest_of(tmp_path / 'article.vdlog') not in page_text
+    assert ('The run log names 2 files not in the data index: settings.txt '
+            '(entry #1), run1.csv (entry #2).') in page_text
+    assert project.index_run_log_files() == ['settings.txt: indexed.',
+                                             'run1.csv: indexed.']
+    entries = list(project.data_index)
+    assert [entry.name for entry in entries] == ['settings.txt', 'run1.csv']
+    assert entries[1].source == 'run log'
+    assert entries[1].holds == ("named in the run log 'Article 7', test 1, "
+                                'entry #2 (Run stopped)')
+    assert entries[1].sha256 == extract.files()[1].file.sha256
+    page_text = _render(project, name)
+    assert 'not in the data index' not in page_text
+    assert [row[0] for row in _index_rows(page_text)] == ['settings.txt',
+                                                          'run1.csv']
+    assert project.verify_data_index() == ['settings.txt: matches',
+                                           'run1.csv: matches']
+    assert 'project.index_run_log_files()' in project.journal
+    # once more: the same files are the same entries
+    project.index_run_log_files()
+    assert len(project.data_index) == 2
+
+
+def _index_rows(html_text):
+    return next(block for block in _payload(html_text)['blocks']
+                if block.get('caption') == rdi.CAPTION)['rows']
+
+
+def digest_of(path):
+    return hashlib.sha256(open(path, 'rb').read()).hexdigest()
+
+
+def test_the_log_now_column_carries_the_badge(tmp_path):
+    project, name, _held, path = _logged(tmp_path)
+    with writer(path) as log:
+        log.append('note', author='AB', test=1, text='later')
+    found = _log_table(_render(project, name))
+    assert found['rows'][0][4] == 'newer entries in the log'
+    assert found['marks'][0][4] == 'unchecked'
+    os.remove(path)
+    found = _log_table(_render(project, name))
+    assert found['rows'][0][4] == 'LOG NOT FOUND'
+    assert found['marks'][0][4] == 'changed'
+
+
+def test_a_missing_or_different_file_is_said_and_not_indexed(tmp_path):
+    project, _name, _held, path = _logged(tmp_path)
+    os.remove(tmp_path / 'settings.txt')
+    (tmp_path / 'run1.csv').write_bytes(b'1,2,4\n')
+    lines = project.index_run_log_files(search=[tmp_path / 'archive'])
+    assert lines[0].startswith('settings.txt: not found (looked in ')
+    assert lines[0].endswith('); not indexed.')
+    assert lines[1] == (f'run1.csv: found at {tmp_path / "run1.csv"}, but it '
+                        'is not the file the run log records (its checksum '
+                        'differs); not indexed.')
+    assert len(project.data_index) == 0
+    # a copy in the archive folder named in search is the one found
+    archive = tmp_path / 'archive'
+    archive.mkdir()
+    (archive / 'run1.csv').write_bytes(b'1,2,3\n')
+    told = []
+    assert project.index_run_log_files(
+        search=[archive], progress=lambda *a: told.append(a))[1] == (
+        'run1.csv: indexed.')
+    assert told and told[-1] == (6, 6)
+    assert project.data_index[0].path == str(archive / 'run1.csv')
+    assert path.exists()
+
+
+def test_the_log_itself_is_never_indexed(tmp_path):
+    path = tmp_path / 'article.vdlog'
+    with writer(path) as log:
+        model.open_test(log, author='AB', test_kind='Random Vibration',
+                        header=HEADER, files=[str(path)])
+    project = Project('P')
+    name = project.add('Report', Report('Report', [], features=['data_index']))
+    project.attach_run_log(path)
+    assert project.index_run_log_files() == [
+        ("article.vdlog: the run log itself, whose checksum changes with "
+         "every entry; the test's head hash stands for it, so it is not "
+         'indexed.')]
+    assert len(project.data_index) == 0
+    assert 'not in the data index' not in _render(project, name)
+
+
+def test_an_empty_test_is_listed_and_names_no_file(tmp_path):
+    path = tmp_path / 'article.vdlog'
+    with writer(path) as log:
+        model.open_test(log, author='AB', test_kind='Random Vibration',
+                        header=HEADER)
+    project = Project('P')
+    name = project.add('Report', Report('Report', [], features=['data_index']))
+    held = project.attach_run_log(path)
+    assert project.index_run_log_files(held) == [
+        ('The run log names no file in test 1 by entry #1; nothing is '
+         'indexed.')]
+    page_text = _render(project, name)
+    assert _log_table(page_text)['rows'][0][2] == 'entry #1'
+    assert rdi.EMPTY in page_text
+    assert 'not in the data index' not in page_text

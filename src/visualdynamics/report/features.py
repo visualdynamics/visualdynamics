@@ -201,7 +201,8 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
         'Every file the report rests on, with what it holds, its format, '
         'size and SHA-256, checked again at export; attached documents '
         'with their checksums, a small text or CSV attachment printed '
-        'whole; and the analysis recipe.'),
+        'whole; and the analysis recipe. A run log brought into the project '
+        "adds its test's head hash and the files its entries name."),
     ReportFeature(
         'calibration_in_date', 'Calibration in date', 'Records',
         "Whether each channel's sensor was in calibration on the test "

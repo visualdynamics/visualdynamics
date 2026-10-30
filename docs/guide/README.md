@@ -192,7 +192,8 @@ that is not an alpha.
 
 - [The run log file](run-log.md): what happened on the floor, entry by
   entry, corrected without editing, each test's entries chained by
-  hash, kept by one writer with a second copy
+  hash, kept by one writer with a second copy, and exported as text,
+  CSV and the machine log
 
 ## Reports
 

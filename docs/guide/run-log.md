@@ -194,3 +194,37 @@ lab's share or the data folder. A mirror that cannot be written (the
 share is away) is reported in `log.mirror_problem` and never costs the
 entry its place in the log itself; when the mirror can be written
 again, the whole log is copied there, so it catches up.
+
+## Exports
+
+The `.vdlog` is its own JSON export, and the one format the log is read
+back from. Three views are written out from it
+(`visualdynamics.core.run_log_export`), each for the whole log, one
+test (`test=1`), or the entries between tests (`test=None`):
+
+- **Plain text** (`to_text`), for printing or attaching to a report:
+  every entry in the order written, with its time and offset, author,
+  login and machine, place and fields. A corrected entry is marked
+  `[CORRECTED by #4]`, and the correction says what it changed and
+  what the value was (`stop: power loss (was amplifier trip)`); a late
+  entry is marked with when it was entered, and an entry under a clock
+  check with its time on the recorders' clock. The lines that could not
+  be read, the chains' heads and what verifying found close it.
+- **CSV** (`to_csv`): a row per entry as stored, corrections included,
+  with `corrected_by` and `corrects` columns, a `late` column, the time
+  on the recorders' clock, and the fields as JSON.
+- **The machine log** (`machine_log_csv`): the entries a lab's own
+  machine log keeps (trips and aborts, setting changes, clock checks,
+  people in and out, restarts, and the tests opened and closed, which
+  say what was running), corrected, one row each: the local date,
+  time and UTC offset, the recorders' time, the event in words, its
+  details, the test and its title, the axis and run, the author, the
+  entry's id, and whether a correction changed it.
+
+```python
+from visualdynamics.core import run_log_export
+
+run_log_export.export(log, 'article-7', 'text')          # article-7.txt
+run_log_export.export(log, 'test-1', 'csv', test=1)      # test-1.csv
+run_log_export.export(log, 'machine', 'machine')         # machine.csv
+```

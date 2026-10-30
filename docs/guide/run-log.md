@@ -35,6 +35,90 @@ with RunLog.create('article-7.vdlog', title='Article 7',
 opens any log read-only. `log.view()` is the corrected view;
 `log.entries` is every entry as stored, corrections included.
 
+## The Run Log window
+
+**File > Run Log** opens the log in a dock at the side of the main
+window. Like the project tree it can be dragged to another edge, and
+it can also be floated out to a window of its own on a second monitor;
+it opens next time where it was left. The log keeper is not the person
+at the controller, so the dock belongs on the keeper's own computer, or
+on a monitor that does not cover the control screens.
+
+The window is drawn in large type, to be read from across the room.
+
+- **The status strip** across the top reads the current test, its axis,
+  run and level, whether the run is running or stopped and how it
+  stopped, in words, the time since the run started, and the holds,
+  counted. **Holds** lists them. A log open read-only says who holds it,
+  and a mirror that could not be written says so here.
+- **The tests** are a strip of tabs, the whole log first, so an earlier
+  test is a click away. A keeper looking at the current test follows
+  it to the next one when the log rolls.
+- **The day** lists every entry in the order written under its date. A
+  corrected entry is shown as it was written, struck through, with the
+  correction beneath it saying what changed and what the value was; a
+  late entry is marked with when it was entered.
+- **The owed lists** beside the day show every line still owed. They are
+  shown, never enforced.
+
+Every entry needs its author's initials, typed once into **Initials**;
+**Axis** holds the axis the next run is on. Each act takes its event
+time when it starts, not when it is written: a form when it opens, the
+level row at its first keystroke. A form's event time can be changed
+for an event entered late.
+
+**The level row** is one entry for each step of the step-up. Its level
+is offered from the test header's step schedule, the next step after
+the last one written in the run, and the voltage, current and drive
+fraction follow in tab order, then the analyst's answer, the answers by
+channel (`12: not explained, 4: as predicted`), the go, and who agreed a
+go at a hold point. **Enter** in any box writes the row, and the next
+step is offered. As the row is typed, the projection to full level is
+shown beneath it, each check that cannot be made saying why:
+
+    -12 dB, factor 3.981 to full level: not judged
+      drive fraction: not judged: no drive fraction was read
+      peak current: 752.4 A at full level, within the peak current rating of 800 A (94%)
+      peak voltage: not judged: no voltage was read
+
+**The abort** is one key, **Ctrl+Shift+A**, which works while typing
+anywhere in the dock. The event time is taken at the key, and the form
+it opens needs only the kind of stop; **Enter** writes the run stop and
+the abort together, both at that time. The channel, the line or band,
+the panel fault, the counter, who called the stop, what was heard, the
+records read and the over-test answer can be written then or later, by
+correction; what is left blank is listed as owed.
+
+The rest are small forms on the dock's bar, each written with **Enter**
+and put away with **Esc**:
+
+| Act | Key | Writes |
+|---|---|---|
+| Abort | Ctrl+Shift+A | a run stop and an abort |
+| Run Start | Ctrl+Shift+R | the run's start, with its level and counter |
+| Run Stop | Ctrl+Shift+S | a stop that is not an abort |
+| Note | Ctrl+Shift+N | a note |
+| Clock Check | Ctrl+Shift+K | the recorders' clock less this computer's |
+| Person In, Person Out | Ctrl+Shift+I, Ctrl+Shift+O | who came or went, and their role |
+| Cause Found | Ctrl+Shift+C | the cause of an abort, the latest unanswered offered |
+| Correct | | a correction of the entry picked in the day |
+| Open Test, Roll | | a test opened, or the roll to the next with the header carried |
+| Close Test, Release | | a test closed to runs, or released |
+| New Log, Open Log, Close Log | | the file: closing releases it for another writer |
+| Level Row | Ctrl+Shift+L | back to the level row |
+
+Every key has a modifier, so none is taken from a box being typed into.
+The test forms ask for the header fields the level row reads (the step
+schedule, the hold points, sigma, the current ratings and the rail);
+the rest of a header is written with a header change.
+
+A log already open for writing in another Visual Dynamics, or elsewhere,
+opens read-only, and the strip names who holds it; **Reload** reads
+what its writer has added since. Each entry is written, synced and
+mirrored on a thread of its own, and the model is read again there
+after each one, so the keeper never waits for the disk, a mirror on a
+slow share or a file being hashed before typing the next entry.
+
 ## The file
 
 A `.vdlog` is JSON Lines: UTF-8 text, one JSON object per line, readable

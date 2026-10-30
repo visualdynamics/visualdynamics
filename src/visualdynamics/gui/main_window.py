@@ -1684,6 +1684,9 @@ class MainWindow(QMainWindow):
         # itself, editable — created on first use, Chromium is heavy
         self.report_editor: Any = None
         self._table_layout = table_layout
+        #: the Run Log dock (`gui.run_log_dock`), built the first time it
+        #: is asked for
+        self.run_log_dock: Any = None
         # the splitter takes the height going spare; without the
         # stretch the button bar below it claimed an even share and
         # stood a quarter of the window tall
@@ -2115,6 +2118,9 @@ class MainWindow(QMainWindow):
         # a run cut to a stretch and written back, nothing else changed
         # (Brandon, 2026-10-13)
         file_menu.addAction('&Truncate Rattlesnake File…', self.truncate_rattlesnake_file)
+        # the run log kept on the floor while a test runs, in a dock that
+        # floats to a second monitor (gui/run_log_dock.py)
+        file_menu.addAction('Run &Log', self.show_run_log)
         file_menu.addSeparator()
         # light, dark, or the platform's choice, remembered between
         # launches: a Linux desktop Qt could not read left a friend of
@@ -3190,6 +3196,11 @@ class MainWindow(QMainWindow):
         # destroyed is the gate's stall (ReportEditor.stand_down)
         if self.report_editor is not None:
             self.report_editor.stand_down()
+        # the run log: its place remembered, every entry already given
+        # written, and its lock released, before the dock goes
+        if self.run_log_dock is not None:
+            self._remember_run_log_place()
+            self.run_log_dock.panel.shut_down()
         plotters = [self.scene.built_plotter, self.data_pane.waterfall_plotter,
                     self._mac_bars_plotter_obj]
         self.scene.plotter = None
@@ -3200,6 +3211,50 @@ class MainWindow(QMainWindow):
                 with contextlib.suppress(Exception):  # never block closing
                     plotter.close()
         super().closeEvent(event)
+
+    # ---- the run log ---------------------------------------------------------
+
+    def show_run_log(self, path: str | None = None) -> Any:
+        """Show the Run Log dock, built the first time and put back where
+        it was last left, and return it.
+
+        `path` names a log: one that exists is opened (read-only, saying
+        who holds it, when another program is writing it); one that does
+        not is offered to the New Log form, written only when the keeper
+        confirms it.
+        """
+        import os
+
+        from .run_log_dock import RunLogDock, restore_place
+
+        dock = self.run_log_dock
+        if dock is None:
+            dock = self.run_log_dock = RunLogDock(self)
+            restore_place(dock, self)
+            dock.topLevelChanged.connect(self._run_log_moved)
+            dock.dockLocationChanged.connect(self._run_log_moved)
+        dock.show()
+        dock.raise_()
+        if path is not None:
+            if os.path.exists(path):
+                dock.panel.open_log(path)
+            else:
+                form = dock.panel.open_form('new log')
+                if form is not None:
+                    form.set_box('path', path)
+        return dock
+
+    def _run_log_moved(self, *_where) -> None:
+        self._remember_run_log_place()
+
+    def _remember_run_log_place(self) -> None:
+        """Store where the Run Log dock is."""
+        from .run_log_dock import remember_place
+
+        dock = self.run_log_dock
+        if dock is None or dock.placing:
+            return
+        remember_place(dock, self.dockWidgetArea(dock))
 
     # ---- project management -------------------------------------------------
 

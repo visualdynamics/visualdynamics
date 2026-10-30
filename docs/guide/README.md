@@ -193,7 +193,8 @@ that is not an alpha.
 - [The run log file](run-log.md): what happened on the floor, entry by
   entry, corrected without editing, each test's entries chained by
   hash, kept by one writer with a second copy, and exported as text,
-  CSV and the machine log
+  CSV and the machine log; the controller's output folder watched, its
+  files proposed for the run and put into the report's data index
 
 ## Reports
 

@@ -53,8 +53,9 @@ kind, its event time (when the thing happened) and its entered-at time
 (when it was written down), each with its date and its UTC offset, the
 author's typed initials, the computer's login and machine name, the
 test, axis and run it belongs to (any of them absent), the fields of
-its kind, free text, the files it names by SHA-256, and its two links
-in its test's chain.
+its kind, free text, the files it names by SHA-256 (each with its name
+and size, and when known its format, what it holds and where it was),
+and its two links in its test's chain.
 
 Each entry is written, flushed and synced to the disk before the call
 that wrote it returns, so a crash, a pulled plug or a killed program
@@ -228,3 +229,91 @@ run_log_export.export(log, 'article-7', 'text')          # article-7.txt
 run_log_export.export(log, 'test-1', 'csv', test=1)      # test-1.csv
 run_log_export.export(log, 'machine', 'machine')         # machine.csv
 ```
+
+## Controller files
+
+A controller writes its records into an output folder as the test
+runs: a run's stream, its spectra, its settings. The log can watch that
+folder and **propose** each file that appears, for the run that was
+current when it appeared. Nothing is attached until the log keeper
+accepts the proposal; a proposal turned down leaves nothing in the log.
+
+```python
+from visualdynamics.core import run_log_files as rf
+
+watch = rf.ControllerWatch('D:/controller/output')
+watch.start()                       # looks every 2 s on its own thread
+...
+for found in watch.take():          # proposals and problems so far
+    if isinstance(found, rf.Proposal):
+        rf.accept(log, found, author='AB')
+watch.stop()
+```
+
+A file is hashed only once it has **settled**: its size and modification
+time unchanged for five seconds (`settle_s`), seen on at least two looks,
+since a file still being written would hash to a value its finished
+bytes do not have. A file that changes while it is hashed waits to settle
+again, and one removed before it settles is forgotten. Hashing reads at
+most 32 MB a second (`rate`), because the file is on the controller's own
+disk or share while the next run writes there. The files already in the
+folder when the watch begins are earlier runs and are not proposed
+(`existing=True` proposes them too). When a test closes,
+`watch.archive()` (in the window, `ask_archive()`) hashes everything seen
+and not yet hashed, settled or not.
+
+The folders are listed every two seconds (`poll_s`) whether or not
+anything says they changed, since a network share often sends no notice
+of a change; a notice only makes the next look come sooner
+(`watch.poke()`). The looking and the hashing run on a thread of the
+watch's own that never holds up typing in the log. A folder named that
+does not exist is refused with its path; one that goes away later (a
+share that drops) is reported once and looked for again at each poll,
+and a file that cannot be read is reported once and tried again.
+
+Each proposal carries the file as a data index records it: its name,
+path, size, SHA-256, **format** and what it **holds**, read through Visual
+Dynamics' own importers. A Rattlesnake run gives its kind, channels,
+sample rate and time stream from its dimensions alone, so a run of any
+size is described without reading its data; another format an importer
+reads is read whole up to 64 MB; and the run, axis and level the file's
+name gives are added. A file nothing recognizes is kept with the format
+`unknown`, by name, size and SHA-256; it is never refused.
+
+| A file in the folder | Format | Holds |
+|---|---|---|
+| `shock_Z_run1.nc4` | Rattlesnake controller output (.nc4) | Rattlesnake transient run; 7 channels, 101Z+ to 1Z+; 8192 Hz; time stream 2.8158 s; run 1, axis Z (from its name) |
+| `notes.qqq` | unknown | not read: no importer recognizes its format; it is recorded by name, size and SHA-256 |
+
+### The stream against the counter
+
+`rf.check_stream(log, proposal)` compares a Rattlesnake stream's length
+with the time the run's entries counted: the last counter written at
+the run's stop or abort less the counter at its start. A counter is
+typed as `1:02:03`, `12:30`, `750 s` or `12.5 min`. The stream runs from
+the controller's start to its stop, ramps included, so it is somewhat
+longer than the counter; a difference of more than 30 s either way
+(`tolerance_s`) is reported to the log keeper as a finding, shorter
+("the stream may not hold the whole run") or longer ("more than the 30 s
+allowed for its ramps"). Set the tolerance to what the ramps, and any
+lower levels run inside the same run, take. Nothing is refused, and when
+nothing can be compared (a spectral save with no time stream, a run with
+no counter at its stop) the check says so and is not a pass.
+
+### Into the report's data index
+
+```python
+rf.index_run_log(project.data_index, log, tests=[1],
+                 search=['E:/archive/article-7'])
+```
+
+puts each file the log names into the project's data index, with the
+size and SHA-256 the log recorded, so nothing is hashed twice; the
+index's check before a report is issued hashes each one again and says
+whether it still matches. A file is looked for where it was hashed,
+then by name in each `search` folder, then beside the log; one found
+nowhere is listed as missing. The log's own file goes into the index as
+a run log that holds each test's head hash, so the report's record of
+data carries the anchor that `log.verify(heads=...)` checks the log
+against. The data index is the project's one index of files: the log
+writes into it rather than keeping one of its own.

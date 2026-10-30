@@ -144,16 +144,15 @@ _DOCUMENT_FORMATS = {
 }
 
 
-def format_of(path: str | os.PathLike) -> str:
-    """The name of a file's format, as a data index prints it.
+def known_format(path: str | os.PathLike) -> str | None:
+    """The name of a file's format when Visual Dynamics knows it, or
+    None.
 
-    A Visual Dynamics file is named as one. A document the record carries
-    beside its data (a settings list, a log, a scanned procedure) is
-    named by its kind, from its suffix. Any other file an importer
-    recognizes is named by that importer's description ('Rattlesnake
-    controller output (.nc4)'), and an unknown file by its suffix. A
-    sniffer that trips over the file is not its format, so this does
-    not raise for a readable path.
+    Known are a Visual Dynamics file, a document the record carries
+    beside its data, named by its kind from its suffix, and any file an
+    importer recognizes, named by that importer's description. A sniffer
+    that trips over the file is not its format, so this does not raise
+    for a readable path. `format_of` is this with a name for the rest.
     """
     path = str(path)
     suffix = os.path.splitext(path)[1].lower()
@@ -167,6 +166,25 @@ def format_of(path: str | os.PathLike) -> str:
                 return imp.description
         except Exception:  # noqa: BLE001, S112 — a sniffer that trips says no
             continue
+    return None
+
+
+def format_of(path: str | os.PathLike) -> str:
+    """The name of a file's format, as a data index prints it.
+
+    A Visual Dynamics file is named as one. A document the record carries
+    beside its data (a settings list, a log, a scanned procedure) is
+    named by its kind, from its suffix. Any other file an importer
+    recognizes is named by that importer's description ('Rattlesnake
+    controller output (.nc4)'), and an unknown file by its suffix
+    (`known_format` says which were known). A sniffer that trips over
+    the file is not its format, so this does not raise for a readable
+    path.
+    """
+    known = known_format(path)
+    if known is not None:
+        return known
+    suffix = os.path.splitext(str(path))[1].lower()
     return f'{suffix[1:].upper()} file ({suffix})' if suffix else 'file'
 
 
@@ -437,6 +455,7 @@ __all__ = [
     'from_sep005',
     'import_file',
     'importers',
+    'known_format',
     'load',
     'native',
     'project_type_of',

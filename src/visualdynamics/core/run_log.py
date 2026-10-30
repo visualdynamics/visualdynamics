@@ -231,11 +231,21 @@ class RunLogLocked(RunLogError):
 @dataclass(frozen=True)
 class FileRef:
     """A file an entry names: its name, its SHA-256 as 64 lower-case hex
-    digits, and its size in bytes when known."""
+    digits, and its size in bytes when known.
+
+    `format`, `holds` and `path` say, when known, the file's format,
+    what it holds (its run and channels) and where it was when it was
+    hashed, in the words a data index records them
+    (`data_index.IndexEntry`), so the log's files go into a report's
+    data index as they are. Each is left out of the file when empty.
+    """
 
     name: str
     sha256: str
     size: int | None = None
+    format: str = ''
+    holds: str = ''
+    path: str = ''
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -248,12 +258,19 @@ class FileRef:
                 or self.size < 0):
             raise RunLogError(f'{self.name}: a size is a whole number of '
                               f'bytes, not {self.size!r}')
+        for label in ('format', 'holds', 'path'):
+            if not isinstance(getattr(self, label), str):
+                raise RunLogError(f'{self.name}: its {label} is text, not '
+                                  f'{getattr(self, label)!r}')
 
     def to_dict(self) -> dict[str, Any]:
         """The file as the log stores it."""
         stored: dict[str, Any] = {'name': self.name, 'sha256': self.sha256}
         if self.size is not None:
             stored['size'] = self.size
+        for label in ('format', 'holds', 'path'):
+            if getattr(self, label):
+                stored[label] = getattr(self, label)
         return stored
 
 
@@ -623,7 +640,8 @@ def _entry_v1(stored: Mapping[str, Any], line: int) -> Entry:
         if not isinstance(item, Mapping):
             raise RunLogError('a file it names is not a mapping')
         files.append(FileRef(item.get('name'), item.get('sha256'),
-                             item.get('size')))
+                             item.get('size'), item.get('format') or '',
+                             item.get('holds') or '', item.get('path') or ''))
     corrects = stored.get('corrects')
     if corrects is not None:
         _reference(corrects, 'corrected entry')

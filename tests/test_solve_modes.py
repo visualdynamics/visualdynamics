@@ -247,18 +247,41 @@ def test_the_panes_two_numbers_solve_and_show_the_modes(window, pump):
             'damping=0.015)') in window.project.journal
 
 
-def test_the_pane_asks_for_a_count_and_no_frequency(window, pump):
-    """The highest frequency came off the pane (Brandon, 2026-10-30):
-    reaching it took the sparse solve several passes, and a count is
-    one. The count includes the rigid-body modes."""
-    from PySide6.QtWidgets import QLabel
-
+def test_the_pane_solves_to_a_count_or_a_frequency_showing_one(window, pump):
+    """A number of modes or every mode up to a frequency, as the solve
+    takes either (Brandon, 2026-10-31; the frequency was off the pane for
+    a day while reaching it took the sparse solve several passes). Only
+    the chosen limit's row shows, and a count is the default."""
     window.add_object('Skin', _plate_geometry())
     select_objects(window, pump, 'Skin')
     panel = _modes(window, pump)
-    names = [label.text() for label in panel.fem_section.findChildren(QLabel)]
-    assert 'Modes' in names and 'Highest frequency' not in names
+    names = panel._limit_names
+    assert panel.limit_box.currentData() == 'count'
+    assert panel.count_box.isVisibleTo(panel) and names['count'].isVisibleTo(panel)
+    assert not panel.top_box.isVisibleTo(panel)
+    assert not names['frequency'].isVisibleTo(panel)
+    assert panel.limit() == {'num_modes': 30}
     assert 'rigid-body' in panel.count_box.toolTip()
+
+    panel.limit_box.setCurrentIndex(panel.limit_box.findData('frequency'))
+    pump()
+    assert panel.top_box.isVisibleTo(panel) and names['frequency'].isVisibleTo(panel)
+    assert not panel.count_box.isVisibleTo(panel)
+    assert not names['count'].isVisibleTo(panel)
+    assert panel.limit() == {'maximum_frequency': 2000.0}
+    panel.top_box.setValue(800.0)
+    panel.solve_button.click()
+    pump()
+    shapes = window.project['Skin Modes']
+    assert shapes.frequency.max() <= 800.0
+    more = window.project[window.project.solve_modes('Skin', num_modes=40)]
+    assert more.frequency.max() > 800.0
+    assert int(np.sum(more.frequency <= 800.0)) == shapes.num_shapes, \
+        'every mode up to the frequency, no fewer'
+    assert ("project.solve_modes('Skin', maximum_frequency=800.0, "
+            'damping=0.02)') in window.project.journal
+    assert window.statusBar().currentMessage().startswith(
+        f'Skin Modes: {shapes.num_shapes} modes to ')
 
 
 def test_a_group_without_properties_is_named_before_the_solve(window, pump):

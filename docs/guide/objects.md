@@ -239,12 +239,14 @@ saved in the `.vdyn` file. *Solve Modes* (`project.solve_modes`) then
 builds the model from the element groups (`fem.Model.from_geometry`)
 and adds its normal modes to the geometry's group. It is in the Modes
 pane: turn on *Modes* on the 3-D view's bar, choose *Finite element*
-(offered once the element groups have properties), and set the number
-of modes wanted, rigid-body modes included, and the damping to give
-every mode. The lowest modes are solved, in one pass, and the status
-bar says the highest frequency reached. A script can ask for every mode
-up to a frequency instead (`maximum_frequency=`); the modes below it are
-counted first, so that is one pass too. The pane counts the nodes, elements and
+(offered once the element groups have properties), and set how far to
+solve and the damping to give every mode. *Solve to* is either a
+*Number of modes*, the lowest that many with the rigid-body modes
+included, or a *Highest frequency*, every mode up to it; the status bar
+says how many modes were solved and the highest frequency reached. A
+script passes `num_modes=` or `maximum_frequency=`. Either way the
+solve is one pass: for a frequency, the modes below it are counted
+first. The pane counts the nodes, elements and
 DOFs to be solved, and names any element group still without
 properties. The model is free-free unless
 ground groups hold it, and a free-free solution has its six rigid-body

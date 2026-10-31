@@ -184,6 +184,21 @@ out, and the status line says so. This is how a target written on the
 Specification sheet, which always has its limit bands, becomes a CPSD
 to generate a signal or predict a response from.
 
+A specification on frequency lines converts as it is. One written at
+breakpoints is read onto evenly spaced lines first, since a density to
+drive or predict with is read line by line. *Convert to PSD* then opens
+a pane beside the plot with the **Spacing** of the lines. It opens at
+the spacing the specification's sheet remembers, and blank when there
+is none. The plot previews the result, the pane counts the breakpoints
+and the lines, and **Generate** converts it. The reading is the same as
+the sheet's *Interpolated* form: each channel on its power law between
+breakpoints, the lines at multiples of the spacing over the range the
+breakpoints cover. A cross term that changes with frequency is refused,
+because the reading keeps one coherence and phase per pair. From a
+script, `project.convert_to_psd(name, spacing=5.0)`; without
+`spacing`, the remembered one is used, and with none remembered the
+conversion is refused rather than guessed.
+
 ## The test level
 
 A run is often recorded below the level the specification states, at

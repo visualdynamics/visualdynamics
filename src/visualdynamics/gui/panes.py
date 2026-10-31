@@ -50,6 +50,7 @@ from .field_limit_panel import FieldLimitPanel
 from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
 from .instrumentation_panel import InstrumentationPanel
+from .lines_panel import LinesPanel
 from .mate_panel import MatePanel
 from .matrix_check_panel import ConditioningPanel, RealizabilityPanel
 from .matrix_comparison_panel import MatrixComparisonPanel
@@ -579,6 +580,10 @@ class DataPane(QWidget):
         # set, previewed beside the plot (Compute Modal Responses)
         self.modal_response_panel: ModalResponsePanel = ModalResponsePanel()
         self.modal_response_panel.hide()
+        # a specification at breakpoints read onto lines, previewed
+        # beside the plot (Convert to PSD/CPSD)
+        self.lines_panel: LinesPanel = LinesPanel()
+        self.lines_panel.hide()
         plot_row = QHBoxLayout()
         plot_row.setContentsMargins(0, 0, 0, 0)
         plot_row.setSpacing(0)
@@ -598,6 +603,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.author_split, 1)
         plot_row.addWidget(self.signal_panel)
         plot_row.addWidget(self.modal_response_panel)
+        plot_row.addWidget(self.lines_panel)
         plot_row.addWidget(self.averaging_panel)
         plot_row.addWidget(self.shock_panel)
         plot_row.addWidget(self.filter_panel)

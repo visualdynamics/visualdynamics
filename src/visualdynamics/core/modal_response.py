@@ -377,8 +377,8 @@ def modal_response_density(density: Psd, shapes: ShapeSet, *,
         raise ValueError('the density is written at breakpoints: a mode '
                          'answers line by line, and the modes between '
                          'breakpoints would be missed. Read it onto lines '
-                         'first, at a frequency spacing (the '
-                         "specification sheet's Interpolated form)")
+                         'first, at a frequency spacing: Convert to CPSD '
+                         'on the specification it came from')
     forces = modal_force_density(density, shapes, records)
     names = modal_dofs(shapes)
     entries = {(forces.response_dof[i], forces.reference_dof[i]): i

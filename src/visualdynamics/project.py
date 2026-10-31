@@ -4963,11 +4963,17 @@ class Project(dict):
         self[name] = obj.as_specification()
         return name
 
-    def convert_to_psd(self, name: Any) -> str:
+    def convert_to_psd(self, name: Any, spacing: float | None = None) -> str:
         """Convert a specification to a plain PSD or CPSD, under its own
         name. This undoes `convert_to_specification`, and makes a
         target written on the Specification sheet a CPSD to drive or
         predict with.
+
+        A specification on lines converts as it is. One written at
+        breakpoints is read onto evenly spaced lines at `spacing`, the
+        sheet's own reading (`core.author.read_onto_lines`), since a
+        density to drive or predict with is read line by line: one
+        value at each breakpoint would miss everything between them.
 
         A PSD cannot hold warning and abort limits, so a specification's
         limits are left out; asking for the conversion is asking for
@@ -4978,18 +4984,64 @@ class Project(dict):
         ----------
         name : str or Specification
             The specification.
+        spacing : float, optional
+            The line spacing in Hz, for a specification at breakpoints.
+            Defaults to the spacing its sheet remembers
+            (`remembered_spacing`); with neither, ValueError is raised,
+            since the spacing is not guessed. Given for a specification
+            already on lines, ValueError is raised.
 
         Returns
         -------
         str
             Its name.
         """
+        # the spacing is chosen here (Brandon, 2026-10-30): a breakpoint
+        # CPSD reached Compute Modal Responses and was answered at four
+        # breakpoints alone
+        from .core.author import read_onto_lines
+
         name = self.name_of(name)
         obj = self[name]
         if not isinstance(obj, Specification):
             raise TypeError(f'{name} is not a specification')
-        self[name] = obj.as_psd(drop_limits=True)
+        if obj.interpolation == 'bin':
+            if spacing is not None:
+                raise ValueError(f'{name} is already on lines; it converts '
+                                 'as it is, with no spacing')
+            self[name] = obj.as_psd(drop_limits=True)
+            return name
+        if spacing is None:
+            spacing = self.remembered_spacing(name)
+        if spacing is None:
+            raise ValueError(f'{name} is written at breakpoints: give the '
+                             'frequency spacing of the lines to read it onto')
+        self[name], _notes = read_onto_lines(obj, float(spacing))
         return name
+
+    def remembered_spacing(self, name: Any) -> float | None:
+        """The frequency spacing the specification's sheet remembers, in
+        Hz: the spacing of its lines form, or of the lines it was opened
+        from. None when it has none, such as a specification imported at
+        breakpoints.
+
+        Parameters
+        ----------
+        name : str or Specification
+            The specification.
+
+        Returns
+        -------
+        float or None
+            The spacing.
+        """
+        from .core.author import uniform_spacing
+
+        name = self.name_of(name)
+        draft = (self.provenance.get(name) or {}).get('params', {}).get('draft')
+        if isinstance(draft, dict) and draft.get('spacing'):
+            return float(draft['spacing'])
+        return uniform_spacing(getattr(self[name], 'abscissa', []))
 
     def scale_family(self, measured: Any) -> list[str]:
         """The measured PSDs that share one comparison scale: the object

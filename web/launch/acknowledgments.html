@@ -30,7 +30,7 @@
   <header><h1>Acknowledgments</h1></header>
 
   <p class="lede">
-    Two people have written the code in Visual Dynamics. Many more
+    Three people have written the code in Visual Dynamics. Many more
     gave it ideas, and this page thanks them.
   </p>
 
@@ -47,6 +47,12 @@
     replication read segment by segment, the classical pulse check, the
     sweep rate against the modes, the signature comparison, the
     replication fit, the stroke readout and the dwell.
+  </p>
+  <p>
+    Matt McDowell made the sparse eigensolution faster: a solve up to a
+    frequency counts the modes below it first and solves once, numpy's
+    and scipy's BLAS thread pools no longer compete while it runs, and
+    the solver checks for converged modes less often.
   </p>
 
   <h2>Ideas and inspiration</h2>

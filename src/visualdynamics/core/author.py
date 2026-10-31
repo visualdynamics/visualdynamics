@@ -62,7 +62,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
     from .breakpoints import BreakpointReading
     from .channel_table import ChannelTable
-    from .data import Specification
+    from .data import Psd, Specification
     from .shapes import ShapeSet
 
 # One draft for every way in and out (Brandon, 2026-09-04: a generic
@@ -1914,6 +1914,65 @@ def _helper_lines(frequencies: Any) -> list[float]:
     helper = np.zeros(len(f), dtype=bool)
     helper[:-1] = np.diff(f) < 1e-5 * f[1:]
     return [float(v) for v in f[helper]]
+
+
+def read_onto_lines(spec: Specification, spacing: float
+                    ) -> tuple[Psd, list[str]]:
+    """A specification written at breakpoints, read onto evenly spaced
+    lines as a PSD or CPSD to drive or predict with.
+
+    The reading is the specification sheet's own: the specification is
+    opened as a sheet (`SpecificationDraft.from_specification`), read
+    onto lines at `spacing` (`SpecificationDraft.to_lines`, each
+    channel on its power law between breakpoints, the lines multiples
+    of the spacing over the range the breakpoints cover) and made. The
+    warning and abort limits are left out, as a PSD cannot hold them.
+
+    Parameters
+    ----------
+    spec : Specification
+        The specification, at breakpoints.
+    spacing : float
+        The line spacing in Hz.
+
+    Returns
+    -------
+    tuple of (Psd, list of str)
+        The density on lines, read as a density per line
+        (`interpolation` 'bin'), and the sheet's notes (lines left out at
+        0 Hz, an end breakpoint off the grid).
+
+    Raises
+    ------
+    ValueError
+        When a cross term varies with frequency (the sheet holds one
+        coherence and phase per pair, so it would be lost), or as
+        `from_specification` and `to_lines`.
+    """
+    draft = SpecificationDraft.from_specification(spec)
+    references = spec.reference_dof or list(spec.response_dof)
+    present = {frozenset((spec.response_dof[i], references[i]))
+               for i in range(spec.num_records)
+               if spec.response_dof[i] != references[i]}
+    lost = [f'{draft.channels[a]}–{draft.channels[b]}'
+            for (a, b), entry in draft.pairs.items()
+            if entry is None
+            and frozenset((draft.channels[a], draft.channels[b])) in present]
+    if lost:
+        raise ValueError(
+            f'{len(lost)} cross term{"s" * (len(lost) != 1)} vary with '
+            f'frequency ({lost[0]}' + (f' and {len(lost) - 1} more'
+                                       if len(lost) > 1 else '')
+            + '), and reading onto lines keeps one coherence and phase '
+            'per pair')
+    lines = draft.to_lines(spacing)
+    made = lines.make(f'read onto {float(spacing):g} Hz lines')
+    psd = made.as_psd(drop_limits=True)
+    # a density per line, however few the lines: `make` leaves the
+    # reading to `Specification.reading_of`, which calls a short grid
+    # breakpoints, and a breakpoint reading is what this is to end
+    psd.interpolation = 'bin'
+    return psd, list(lines.notes)
 
 
 def uniform_spacing(frequencies: Any) -> float | None:

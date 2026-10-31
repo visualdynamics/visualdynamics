@@ -126,9 +126,9 @@ the case of drives that are not correlated. A density that holds only
 autospectra at several drives is refused, as Transform refuses it. A
 density on octave bands is refused too, since a mode's response
 changes across a band, and so is a density written at breakpoints,
-since the modes between two breakpoints would be missed. Read a
-breakpoint specification onto lines first, at a frequency spacing (the
-specification sheet's *Interpolated* form).
+since the modes between two breakpoints would be missed. *Convert to
+CPSD* on a breakpoint specification reads it onto lines at a spacing
+you set.
 
 The pane shows the number of frequency lines instead of samples, and
 the plot previews each mode's response autospectrum. **Compute** makes

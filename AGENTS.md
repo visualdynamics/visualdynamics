@@ -83,8 +83,7 @@ something that cannot be bought back.
 
 ## Branches
 
-The repository holds no working branches: `main`, `cla-signatures`
-(the record of a retired contributor agreement), the publishing
+The repository holds no working branches: `main`, the publishing
 branches, the merge queue's own temporary branches and, should a
 backport ever be needed, `maintenance/X.Y.x`.
 A ruleset refuses the creation of anything else, the maintainers

@@ -289,7 +289,11 @@ A file another program wrote is read by its standard fields: nodes,
 lines, elements and per-node axes (a node with its own axes gets a
 coordinate system), records with their units, frequencies and shapes,
 and activities as named object groups. A type the specifications do
-not define is left out with a note. The reader and writer were checked
+not define is left out with a note. A data object here shares one
+abscissa across its records, so a dataset whose rows each carry their
+own and do not agree is read as one object per abscissa, named `Run`,
+`Run (2)` and so on, with a note. A shorter row padded out with
+non-finite values is read to its own length. The reader and writer were checked
 against the format's reference implementation in both directions, and
 the specification files that define the types ship inside the package.
 A file is written as `.h5`, the container's suffix, which is how the

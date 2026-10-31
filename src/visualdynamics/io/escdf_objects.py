@@ -723,7 +723,32 @@ def _split_ratio(unit: str) -> tuple[str, str | None]:
     return left, right
 
 
-def _data_from(dataset: escdf.Dataset) -> DataArray:
+def _axis_groups(abscissa: np.ndarray) -> list[tuple[list[int], np.ndarray]]:
+    """The rows that share an abscissa, each group with its abscissa.
+
+    A two-dimensional abscissa gives each row its own. Rows of different
+    lengths are padded out to one width, so each row's abscissa is read
+    up to its first value that is not finite, and rows group when those
+    agree."""
+    if abscissa.ndim == 1:
+        return [([], abscissa)]
+    groups: list[tuple[list[int], np.ndarray]] = []
+    for row, values in enumerate(abscissa):
+        finite = np.isfinite(values)
+        length = int(np.argmin(finite)) if not finite.all() else len(values)
+        axis = values[:length]
+        for rows, shared in groups:
+            if len(shared) == len(axis) and np.allclose(shared, axis):
+                rows.append(row)
+                break
+        else:
+            groups.append(([row], axis))
+    return groups
+
+
+def _data_from(dataset: escdf.Dataset) -> list[DataArray]:
+    """The data objects a data dataset holds: one, or one per abscissa
+    when its rows are on different ones."""
     v = dataset.values
     data_type = str(v.get('data_type', 'spectrum'))
     cls = _CLASSES.get(data_type, Spectrum)
@@ -732,16 +757,20 @@ def _data_from(dataset: escdf.Dataset) -> DataArray:
     reference = [str(c) for c in channel[:, 1]] if channel.shape[1] > 1 else None
     ordinate = np.asarray(v['ordinate'])
     if 'abscissa' in v:
-        abscissa = np.asarray(v['abscissa'], dtype=np.float64)
-        if abscissa.ndim == 2:
-            if not np.allclose(abscissa, abscissa[0]):
-                warnings.warn(ImportNote(f'{dataset.name}: each row has its own '
-                                         'abscissa; the first row\'s is used for '
-                                         'all'), stacklevel=2)
-            abscissa = abscissa[0]
+        # A data object shares one abscissa across its records, so rows
+        # on different ones are one object each, as the UNV reader
+        # splits them. They were put on the first row's abscissa, with
+        # a note, and every other row's samples sat at the wrong times
+        # (Brandon, 2026-10-30).
+        groups = _axis_groups(np.asarray(v['abscissa'], dtype=np.float64))
+        if len(groups) > 1:
+            warnings.warn(ImportNote(
+                f'{dataset.name}: its rows are on {len(groups)} different '
+                f'abscissas, so it is read as {len(groups)} objects'),
+                stacklevel=2)
     else:
         start, step = float(v['abscissa_start']), float(v['abscissa_step'])
-        abscissa = start + step * np.arange(ordinate.shape[1])
+        groups = [([], start + step * np.arange(ordinate.shape[1]))]
     units = [u.replace('^', '**') for u in _strings(v.get('ordinate_unit'))]
     units = units * ordinate.shape[0] if len(units) == 1 else units
     reference_units: list[str | None] | None = None
@@ -764,7 +793,7 @@ def _data_from(dataset: escdf.Dataset) -> DataArray:
         dimension = 'time' if cls in (TimeHistory,) else 'frequency'
         try:
             scale, offset = si_transform(abscissa_unit, dimension)
-            abscissa = abscissa * scale + offset
+            groups = [(rows, axis * scale + offset) for rows, axis in groups]
         except UnitError as failure:
             warnings.warn(ImportNote(f'{dataset.name}: abscissa_unit '
                                      f'{abscissa_unit!r} was not understood '
@@ -780,32 +809,40 @@ def _data_from(dataset: escdf.Dataset) -> DataArray:
     if cls in (TimeHistory, Spectrum, Srs) and reference is not None \
             and all(r == q for r, q in zip(response, reference)):
         reference = None
-    if reference is not None:
-        kwargs['reference_dof'] = reference
-    if cls is MultipleCoherence:
-        kwargs.pop('reference_dof', None)
-    try:
-        data = cls(abscissa, ordinate, response, **kwargs)
-    except (TypeError, ValueError) as failure:
-        warnings.warn(ImportNote(f'{dataset.name}: read as a spectrum, not '
-                                 f'{data_type!r} ({failure})'), stacklevel=2)
-        data = Spectrum(abscissa, ordinate, response)
-    # declared, not merely named: the values are in the file's units,
-    # and declaring them is what converts them to SI and shows them
-    # (a first cut named them and the app showed them undefined —
-    # Brandon, 2026-09-30). A unit the registry does not know leaves
-    # that record undefined, with a note.
-    declared = [u or None for u in units]
-    if any(declared):
+
+    def built(rows: list[int], abscissa: np.ndarray) -> DataArray:
+        rows = rows or list(range(ordinate.shape[0]))
+        values = ordinate[rows][:, :len(abscissa)]
+        responses = [response[i] for i in rows]
+        own = dict(kwargs)
+        if reference is not None and cls is not MultipleCoherence:
+            own['reference_dof'] = [reference[i] for i in rows]
         try:
-            data.define_units(declared, reference_units if reference_units
-                              and any(reference_units) else None)
-        except Exception as failure:  # noqa: BLE001 — a unit nobody spells
-            spelled = sorted({u for u in declared if u})
-            warnings.warn(ImportNote(f'{dataset.name}: units {spelled} '
-                                     f'were not understood ({failure}); left '
-                                     'undefined'), stacklevel=2)
-    return data
+            data = cls(abscissa, values, responses, **own)
+        except (TypeError, ValueError) as failure:
+            warnings.warn(ImportNote(f'{dataset.name}: read as a spectrum, not '
+                                     f'{data_type!r} ({failure})'), stacklevel=3)
+            data = Spectrum(abscissa, values, responses)
+        # declared, not merely named: the values are in the file's
+        # units, and declaring them is what converts them to SI and
+        # shows them (a first cut named them and the app showed them
+        # undefined — Brandon, 2026-09-30). A unit the registry does
+        # not know leaves that record undefined, with a note.
+        declared = [units[i] or None for i in rows] if units else []
+        if any(declared):
+            theirs = ([reference_units[i] for i in rows]
+                      if reference_units else None)
+            try:
+                data.define_units(declared, theirs if theirs and any(theirs)
+                                  else None)
+            except Exception as failure:  # noqa: BLE001 — a unit nobody spells
+                spelled = sorted({u for u in declared if u})
+                warnings.warn(ImportNote(f'{dataset.name}: units {spelled} '
+                                         f'were not understood ({failure}); '
+                                         'left undefined'), stacklevel=3)
+        return data
+
+    return [built(rows, axis) for rows, axis in groups]
 
 
 def _shapes_from(dataset: escdf.Dataset) -> ShapeSet:
@@ -863,28 +900,31 @@ def _photos_from(dataset: escdf.Dataset) -> Photos:
     return Photos(stems, formats, images)
 
 
-def _object_from(dataset: escdf.Dataset) -> Any | None:
+def _objects_from(dataset: escdf.Dataset) -> list[Any]:
+    """The objects a dataset holds: one, none when its type is not
+    one the specifications define, or several for data whose rows are
+    on different abscissas."""
     whole = _whole_object(dataset)
     if whole is not None:
-        return whole
+        return [whole]
     spec = dataset.specification
     if spec is None:
         warnings.warn(ImportNote(f'{dataset.name}: type {dataset.kind!r} is not one '
                                  'the specifications define; left out'), stacklevel=2)
-        return None
+        return []
     if spec.is_a('geometry'):
-        return _geometry_from(dataset)
+        return [_geometry_from(dataset)]
     if spec.is_a('channel_table'):
-        return _channel_table_from(dataset)
+        return [_channel_table_from(dataset)]
     if spec.is_a('data'):
         return _data_from(dataset)
     if spec.is_a('mode'):
-        return _shapes_from(dataset)
+        return [_shapes_from(dataset)]
     names = _strings(dataset.values.get('attachment_names'))
     if names and all(n.lower().rpartition('.')[2] in ('png', 'jpg', 'jpeg', 'gif', 'bmp')
                      for n in names):
-        return _photos_from(dataset)
-    return None
+        return [_photos_from(dataset)]
+    return []
 
 
 def from_file(file: escdf.File) -> Project:
@@ -920,24 +960,24 @@ def from_file(file: escdf.File) -> Project:
                 (target.update if isinstance(target, dict) else target.extend)(loaded)
     display = {v: k for k, v in settings.get('names', {}).items()}
     objects: dict[str, Any] = {}
-    kept: dict[str, str] = {}                 # dataset name -> object name
+    kept: dict[str, list[str]] = {}           # dataset name -> object names
+
+    def add(name: str, dataset: escdf.Dataset) -> None:
+        label = display.get(name) or dataset.descriptive_name or name
+        for count, obj in enumerate(_objects_from(dataset), start=1):
+            # a dataset split by abscissa: 'Run', 'Run (2)', as UNV's
+            own = label if count == 1 else f'{label} ({count})'
+            while own in objects:
+                own += ' (2)'
+            objects[own] = obj
+            kept.setdefault(name, []).append(own)
+
     for name, dataset in file.metadata.items():
-        if name == PROJECT_RECORD:
-            continue
-        obj = _object_from(dataset)
-        if obj is not None:
-            label = display.get(name) or dataset.descriptive_name or name
-            objects[label] = obj
-            kept[name] = label
+        if name != PROJECT_RECORD:
+            add(name, dataset)
     for activity in file.activities.values():
         for name, dataset in activity.data.items():
-            obj = _object_from(dataset)
-            if obj is not None:
-                label = display.get(name) or dataset.descriptive_name or name
-                while label in objects:
-                    label += ' (2)'
-                objects[label] = obj
-                kept[name] = label
+            add(name, dataset)
     # in the order the project held them, when the file says; a
     # foreign file's order is its own
     order = [display[k] for k in settings.get('names', {}).values() if k in display]
@@ -950,8 +990,8 @@ def from_file(file: escdf.File) -> Project:
         project.object_groups = Project('x', object_groups=links_record).object_groups
     else:
         for activity in file.activities.values():
-            members = [kept[n] for n in list(activity.data) + list(activity.links)
-                       if n in kept]
+            members = [label for n in list(activity.data) + list(activity.links)
+                       for label in kept.get(n, [])]
             if len(members) >= 2:
                 project.link(*members, name=activity.descriptive_name or activity.name)
     return project

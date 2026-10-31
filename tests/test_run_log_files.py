@@ -754,8 +754,14 @@ def test_a_poke_looks_at_once(tmp_path):
         # the thread's own first look can land after the write, and then
         # this poke settles the file at once: pending or already proposed
         assert wait_for(lambda: watch.pending or got), 'a poke, a look'
-        watch.poke()
-        assert wait_for(lambda: got), 'another, and it is settled'
+        # Poked until it settles, not poked once: a look can list a.dat
+        # inside write_bytes, at size 0, and two pokes made before the
+        # thread clears its wake flag are one look, which finds the size
+        # changed and starts the settling over. With an hour's poll
+        # nothing looked again, and main failed on 3.12 that way after
+        # #260 (2026-10-30); in use the next poll settles it.
+        assert wait_for(lambda: watch.poke() or got), \
+            'another look, and it is settled'
         (folder / 'b.dat').write_bytes(b'b')
         watch.ask_archive()
         assert wait_for(lambda: len(got) == 2)

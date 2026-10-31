@@ -1579,6 +1579,11 @@ class MainWindow(QMainWindow):
             self._modal_quantity_chosen)
         self.data_pane.modal_response_panel.apply_asked.connect(
             self._modal_apply)
+        #: the Convert to PSD/CPSD pane while it is open on a
+        #: specification at breakpoints: its name and the spacing set
+        self._lining: dict | None = None
+        self.data_pane.lines_panel.changed.connect(self._lines_spacing_chosen)
+        self.data_pane.lines_panel.apply_asked.connect(self._lines_apply)
         #: the replication fit last read, as (record, its samples, the
         #: inputs, the fit): a cutoff column picked only changes the
         #: case drawn, and reading the fit again was 0.23 s of filters
@@ -10448,14 +10453,17 @@ class MainWindow(QMainWindow):
         replicating = bool(series) and self._replication_found(series)
         signaling = self._signal_door()
         modaling = self._modal_door()
+        lining = self._lines_door()
         authoring = (None if signaling is not None or modaling is not None
+                     or lining is not None
                      else self._authoring(shapes, geometries, series, channels))
         # no 3-D view in edit mode (Brandon, 2026-09-06): every editing
         # gesture is on the flat plot, so the stage stands down while
         # the sheet is open and comes back when it closes
         self.data_pane.flat_only = (authoring is not None
                                     or signaling is not None
-                                    or modaling is not None)
+                                    or modaling is not None
+                                    or lining is not None)
         # a lone set's transformation is drawn on its geometry, which
         # comes up above the tables (Brandon, 2026-10-23)
         self._values_on = (self._values_geometry(shapes[0][0], shapes[0][1])
@@ -10555,6 +10563,8 @@ class MainWindow(QMainWindow):
             parts.append(self._render_signal())
         if modaling is not None:
             parts.append(self._render_modal())
+        if lining is not None:
+            parts.append(self._render_lines())
         if authoring is not None:
             parts.append(self._render_author(authoring))
             if authoring[0] == 'table':
@@ -19348,8 +19358,9 @@ class MainWindow(QMainWindow):
         element groups' properties, and add the mode set to the
         geometry's object group.
 
-        The number of modes to solve for and the damping to give every
-        mode are the Modes pane's, finite element kind."""
+        How far to solve (a number of modes or a highest frequency) and
+        the damping to give every mode are the Modes pane's, finite
+        element kind."""
         # The two numbers were asked in two dialogs until the pane took
         # them (Brandon, 2026-10-22).
         obj = self.current_object()
@@ -19358,13 +19369,15 @@ class MainWindow(QMainWindow):
                               'properties (the Element Groups table) to solve')
             return
         panel = self.scene.modes_panel
-        count, percent = panel.num_modes(), panel.damping() * 100.0
+        limit, percent = panel.limit(), panel.damping() * 100.0
+        solving = (f'Solving for {limit["num_modes"]} modes…'
+                   if 'num_modes' in limit else
+                   f'Solving modes to {limit["maximum_frequency"]:g} Hz…')
         acted = self._act_on(
             Geometry, 'Select a geometry to solve',
             lambda name, **options: self._run_long(
-                f'Solving for {count} modes…', self.project.solve_modes,
-                name, **options),
-            num_modes=count, damping=percent / 100.0)
+                solving, self.project.solve_modes, name, **options),
+            **limit, damping=percent / 100.0)
         if acted is None:
             return
         name, _geometry, added = acted
@@ -19393,6 +19406,21 @@ class MainWindow(QMainWindow):
         under the same name, its limits left out
         (`Project.convert_to_psd`)."""
         obj = self.current_object()
+        if isinstance(obj, Specification) and obj.interpolation != 'bin':
+            # at breakpoints: the spacing is chosen in a pane first
+            # (Brandon, 2026-10-30)
+            name = self.project.name_of(obj)
+            if self._lining is not None and self._lining['name'] == name:
+                self.close_lines_pane()
+                return
+            self._author_wanted = False
+            self._signaling = self._modaling = None
+            self.data_pane.signal_panel.hide()
+            self.data_pane.modal_response_panel.hide()
+            self._lining = {'name': name,
+                            'spacing': self.project.remembered_spacing(name)}
+            self.render_current()
+            return
         kind = ('CPSD' if isinstance(obj, Psd) and not obj.is_autospectrum()
                 else 'PSD')
         said = f'converted to a {kind}'
@@ -19401,6 +19429,93 @@ class MainWindow(QMainWindow):
         self._read_as('convert_to_psd',
                       'Select a specification to convert to a PSD',
                       self.project.convert_to_psd, said)
+
+    def close_lines_pane(self) -> None:
+        """Put the Convert to PSD/CPSD pane away."""
+        self._lining = None
+        self.data_pane.lines_panel.hide()
+        self.render_current()
+
+    def _lines_door(self):
+        """The pane's state while it is open and its specification is
+        still the one selected; otherwise None, and the pane put away."""
+        if self._lining is None:
+            return None
+        name = self._lining['name']
+        # one pane beside the plot at a time: another opened puts this away
+        if (self._sole_selected_name() != name or name not in self.objects
+                or not isinstance(self.objects[name], Specification)
+                or self._signaling is not None or self._modaling is not None):
+            self._lining = None
+            self.data_pane.lines_panel.hide()
+            return None
+        return self._lining
+
+    def _render_lines(self) -> str:
+        """The pane beside a preview: the specification read onto lines
+        at the spacing set, or the breakpoints alone until one is."""
+        from ..core.author import read_onto_lines
+
+        name, spacing = self._lining['name'], self._lining['spacing']
+        spec = self.objects[name]
+        kind = 'PSD' if spec.is_autospectrum() else 'CPSD'
+        panel = self.data_pane.lines_panel
+        panel.show_settings(f'Convert to {kind}', spacing)
+        panel.show()
+        f = np.asarray(spec.abscissa, dtype=float)
+        span = f'{f[0]:g} – {f[-1]:g} Hz'
+        if not spacing:
+            panel.show_reading(breakpoints=str(f.size), span=span,
+                               note='Set the frequency spacing of the lines',
+                               ready=False)
+            return f'{name}: set the frequency spacing to read it onto lines'
+        try:
+            lines, notes = read_onto_lines(spec, spacing)
+        except ValueError as why:
+            panel.show_reading(breakpoints=str(f.size), span=span,
+                               note=f'Cannot convert: {why}', ready=False)
+            return f'{name}: {why}'
+        panel.show_reading(breakpoints=str(f.size), span=span,
+                           lines=f'{len(lines.abscissa):,}',
+                           note='; '.join(notes))
+        status = self._render_series([(f'{name} on {spacing:g} Hz lines',
+                                       lines, None)])
+        said = (f'{name} read onto {len(lines.abscissa):,} lines at '
+                f'{spacing:g} Hz')
+        return said + (f' | {status}' if status else '')
+
+    def _lines_spacing_chosen(self, spacing: float) -> None:
+        if self._lining is not None:
+            self._lining['spacing'] = spacing or None
+            self.render_current()
+
+    def _lines_apply(self, spacing: float) -> None:
+        """Generate: the project's verb at the spacing set, and the
+        pane put away."""
+        if self._lining is None or not spacing:
+            return
+        name = self._lining['name']
+        spec = self.objects[name]
+        kind = 'PSD' if spec.is_autospectrum() else 'CPSD'
+        limits = spec.has_limits
+        try:
+            self.project.convert_to_psd(name, spacing=spacing)
+        except (ValueError, TypeError) as why:
+            self._show_status(f'{name}: {why}')
+            return
+        self._lining = None
+        self.data_pane.lines_panel.hide()
+        item = self._item_for_object(name)
+        if item is not None:
+            self._refresh_item(item, self.objects[name])
+        self._report_content_changed()
+        self.render_current()
+        lines = len(self.objects[name].abscissa)
+        self._show_status(
+            f'{name} converted to a {kind} on {lines:,} lines at '
+            f'{spacing:g} Hz'
+            + (' — its warning and abort limits were left out'
+               if limits else ''))
 
     def _read_as(self, verb_name, refusal, verb, said) -> None:
         """Swap the selected object for its other reading, under the

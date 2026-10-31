@@ -369,3 +369,63 @@ def test_a_file_is_written_as_h5_unless_it_names_another_suffix(tmp_path):
     for path in tmp_path.iterdir():
         assert escdf.read(path).problems() == []
         assert set(visualdynamics.Project.open(path)) == set(project)
+
+
+def test_rows_on_different_abscissas_are_one_object_each(tmp_path):
+    """A data object shares one abscissa, so rows on different ones are
+    an object each, as the UNV reader splits them. They were all put on
+    the first row's abscissa, with a note, and every other row's samples
+    sat at the wrong times (Brandon, 2026-10-30). A shorter row padded
+    out with NaN is read to its own length."""
+    nan = np.nan
+    file = escdf.File(created_by='x')
+    run = escdf.Dataset('r', 'data', 'Run')
+    run.values = {
+        'data_type': 'time response',
+        'channel': np.array([['1X+'], ['2X+'], ['3X+'], ['4X+']]),
+        'ordinate_unit': np.array(['g', 'g', 'N', 'g'], dtype=object),
+        'abscissa_unit': 'ms',
+        'abscissa': np.array([[0.0, 10.0, 20.0, 30.0],
+                              [0.0, 20.0, 40.0, 60.0],
+                              [0.0, 10.0, 20.0, 30.0],
+                              [5.0, 15.0, 25.0, nan]]),
+        'ordinate': np.array([[1.0, 2.0, 3.0, 4.0],
+                              [5.0, 6.0, 7.0, 8.0],
+                              [9.0, 10.0, 11.0, 12.0],
+                              [13.0, 14.0, 15.0, nan]])}
+    file.activities['a'] = escdf.Activity('a', 'Test', data={'r': run})
+    path = tmp_path / 'rows.escdf'
+    escdf.write(file, path)
+    with pytest.warns(ImportNote, match='rows are on 3 different abscissas'):
+        project = escdf_objects.load(path)
+    shared, slow, short = project['Run'], project['Run (2)'], project['Run (3)']
+    assert shared.response_dof == ['1X+', '3X+']
+    np.testing.assert_allclose(shared.abscissa, [0.0, 0.01, 0.02, 0.03])
+    np.testing.assert_allclose(shared.ordinate[1], [9.0, 10.0, 11.0, 12.0])
+    assert shared.ordinate_unit == ['g', 'N'], 'each row keeps its own unit'
+    assert shared.ordinate[0, 0] == pytest.approx(9.80665)
+    assert slow.response_dof == ['2X+']
+    np.testing.assert_allclose(slow.abscissa, [0.0, 0.02, 0.04, 0.06])
+    np.testing.assert_allclose(slow.ordinate[0] / 9.80665, [5.0, 6.0, 7.0, 8.0])
+    assert short.response_dof == ['4X+']
+    np.testing.assert_allclose(short.abscissa, [0.005, 0.015, 0.025])
+    np.testing.assert_allclose(short.ordinate[0] / 9.80665, [13.0, 14.0, 15.0])
+    group = next(g for g in project.object_groups if g.get('name') == 'Test')
+    assert set(group['members']) == {'Run', 'Run (2)', 'Run (3)'}
+
+
+def test_rows_on_one_abscissa_given_per_row_are_one_object(tmp_path):
+    file = escdf.File(created_by='x')
+    run = escdf.Dataset('r', 'data', 'Run')
+    run.values = {'data_type': 'time response',
+                  'channel': np.array([['1X+'], ['2X+']]),
+                  'ordinate_unit': 'g', 'abscissa_unit': 's',
+                  'abscissa': np.tile(np.arange(4) * 0.01, (2, 1)),
+                  'ordinate': np.ones((2, 4))}
+    file.activities['a'] = escdf.Activity('a', 'Test', data={'r': run})
+    path = tmp_path / 'same.escdf'
+    escdf.write(file, path)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        project = escdf_objects.load(path)
+    assert list(project) == ['Run'] and project['Run'].num_records == 2

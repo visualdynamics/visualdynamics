@@ -15,8 +15,9 @@ the six terms of the inertia tensor about that point. The view previews
 the six shapes on the geometry as they are set, and the button at the
 bottom makes the shape set (`generate_rigid_body_modes`).
 
-Finite element: the settings are the number of modes to solve for,
-rigid-body modes included, and the damping to give every mode. A solve is too slow to preview as the
+Finite element: the settings are how far to solve, either a number of
+modes (rigid-body modes included) or every mode up to a frequency, and
+the damping to give every mode. A solve is too slow to preview as the
 numbers change, so the readings say what will be solved (the nodes,
 elements, element groups and DOFs) and refuse a group with no
 properties before the solve does; the button solves (`solve_modes`).
@@ -44,7 +45,12 @@ from PySide6.QtWidgets import (
 
 from ..core.rigid import INERTIA_TERMS, MassProperties, axis_name
 from .editors import LENGTH_DECIMALS, DoubleSpinBox, SpinBox, commit_on_enter
-from .settings_panel import add_derived, add_rule, add_settings, panel_grid
+from .settings_panel import (
+    add_derived,
+    add_keyed_settings,
+    add_rule,
+    panel_grid,
+)
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.geometry import Geometry
@@ -54,9 +60,10 @@ if TYPE_CHECKING:                                    # pragma: no cover
 INERTIA_DIMENSION = 'mass*length**2'
 
 #: the solve's settings as the pane opens: a free model's six rigid-body
-#: modes and two dozen flexible ones, and the damping Solve Modes asked
-#: for by default when it asked in two dialogs
+#: modes and two dozen flexible ones, the frequency and the damping
+#: Solve Modes asked for by default when it asked in two dialogs
 DEFAULT_NUM_MODES = 30
+DEFAULT_MAXIMUM_FREQUENCY = 2000.0
 DEFAULT_DAMPING_PERCENT = 2.0
 
 
@@ -218,17 +225,32 @@ class ModesPanel(QWidget):
         will be solved, and the button."""
         section = QWidget()
         grid = _section_grid(section)
-        # A count, not the highest frequency (Brandon, 2026-10-30): to
-        # reach a frequency the sparse solve guessed a count, doubled it
-        # and solved again until the last mode passed it, and its last
-        # pass overshot. The 243-mode drone took 4.3 s that way and
-        # 1.4 s asked for its count, which is always one solve.
+        # A count or a frequency, as `Model.eigensolution` takes either
+        # (Brandon, 2026-10-31). The frequency came off the pane on
+        # 2026-10-30 because reaching it took the sparse solve several
+        # passes (the 243-mode drone 4.3 s against 1.4 s by count); it
+        # came back once the modes below a frequency were counted
+        # first, which makes it one pass as well.
+        self.limit_box: QComboBox = QComboBox()
+        self.limit_box.addItem('Number of modes', 'count')
+        self.limit_box.addItem('Highest frequency', 'frequency')
+        self.limit_box.setToolTip(
+            'Solve for the lowest number of modes, or for every mode up to '
+            'a frequency')
+        self.limit_box.currentIndexChanged.connect(self._show_limit)
         self.count_box: SpinBox = SpinBox()
         self.count_box.setRange(1, 100_000)
         self.count_box.setValue(DEFAULT_NUM_MODES)
         self.count_box.setToolTip(
             'How many modes to solve for, the lowest ones, rigid-body '
             'modes included: a free model has six at 0 Hz')
+        self.top_box: DoubleSpinBox = DoubleSpinBox()
+        self.top_box.setDecimals(1)
+        self.top_box.setRange(0.1, 1e9)
+        self.top_box.setValue(DEFAULT_MAXIMUM_FREQUENCY)
+        self.top_box.setSuffix(' Hz')
+        self.top_box.setToolTip('Solve for every mode up to this frequency, '
+                                'rigid-body modes included')
         self.damping_box: DoubleSpinBox = DoubleSpinBox()
         self.damping_box.setDecimals(2)
         self.damping_box.setRange(0.0, 100.0)
@@ -237,25 +259,38 @@ class ModesPanel(QWidget):
         self.damping_box.setToolTip(
             'The damping to give every mode, in percent of critical. A '
             'finite element model has none of its own')
-        add_settings(grid, (('Modes', self.count_box),
-                            ('Damping', self.damping_box)), 0)
-        commit_on_enter(self.count_box, self.damping_box)
-        add_rule(grid, 2)
+        self._limit_names, _editors = add_keyed_settings(
+            grid, (('limit', 'Solve to', self.limit_box),
+                   ('count', 'Modes', self.count_box),
+                   ('frequency', 'Frequency', self.top_box),
+                   ('damping', 'Damping', self.damping_box)), 0)
+        commit_on_enter(self.count_box, self.top_box, self.damping_box)
+        add_rule(grid, 4)
         self.fem_derived: dict[str, QLabel] = {}
         derived = (('nodes', 'Nodes'), ('elements', 'Elements'),
                    ('groups', 'Element groups'), ('dofs', 'DOFs'))
-        for key, (_name, value) in add_derived(grid, derived, 3).items():
+        for key, (_name, value) in add_derived(grid, derived, 5).items():
             self.fem_derived[key] = value
         self.fem_problem: QLabel = QLabel('')
         self.fem_problem.setWordWrap(True)
-        grid.addWidget(self.fem_problem, 7, 0, 1, 2)
+        grid.addWidget(self.fem_problem, 9, 0, 1, 2)
         self.solve_button: QPushButton = QPushButton('Solve Modes')
         self.solve_button.setToolTip(
-            "Solve for the lowest normal modes and make them "
-            "a shape set in the geometry's group")
+            "Solve for the normal modes and make them a shape set in the "
+            "geometry's group")
         self.solve_button.clicked.connect(self.solve_asked.emit)
-        grid.addWidget(self.solve_button, 8, 0, 1, 2)
+        grid.addWidget(self.solve_button, 10, 0, 1, 2)
+        self._show_limit()
         return section
+
+    def _show_limit(self, *_args) -> None:
+        """Show the row the chosen limit reads, the count or the
+        frequency, and not the other (principle 3)."""
+        by_count = self.limit_box.currentData() == 'count'
+        self._limit_names['count'].setVisible(by_count)
+        self.count_box.setVisible(by_count)
+        self._limit_names['frequency'].setVisible(not by_count)
+        self.top_box.setVisible(not by_count)
 
     # ---- which kind -------------------------------------------------------
 
@@ -311,9 +346,13 @@ class ModesPanel(QWidget):
             self.fem_problem.setText('')
         self.solve_button.setEnabled(not missing and nodes > 0)
 
-    def num_modes(self) -> int:
-        """How many modes to solve for, rigid-body modes included."""
-        return int(self.count_box.value())
+    def limit(self) -> dict[str, float | int]:
+        """How far to solve, as the solve's keyword: ``num_modes``, how
+        many modes, rigid-body modes included, or ``maximum_frequency``,
+        the highest frequency in Hz."""
+        if self.limit_box.currentData() == 'count':
+            return {'num_modes': int(self.count_box.value())}
+        return {'maximum_frequency': float(self.top_box.value())}
 
     def damping(self) -> float:
         """The damping to give every mode, as a fraction of critical."""

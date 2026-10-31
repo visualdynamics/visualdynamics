@@ -243,8 +243,8 @@ pane: turn on *Modes* on the 3-D view's bar, choose *Finite element*
 of modes wanted, rigid-body modes included, and the damping to give
 every mode. The lowest modes are solved, in one pass, and the status
 bar says the highest frequency reached. A script can ask for every mode
-up to a frequency instead (`maximum_frequency=`); on a large model that
-takes several passes, so a count is faster. The pane counts the nodes, elements and
+up to a frequency instead (`maximum_frequency=`); the modes below it are
+counted first, so that is one pass too. The pane counts the nodes, elements and
 DOFs to be solved, and names any element group still without
 properties. The model is free-free unless
 ground groups hold it, and a free-free solution has its six rigid-body

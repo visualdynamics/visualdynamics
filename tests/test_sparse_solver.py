@@ -11,6 +11,8 @@ the sparse one has: the search up to a frequency, and the refusals.
 
 from __future__ import annotations
 
+import itertools
+import math
 import warnings
 
 import numpy as np
@@ -584,11 +586,12 @@ def test_the_sparse_solve_holds_each_blas_pool_to_a_quarter_of_the_cpus(monkeypa
     before, seen, after = _pools_during_the_solve(monkeypatch)
     assert seen == [[1] * len(before)], 'one thread a pool on four CPUs'
     assert after == before, 'the pools are given back'
-    with fem.blas_threads() as threads:
-        assert threads == 1
-    monkeypatch.setattr(fem.os, 'cpu_count', lambda: 400)
-    with fem.blas_threads() as threads:
-        assert threads == fem.BLAS_MOST_THREADS
+    # the rule by value: a quarter of the logical CPUs, at least one and
+    # at most eight
+    for cpus, quarter in ((4, 1), (20, 5), (31, 7), (400, 8), (None, 1)):
+        monkeypatch.setattr(fem.os, 'cpu_count', lambda cpus=cpus: cpus)
+        with fem.blas_threads() as threads:
+            assert threads == quarter, cpus
 
 
 def test_a_thread_count_the_user_set_is_left_alone(monkeypatch):
@@ -692,3 +695,32 @@ def test_the_count_is_predicted_from_how_the_modes_grow():
     assert predicted_count(solid, 199.5 ** (2.0 / 3.0)) == 200
     assert predicted_count(np.concatenate([np.zeros(6), k[:7]]), 1e6) is None
     assert predicted_count(bar, 1.0) == len(bar) + 1, 'never fewer than found'
+
+
+def test_the_lanczos_reads_its_pairs_once_it_can_then_every_twentieth_of_growth(monkeypatch):
+    """No Ritz step before the basis holds the modes asked for, then one
+    each time the basis has grown by LANCZOS_CHECK_GROWTH since the last,
+    on the next block after it is due. Enough modes that a twentieth of
+    the basis is more than a block, so reading after every block would
+    show."""
+    import scipy.linalg
+
+    from visualdynamics.demo import plate
+
+    sizes = []
+    eigh = scipy.linalg.eigh
+
+    def spy(matrix, *args, **kwargs):
+        if not args and not kwargs:         # the Lanczos' own, of H alone
+            sizes.append(matrix.shape[0])
+        return eigh(matrix, *args, **kwargs)
+
+    monkeypatch.setattr(scipy.linalg, 'eigh', spy)
+    plate.build().eigensolution(num_modes=300, solver='sparse')
+    asked = 300 + fem.LANCZOS_GUARD
+    assert sizes and sizes[0] >= asked
+    assert sizes[0] < asked + fem.LANCZOS_BLOCK, 'the first read once it can'
+    for before, after in itertools.pairwise(sizes):
+        due = before + max(1, math.ceil(fem.LANCZOS_CHECK_GROWTH * before))
+        assert due <= after < due + fem.LANCZOS_BLOCK, (before, after)
+    assert len(sizes) >= 3 and sizes[1] - sizes[0] > fem.LANCZOS_BLOCK, sizes

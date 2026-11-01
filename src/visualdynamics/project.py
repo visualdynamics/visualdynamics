@@ -5271,6 +5271,7 @@ class Project(dict):
                             name or f'{source} Modes')
 
     def project_onto_basis(self, source: str, *, onto: str | None = None,
+                           channels: Iterable[int] | None = None,
                            tolerance: float = 0.02,
                            name: str | None = None) -> str:
         """Sample a shape set at the Basis shape set's DOFs, or at a
@@ -5285,8 +5286,10 @@ class Project(dict):
         target's group. A channel table as the target puts a model's
         modes at a test's sensors and drives before there are test modes
         to compare with: its channels' DOFs, on the geometry the table
-        answers to. With no target, or the source or the target without
-        a geometry, this raises ValueError.
+        answers to. `channels` narrows a channel table to some of its
+        rows, such as the drives alone; each row's values are the same as
+        in the projection onto the whole table. With no target, or the
+        source or the target without a geometry, this raises ValueError.
 
         Parameters
         ----------
@@ -5295,13 +5298,19 @@ class Project(dict):
         onto : str, optional
             The shape set or channel table to project onto. Defaults to
             the shape set in the project's Basis.
+        channels : iterable of int, optional
+            Rows of the channel table `onto` (0-based, the table's
+            order) whose DOFs are the target. Rows with no node or
+            direction are skipped. Every row when omitted.
         tolerance : float, default 0.02
             How far the nearest node may be, as a fraction of the Basis
             geometry's extent (the largest distance of a node from the
             nodes' mean position).
         name : str, optional
             What to call the result. Defaults to the source's name
-            followed by '@ Basis DOFs', or by '@' and the table's name.
+            followed by '@ Basis DOFs', or by '@' and the table's name,
+            with the number of channels in parentheses when `channels`
+            picks some.
 
         Returns
         -------
@@ -5317,12 +5326,34 @@ class Project(dict):
             # Brandon, 2026-10-29: the BARC's FE modes at its test
             # geometry's sensors took a placeholder shape set by script.
             # Only the DOFs are read from the target
-            dofs = list(dict.fromkeys(d for d in self[onto].dof_strings() if d))
+            labels = self[onto].dof_strings()
+            if channels is None:
+                rows = range(len(labels))
+            else:
+                # the twelve drives picked in the table's grid beside the
+                # FE modes (Brandon, 2026-10-31, the band-average BARC):
+                # the same projection, at those rows' DOFs alone
+                rows = list(dict.fromkeys(int(row) for row in channels))
+                outside = [row for row in rows
+                           if not 0 <= row < len(labels)]
+                if outside:
+                    raise ValueError(f'{onto} has {len(labels)} channels; '
+                                     f'rows {outside} are not among them')
+            dofs = list(dict.fromkeys(labels[row] for row in rows
+                                      if labels[row]))
             if not dofs:
-                raise ValueError(f'{onto} has no channel with a node and '
-                                 'direction')
+                raise ValueError(
+                    f'{onto} has no channel with a node and direction'
+                    if channels is None else
+                    'none of the picked channels has a node and direction')
             target = ShapeSet([], [], dofs, np.zeros((0, len(dofs))))
-            name = name or f'{source} @ {onto}'
+            used = sum(1 for row in rows if labels[row])
+            name = name or (f'{source} @ {onto}' if channels is None else
+                            f'{source} @ {onto} ({used} channel'
+                            f'{"" if used == 1 else "s"})')
+        elif channels is not None:
+            raise ValueError('channels picks rows of a channel table; '
+                             f'{onto or "the Basis"} is not one')
         else:
             target = None
         basis = ((onto, target if target is not None else self[onto])
@@ -5559,6 +5590,80 @@ class Project(dict):
         export_file(self[name], str(path), unit_system=unit_system,
                     **kwargs)
         return str(path)
+
+    def export_state_space(self, shapes: Any, table: Any,
+                           path: str | os.PathLike, *,
+                           maximum_frequency: float | None = None,
+                           rigid_frequency: float = 1.0,
+                           unit_system: Any = None) -> Any:
+        """Write a shape set at a channel table's channels as a modal
+        state-space model, the file Rattlesnake's state-space virtual
+        hardware loads (Export State Space).
+
+        The table's reference rows are the inputs, each a force at its
+        DOF, and every row is an output, in table order, in its own unit
+        (`core.state_space`). The file matches that table row for row,
+        so it is written for the whole table.
+
+        Parameters
+        ----------
+        shapes : str or object
+            The shape set: real, mass-normalized, with a mass unit.
+        table : str or object
+            The channel table.
+        path : str or os.PathLike
+            Where to write the `.npz`.
+        maximum_frequency : float, optional
+            Modes at or above this frequency, in Hz, are left out. For a
+            controller, its Nyquist frequency, since a mode above it
+            aliases into the band. Every mode is kept when omitted.
+        rigid_frequency : float, default 1.0
+            Modes below this frequency, in Hz, are moved up to it, so a
+            rigid-body mode does not drift through a long run.
+        unit_system : UnitSystem or str, optional
+            The units for a channel whose unit cell is blank, or the
+            name of one of `units.SYSTEMS`. SI when omitted.
+
+        Returns
+        -------
+        StateSpaceModel
+            The model written: its matrices, the rows' DOFs and units,
+            and how many modes were lifted and left out.
+
+        Raises
+        ------
+        TypeError
+            If `shapes` is not a shape set or `table` not a channel table.
+        ValueError
+            As `core.state_space.state_space_model`.
+        """
+        # Brandon, 2026-10-31: run Rattlesnake synthetically on the
+        # RC-on-plate model. Its FRF hardware inverse-transforms the FRF
+        # to a periodic impulse response, which folds any resonance cut
+        # off at Nyquist back around in time; the state-space hardware
+        # integrates the model and carries its state, so nothing folds.
+        from .core.state_space import state_space_model
+        from .io.rattlesnake_state_space import save
+
+        set_name, table_name = self.name_of(shapes), self.name_of(table)
+        if not isinstance(self[set_name], ShapeSet):
+            raise TypeError(f'{set_name!r} is not a shape set')
+        if not isinstance(self[table_name], ChannelTable):
+            raise TypeError(f'{table_name!r} is not a channel table')
+        if isinstance(unit_system, str):
+            # by name, so the journal's line replays: a UnitSystem
+            # object has no source text
+            from .units import SYSTEMS
+
+            if unit_system not in SYSTEMS:
+                raise ValueError(f'no unit system is named {unit_system!r}')
+            unit_system = SYSTEMS[unit_system]
+        model = state_space_model(self[set_name], self[table_name],
+                                  maximum_frequency=maximum_frequency,
+                                  rigid_frequency=rigid_frequency,
+                                  unit_system=unit_system)
+        save(model, path)
+        return model
 
     def generate_report(self, template: str = 'modal',
                         name: str = 'Report', marking: str | None = None,
@@ -9048,6 +9153,14 @@ def _two_sets_on_two_geometries(project, objects):
             and homes[0][1] is not homes[1][1])
 
 
+def _set_and_table(objects):
+    """One real shape set and one channel table, wherever they live."""
+    sets = [o for o in objects if isinstance(o, ShapeSet)]
+    tables = [o for o in objects if isinstance(o, ChannelTable)]
+    return (len(objects) == 2 and len(sets) == 1 and len(tables) == 1
+            and not sets[0].is_complex)
+
+
 def _set_and_table_apart(project, objects):
     """A shape set and a channel table, each answering to its own
     geometry: the model's modes put at the test's channels."""
@@ -9103,6 +9216,9 @@ _SELECTION_APPLIES: tuple = (
                                          or _set_and_table_apart(p, o))),
     ('match_modes', lambda p, o: (len(o) == 2 and all(
         isinstance(x, ShapeSet) for x in o))),
+    # a shape set at a channel table's channels, for Rattlesnake's
+    # state-space hardware (Brandon, 2026-10-31)
+    ('export_state_space', lambda p, o: _set_and_table(o)),
     ('merge', _mergeable),
 )
 
@@ -9182,7 +9298,7 @@ _JOURNALED_VERBS = (
     'report_finding', 'draft_finding_fact', 'report_flash',
     'report_requirement', 'draft_finding_from_requirement',
     'draft_findings_from_run_log', 'accept_logged_finding',
-    'export', 'save', 'duplicate',
+    'export', 'export_state_space', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:
     setattr(Project, _verb, _journaled(getattr(Project, _verb)))

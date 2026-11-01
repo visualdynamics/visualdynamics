@@ -69,7 +69,12 @@ excited, the dominant eigenvector belongs to whatever carries more
 power at that frequency. Picking a reference column in the grid reads
 the shape relative to that one channel instead, and picking only
 autospectra falls back to the envelope, since phase relative to
-nothing is not defined.
+nothing is not defined. Two whole CPSDs have no principal shape and
+also show the envelope, with the reason on the status line. In one,
+every cross term is zero, as in a specification of uncorrelated
+drives: the channels share no phase, and the dominant eigenvector would
+be the channel with the highest level alone. In the other, the largest eigenvalue is
+repeated at some line, so no one shape is dominant there.
 
 Every animation shows one quantity at a time, because a node moved by
 an acceleration and the next one moved by a force would show neither.

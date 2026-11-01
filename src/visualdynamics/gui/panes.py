@@ -77,6 +77,7 @@ from .signal_panel import SignalPanel
 from .signature_panel import SignaturePanel
 from .sine_panel import SinePanel
 from .srs_tolerance_panel import SrsTolerancePanel
+from .state_space_panel import StateSpacePanel
 from .statistics_panel import StatisticsPanel
 from .stroke_panel import StrokePanel
 from .sweep_rate_panel import SweepRatePanel
@@ -584,6 +585,11 @@ class DataPane(QWidget):
         # beside the plot (Convert to PSD/CPSD)
         self.lines_panel: LinesPanel = LinesPanel()
         self.lines_panel.hide()
+        # a shape set at a channel table's channels as a state-space
+        # model, its FRFs previewed beside the plot (Export State-Space
+        # Model)
+        self.state_space_panel: StateSpacePanel = StateSpacePanel()
+        self.state_space_panel.hide()
         plot_row = QHBoxLayout()
         plot_row.setContentsMargins(0, 0, 0, 0)
         plot_row.setSpacing(0)
@@ -604,6 +610,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.signal_panel)
         plot_row.addWidget(self.modal_response_panel)
         plot_row.addWidget(self.lines_panel)
+        plot_row.addWidget(self.state_space_panel)
         plot_row.addWidget(self.averaging_panel)
         plot_row.addWidget(self.shock_panel)
         plot_row.addWidget(self.filter_panel)

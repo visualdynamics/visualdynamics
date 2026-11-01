@@ -695,6 +695,53 @@ def test_a_pasted_block_lands_whole(window, pump):
             pytest.approx(draft.levels[k][1]), f'{dof} on the object'
 
 
+def test_the_breakpoint_levels_fill_across_and_down(window, pump):
+    """The table the drag across was asked for (Brandon, 2026-10-31): two
+    channels' levels typed at the first breakpoint, and the handle dragged
+    to the last channel at the last breakpoint, sets every channel at
+    every breakpoint, the pair repeating across, and on the object."""
+    from PySide6.QtCore import QItemSelectionModel, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    _populate(window, pump)
+    _select(window, pump, 'Channels')
+    panel = _open(window, pump)
+    key = window._author_door[1]
+    assert _type(panel.points, 0, 1, '0.5') and _type(panel.points, 0, 2, '0.25')
+    pump()
+    view, model = panel.points, panel.points.model()
+    for column in (1, 2):
+        view.selectionModel().select(model.index(0, column),
+                                     QItemSelectionModel.SelectionFlag.Select)
+    pump()
+
+    def mouse(kind, at):
+        button = Qt.MouseButton.LeftButton
+        return QMouseEvent(kind, QPointF(at), button, button,
+                           Qt.KeyboardModifier.NoModifier)
+
+    last = len(CONTROLS)
+    view.mousePressEvent(mouse(QMouseEvent.Type.MouseButtonPress,
+                               view.fill_handle_rect().center()))
+    target = view.visualRect(model.index(1, last)).center()
+    view.mouseMoveEvent(mouse(QMouseEvent.Type.MouseMove, target))
+    view.mouseReleaseEvent(mouse(QMouseEvent.Type.MouseButtonRelease, target))
+    pump()
+    draft = window._drafts[key]
+    first, second = draft.levels[0][0], draft.levels[1][0]
+    for k in range(last):
+        assert draft.levels[k] == pytest.approx([(first, second)[k % 2]] * 2), \
+            f'{CONTROLS[k]} at both breakpoints'
+    assert [_text(panel.points, 1, c) for c in range(1, last + 1)] == \
+        ['0.5', '0.25'] * 3
+    made = window.project['Channels Specification']
+    for k, dof in enumerate(CONTROLS):
+        record = next(i for i in range(made.num_records)
+                      if made.response_dof[i] == dof == made.reference_dof[i])
+        assert np.real(made.ordinate[record][:2]) == \
+            pytest.approx(draft.levels[k]), f'{dof} on the object'
+
+
 def test_scale_selected_scales_what_is_selected(window, pump):
     from PySide6.QtCore import QItemSelectionModel
 

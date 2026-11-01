@@ -451,6 +451,99 @@ def test_a_channel_table_is_a_target_before_there_are_test_modes():
         alone.selection_verbs('FEM Shapes', 'Channels')), 'no geometries'
 
 
+def _projection_project():
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, _shapes = _test_model()
+    project = visualdynamics.Project()
+    project.add('FEM Geometry', fem_geometry)
+    project.add('FEM Shapes', fem_shapes)
+    project.add('Test Geometry', test_geometry)
+    project.add('Channels', _channels())
+    project.link('FEM Geometry', 'FEM Shapes')
+    project.link('Test Geometry', 'Channels')
+    return project
+
+
+def test_picked_channels_are_the_whole_tables_projection_at_their_dofs():
+    """The drives alone (Brandon, 2026-10-31, the band-average BARC):
+    the rows picked are the target, each row's values the same as in the
+    projection onto the whole table, and the name says how many."""
+    project = _projection_project()
+    whole = project[project.project_onto_basis('FEM Shapes', onto='Channels')]
+    name = project.project_onto_basis('FEM Shapes', onto='Channels',
+                                      channels=[1])
+    assert name == 'FEM Shapes @ Channels (1 channel)'
+    picked = project[name]
+    assert picked.coordinate == ['102X-']
+    assert picked.shape_matrix[:, 0] == pytest.approx(whole.shape_matrix[:, 1])
+    assert list(picked.frequency) == list(whole.frequency)
+    assert name in project.object_group_of('Channels')
+    # a row with no node is skipped, and not counted in the name
+    both = project.project_onto_basis('FEM Shapes', onto='Channels',
+                                      channels=[2, 0, 1, 0])
+    assert both == 'FEM Shapes @ Channels (2 channels)'
+    assert project[both].coordinate == ['101X+', '102X-']
+    assert project[both].shape_matrix == pytest.approx(whole.shape_matrix)
+
+
+def test_a_pick_with_no_dof_or_no_table_is_refused():
+    project = _projection_project()
+    with pytest.raises(ValueError, match='none of the picked channels has '
+                                         'a node and direction'):
+        project.project_onto_basis('FEM Shapes', onto='Channels', channels=[2])
+    with pytest.raises(ValueError, match=r'has 3 channels; rows \[7\]'):
+        project.project_onto_basis('FEM Shapes', onto='Channels',
+                                   channels=[0, 7])
+    project.add('Other Shapes', _fem()[1])
+    with pytest.raises(ValueError, match='picks rows of a channel table; '
+                                         'Other Shapes is not one'):
+        project.project_onto_basis('FEM Shapes', onto='Other Shapes',
+                                   channels=[0])
+    assert 'FEM Shapes @ Channels (1 channel)' not in project
+
+
+def test_the_act_projects_a_set_onto_picked_channels(window, pump, monkeypatch):
+    """The twelve drives picked in the table's grid, the FE modes
+    Cmd-clicked: the bar offers the projection, which is made at the
+    picked rows alone and journaled with them."""
+    from PySide6.QtCore import QItemSelectionModel
+    from PySide6.QtWidgets import QInputDialog
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, _shapes = _test_model()
+    window.add_object('Test Geometry', test_geometry)
+    window.add_object('Channels', _channels())
+    window.add_object('FEM Geometry', fem_geometry)
+    window.add_object('FEM Shapes', fem_shapes)
+    window.project.link('Test Geometry', 'Channels')
+    window.project.link('FEM Geometry', 'FEM Shapes')
+    pump()
+    window.tree.setCurrentItem(window._item_for_object('Channels'))
+    window.tree.clearSelection()
+    window.record_grids['Channels'].item(1, 0).setSelected(True)
+    pump()
+    # a Cmd-click: the set becomes current and joins the selection
+    window.tree.setCurrentItem(window._item_for_object('FEM Shapes'), 0,
+                               QItemSelectionModel.SelectionFlag.Select)
+    pump()
+    assert window._projection_picks() == ('FEM Shapes', 'Channels', [1])
+    assert [act[0] for act in window.acts_for()] == ['project_onto_basis']
+    monkeypatch.setattr(QInputDialog, 'getDouble',
+                        staticmethod(lambda *a, **k: (2.0, True)))
+    window.project_onto_basis()
+    made = window.objects['FEM Shapes @ Channels (1 channel)']
+    assert made.coordinate == ['102X-']
+    assert ("project.project_onto_basis('FEM Shapes', onto='Channels', "
+            'tolerance=0.02, channels=[1])') in window.project.journal
+    message = window.statusBar().currentMessage()
+    assert '1 of 1 basis nodes matched' in message, message
+    assert 'select it beside' not in message
+    # the set alone again: no picks, no projection
+    _select(window, 'FEM Shapes')
+    pump()
+    assert window._projection_picks() is None
+
+
 def test_the_act_projects_a_set_onto_a_selected_table(window, pump, monkeypatch):
     from PySide6.QtWidgets import QInputDialog
 

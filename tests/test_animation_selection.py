@@ -262,6 +262,42 @@ def test_a_whole_cpsd_animates_its_principal_shape(window, pump):
                       rtol=1e-6)
 
 
+def test_a_whole_uncorrelated_specification_moves_every_channel(window,
+                                                                pump):
+    """A specification written autos-only, its cross terms present and
+    zero, has no principal shape: the matrix is a multiple of the
+    identity and eigh hands back one channel, so one force DOF of
+    twelve moved. It falls back to the envelope, every channel moving,
+    and the status line says why the cross records are not shown."""
+    from visualdynamics.core.data import Specification
+    from visualdynamics.deform import EnvelopeDeflection
+
+    loaded(window)
+    channels = ['101Z+', '102Z+', '103Z+', '104Z+']
+    lines = 6
+    records, rdofs, fdofs = [], [], []
+    for i, ri in enumerate(channels):
+        for j, rj in enumerate(channels):
+            records.append(np.full(lines, 0.0198 if i == j else 0.0))
+            rdofs.append(ri)
+            fdofs.append(rj)
+    spec = Specification(np.linspace(20.0, 2000.0, lines), np.array(records),
+                         response_dof=rdofs, reference_dof=fdofs,
+                         ordinate_dim='force**2/frequency',
+                         ordinate_unit='N**2/Hz')
+    window.add_object('Flat Spec', spec)
+    window.tree.clearSelection()
+    for name in ('Geometry', 'Flat Spec'):
+        window._item_for_object(name).setSelected(True)
+    pump()
+    deflection = window.animator.deflection
+    assert isinstance(deflection, EnvelopeDeflection)
+    assert len(deflection.rows) == 4, 'every channel moves'
+    message = window.statusBar().currentMessage()
+    assert ('12 cross records not shown (every cross term is zero'
+            in message), message
+
+
 def test_a_picked_mix_of_autos_and_cross_still_envelopes(window, pump):
     """An explicit pick that is not one reference column falls to the
     envelope, and its cross rows are filtered before the

@@ -20,9 +20,11 @@ were held in `held`, an `(n, n)` boolean mask. The controller ignores
 read back as a specified zero cross term. A missing Hermitian half is
 filled with the conjugate of the half that was held.
 
-The file has no place for units. Values are written in the coherent
-form of the unit system asked for, and reading takes the unit as a
-parameter.
+The file has no place for units. Values are written in the unit system
+asked for, g included: the controller reads the target in the unit of
+each channel of its own channel table, which for an accelerometer is
+usually g, so the file holds what the plot shows. Reading takes the unit
+as a parameter.
 
 The file also has `dof`, the channel names as Visual Dynamics writes
 them, which the controller ignores and this reader prefers.
@@ -79,8 +81,8 @@ def save(spec: Specification, path: str | os.PathLike,
          unit_system: UnitSystem | None = None) -> None:
     """Write a specification as the controller's target file (`.npz`).
 
-    Values, bands included, are written in the coherent form of
-    `unit_system`, or as stored when there is none or the units are not
+    Values, bands included, are written in `unit_system` itself, g
+    included, or as stored when there is none or the units are not
     defined; the file records no units. A pair the specification does
     not hold is written as a zero, the controller's own placeholder, and
     `held` records which pairs were held.
@@ -88,8 +90,6 @@ def save(spec: Specification, path: str | os.PathLike,
     Raises ValueError when the specification holds no autospectrum, or
     holds a cross term of a channel that has no autospectrum.
     """
-    from .exporters import data_values
-
     channels = _channels(spec)
     references = spec.reference_dof or list(spec.response_dof)
     index = {name: k for k, name in enumerate(channels)}
@@ -100,7 +100,17 @@ def save(spec: Specification, path: str | os.PathLike,
             raise ValueError(f'{a}/{b} is a cross term of a channel with no '
                              'autospectrum in the specification')
         held[(a, b)] = i
-    frequencies, ordinate = data_values(spec, unit_system)
+    # The display system itself, not its coherent form: the band-average
+    # BARC's response specification, exported with in-slinch-lbf-s (g),
+    # went out in (in/s^2)^2/Hz, 149064 times g^2/Hz, and the controller
+    # reads it in its channels' g (2026-10-31). The coherent rule is for
+    # files whose units must agree with one another, a model's; a target
+    # is read channel by channel
+    converting = unit_system is not None and spec.units_defined
+    frequencies = (spec.display_abscissa(unit_system) if converting
+                   else spec.abscissa)
+    ordinate = (spec.display_ordinate(unit_system) if converting
+                else spec.ordinate)
     n, lines = len(channels), len(frequencies)
     cpsd = np.zeros((lines, n, n), dtype=np.complex128)
     stated = np.eye(n, dtype=bool)
@@ -121,8 +131,7 @@ def save(spec: Specification, path: str | os.PathLike,
     for name in BANDS:
         if name not in spec.limits:
             continue
-        values = (spec.display_limit(name, unit_system.coherent)
-                  if unit_system is not None and spec.units_defined
+        values = (spec.display_limit(name, unit_system) if converting
                   else spec.limits[name])
         out[name] = np.stack([np.real(values[held[(c, c)]])
                               for c in channels], axis=1)

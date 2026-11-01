@@ -105,8 +105,9 @@ def units_written(format: str, unit_system: UnitSystem) -> str:
     `unit_system` chosen, in words.
 
     The status line shows this after a save, because most formats do
-    not record it themselves. A `.mat` and a delimited-text `.csv` are
-    in the display system itself, g included; Nastran and ADF files are SI; 3MF is in meters; ESCDF
+    not record it themselves. A `.mat`, a delimited-text `.csv` and a
+    controller's random specification are in the display system itself,
+    g included; Nastran and ADF files are SI; 3MF is in meters; ESCDF
     labels each value with the unit it was declared in; every other
     format is in the coherent system the display system is built on.
 
@@ -129,7 +130,9 @@ def units_written(format: str, unit_system: UnitSystem) -> str:
     # labels each value with the unit it was declared in. The rest write
     # the coherent system (2026-10-13: the line named the coherent system
     # whatever the format did)
-    if format in ('matlab', 'delimited'):
+    # a controller's random specification too (2026-10-31): its target
+    # is read in each channel's own unit, g for an accelerometer
+    if format in ('matlab', 'delimited', 'rattlesnake_specification'):
         return unit_system.name
     if format == 'nastran' or format.startswith('adf'):
         return 'SI'

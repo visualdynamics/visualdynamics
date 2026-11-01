@@ -116,6 +116,36 @@ colored by level; *3D* on the bar switches to the flat plot and back.
 
 ![An FRF on its own, filtered to the drive points](images/tree-frf.png)
 
+## Editing a table
+
+Every table in the application is edited the same way. Click a cell to
+select it, drag or Shift-click to select a block, and Cmd-click
+(Ctrl-click elsewhere) to add cells. A column header selects the column
+and a row header the row.
+
+Copy and paste use tab-separated text, so a block of cells goes to a
+spreadsheet and comes back, and a paste stops at the edge of the table.
+Delete clears the selected cells, and what a cleared cell means is up to
+the column: a cleared unit is undeclared, and a node id cannot be
+cleared at all. Where each row is an item, such as a channel or a mode,
+selecting whole rows and pressing Delete removes them. *Batch Edit*, on
+the right-click menu, sets every selected cell to one value.
+
+The fill handle is the small square at the bottom-right corner of the
+selection. Drag it down or up to repeat the selection over the rows you
+drag across, sideways to repeat it across the columns, or diagonally to
+fill the whole rectangle between the selection and the cell you release
+it on. A block of several cells repeats in both directions, so two
+alternating values stay alternating. Double-clicking the handle fills
+down to the last row, or across to the last group in the Element Groups
+table, where each group is a column.
+
+A cell that will not take a value, because the value is the wrong type,
+is not one of the column's choices or is out of range, or because the
+cell cannot be edited, keeps the value it had. The other cells of a
+paste, a fill or a batch edit still change, and the status line says how
+many cells were refused and why.
+
 ## Two things together
 
 Hold Cmd (Ctrl on Windows and Linux) and click a second row, or pick
@@ -136,7 +166,7 @@ scene follows.
 | a time history | The geometry deflecting sample by sample, in proportion to what each channel measured; drag the cursor on the record or press Play. |
 | an FRF or a spectrum | For complex frequency data, the **operating deflection shape** at one frequency line (magnitude and phase per channel), animated; the cursor on the plot picks the line. |
 | a PSD of autospectra | The **envelope**: the geometry deflected by ±√PSD, colored by decibels below the largest motion of any node at any line. It shows where the article moves most, without the phase a PSD does not have. |
-| a whole CPSD | The **principal shape**: the dominant eigenvector of the cross-spectral matrix at each line, with each channel's phase relative to the others. |
+| a whole CPSD | The **principal shape**: the dominant eigenvector of the cross-spectral matrix at each line, with each channel's phase relative to the others. A CPSD whose cross terms are all zero, or whose largest eigenvalue is repeated, has no principal shape and shows the envelope. |
 | a picked reference column of a CPSD | The operating deflection shape relative to that reference, the same shape an FRF gives, from operating data. |
 | a second geometry | Both overlaid, such as a test geometry over the model it was built from. |
 
@@ -167,6 +197,15 @@ node the geometry does not have, gets no arrow, and the status line
 counts them. Typing a node or a direction into the table moves its
 arrow straight away, so a table started by hand can be laid out on the
 model as it is filled in.
+
+A table linked with a geometry is drawn on that geometry only. Selected
+beside a second geometry, such as a finite element model that uses the same
+node numbers as the test, the table puts no arrows on the second one, since
+its node 101 is a different point. When the linked geometry is not
+among those drawn there are no arrows, and the status line says which
+geometry the table is linked with. A table in no group is drawn on every
+geometry selected with it. Time data follows the same rule: its DOF
+arrows go on the geometry in its own group. Sensors work the same way.
 
 ### Two shape sets
 
@@ -255,6 +294,8 @@ shape set offer *Transform to Modal Coordinates* (or *Expand to
 Physical Responses* for modal data), two shape sets on two geometries offer
 *Project onto Basis DOFs*, as do a shape set and a channel table on two
 geometries (the model's modes put at the test's channels before there
-are test modes to compare with), and objects of one type that can be merged
+are test modes to compare with). Rows picked in the table's grid with the
+shape set Cmd-clicked offer it too, at the picked channels alone, such as
+the drives. Objects of one type that can be merged
 offer *Merge into One* ([Projects, links, and the
 Basis](projects.md#merging)).

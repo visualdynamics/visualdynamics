@@ -239,7 +239,7 @@ def test_the_mouse_drives_the_fill_through_the_handle(qt_app):
     assert view._filling is not None, 'the press took the handle'
     below = view.visualRect(model.index(2, 2)).center()
     view.mouseMoveEvent(mouse(QMouseEvent.Type.MouseMove, below))
-    assert view._fill_to == 2, 'the drag follows the row under it'
+    assert view._fill_to == (2, 2), 'the drag follows the cell under it'
     view.mouseReleaseEvent(mouse(QMouseEvent.Type.MouseButtonRelease,
                                  below))
     assert view._filling is None
@@ -336,6 +336,156 @@ def test_the_fill_handle_stays_inside_its_cell(qt_app):
         assert cell.contains(handle), f'{handle} spills outside {cell}'
         assert handle.right() == cell.right(), 'tucked into the corner'
         assert handle.bottom() == cell.bottom()
+
+
+# ---- the fill handle, across and across-and-down ------------------------------
+# Brandon (2026-10-31) asked for the drag to go sideways and diagonally,
+# first for a breakpoint table's levels, a column per channel. The grid
+# below has that shape: rows of numbers, a column that refuses a negative
+# value and one that cannot be set at all.
+
+
+class _Grid:
+    """Five rows of four numbers; C is read-only and D takes no negative."""
+
+    def __init__(self):
+        self.values = [[None] * 4 for _ in range(5)]
+
+
+def _grid_setter(k):
+    def setter(grid, row, text):
+        value = float(text) if str(text).strip() else None
+        if k == 3 and value is not None and value < 0:
+            raise ValueError('D takes no negative value')
+        grid.values[row][k] = value
+    return setter
+
+
+def _grid_view(qt_app):
+    from visualdynamics.gui.tables import Column, TableModel
+
+    grid = _Grid()
+    columns = [Column(name, lambda g, r, k=k: g.values[r][k],
+                      set=None if name == 'C' else _grid_setter(k),
+                      format=lambda v: '' if v is None else f'{v:g}',
+                      journal=lambda g, r, text, k=k: f'.values[{r}][{k}] = {text}')
+               for k, name in enumerate('ABCD')]
+    model = TableModel(grid, columns, lambda g: len(g.values))
+    view, heard = _view(model)
+    journal = []
+    model.edit_journaled.connect(journal.append)
+    view.resize(500, 400)
+    view.show()
+    qt_app.processEvents()
+    return grid, model, view, heard, journal
+
+
+def _drag_handle(view, model, row, column):
+    """Press on the fill handle, move to the cell, release there."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    def mouse(kind, at):
+        button = Qt.MouseButton.LeftButton
+        return QMouseEvent(kind, QPointF(at), button, button,
+                           Qt.KeyboardModifier.NoModifier)
+
+    view.mousePressEvent(mouse(QMouseEvent.Type.MouseButtonPress,
+                               view.fill_handle_rect().center()))
+    assert view._filling is not None, 'the press took the handle'
+    target = view.visualRect(model.index(row, column)).center()
+    view.mouseMoveEvent(mouse(QMouseEvent.Type.MouseMove, target))
+    assert view._fill_to == (row, column), 'the drag follows the cell under it'
+    view.mouseReleaseEvent(mouse(QMouseEvent.Type.MouseButtonRelease, target))
+    assert view._filling is None
+
+
+def test_dragging_the_handle_across_fills_along_the_row(qt_app):
+    grid, model, view, heard, journal = _grid_view(qt_app)
+    grid.values[1][0] = 3.0
+    _select(view, [1], [0])
+    _drag_handle(view, model, 1, 1)
+    assert grid.values[1] == [3.0, 3.0, None, None], \
+        'released on B, filled through B and no further'
+    assert all(grid.values[r] == [None] * 4 for r in (0, 2, 3, 4)), \
+        'across only: no other row moved'
+    assert heard[-1] == (1, 0, '')
+    assert journal == ['.values[1][1] = 3'], 'the fill is journaled per cell'
+
+
+def test_a_diagonal_drag_fills_the_whole_rectangle(qt_app):
+    grid, model, view, heard, journal = _grid_view(qt_app)
+    grid.values[0][0] = 2.0
+    _select(view, [0], [0])
+    _drag_handle(view, model, 2, 1)
+    for row in range(3):
+        assert grid.values[row][:2] == [2.0, 2.0], f'row {row}'
+    assert grid.values[3] == [None] * 4, 'it stopped at the row released on'
+    assert all(grid.values[r][3] is None for r in range(5)), \
+        'and at the column'
+    assert heard[-1] == (5, 0, ''), 'the rectangle less the cell it came from'
+    assert len(journal) == 5
+
+
+def test_a_rectangle_fill_repeats_the_block_both_ways(qt_app):
+    """A 2 x 2 block tiles the rectangle, as a spreadsheet repeats a
+    pattern, down and across at once."""
+    grid, _model, view, _heard, _journal = _grid_view(qt_app)
+    block = [[1.0, 2.0], [3.0, 4.0]]
+    for r in range(2):
+        grid.values[r][:2] = block[r]
+    _select(view, [0, 1], [0, 1])
+    # sixteen cells beyond the block; read-only C refuses its five
+    assert view.fill_to(4, 3) == (11, 5)
+    for r in range(5):
+        assert grid.values[r][:2] == block[r % 2], f'row {r}'
+        assert grid.values[r][3] == block[r % 2][1], \
+            f'D at row {r} repeats B, two columns on'
+
+
+def test_a_fill_up_and_to_the_left_keeps_the_blocks_phase(qt_app):
+    """Measured from the block's own first row and column, wrapping: the
+    row just above the block takes the block's last row, and the column
+    just left of it the block's last column."""
+    grid, _model, view, _heard, _journal = _grid_view(qt_app)
+    block = [[5.0, 6.0], [7.0, 8.0]]
+    for r in range(2):
+        grid.values[3 + r][2:] = block[r]
+    _select(view, [3, 4], [2, 3])
+    assert view.fill_to(0, 0) == (13, 3), 'read-only C refuses rows 0 to 2'
+    for r in range(5):
+        assert grid.values[r][:2] == block[(r - 3) % 2], f'row {r}'
+    assert [grid.values[r][3] for r in range(3)] == [8.0, 6.0, 8.0]
+
+
+def test_a_refused_cell_keeps_its_value_and_the_rest_land(qt_app):
+    """As a paste does: each cell takes its value or refuses it on its
+    own, the refusals are counted and the first one's reason goes to the
+    status line. Nothing waits on a refusal."""
+    grid, model, view, heard, journal = _grid_view(qt_app)
+    grid.values[0][0] = -1.0
+    grid.values[1][3] = 9.0
+    _select(view, [0], [0])
+    _drag_handle(view, model, 1, 3)
+    # seven cells: C refuses two (read-only), D two (negative)
+    assert heard[-1] == (3, 4, 'D takes no negative value')
+    assert grid.values[0] == [-1.0, -1.0, None, None]
+    assert grid.values[1] == [-1.0, -1.0, None, 9.0], 'D kept its 9'
+    assert len(journal) == 3, 'only what landed is journaled'
+
+
+def test_a_table_that_runs_across_drags_along_its_items(qt_app):
+    """In the Element Groups table each group is a column, so a drag to
+    the right carries a property from one group to the next."""
+    _geometry, model = _four_groups()
+    view, _heard = _view(model)
+    row = _row(model, 'E [Pa]')
+    model.setData(model.index(row, 0), '7e10', EDIT)
+    _select(view, [row], [0])
+    view.fill_to(row, 2)
+    assert [model.data(model.index(row, c), EDIT) for c in range(4)] == \
+        [model.data(model.index(row, 0), EDIT)] * 3 + [''], \
+        'beam, plate and solid took E; the point group, past the drag, did not'
 
 
 def test_a_checkbox_cell_toggles_and_still_speaks_text(qt_app):

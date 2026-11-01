@@ -171,6 +171,16 @@ def parse_dof(text: str) -> tuple[int | None, str]:
 #: not a phase — where a cross term of the same file is at 5e-2.
 REAL_FLOOR = 1e-9
 
+#: a cross term this small against its two autospectra, |G_ij|^2 below
+#: CROSS_ZERO * G_ii G_jj (a coherence of 1e-12), is the residue of
+#: arithmetic rather than a shared phase (`Psd.principal_shapes`)
+CROSS_ZERO = 1e-12
+#: the largest eigenvalue of a cross-spectral matrix is repeated when
+#: the next is within this fraction of it: equal levels written into a
+#: specification come back from eigh equal to about 1e-16, and a
+#: measured matrix is never that close (`Psd.principal_shapes`)
+EIGEN_TIE = 1e-6
+
 
 def _even_steps(abscissa, what: str) -> float:
     """The sample step, or a refusal that says which way it is wrong.
@@ -3956,6 +3966,13 @@ class Psd(_Bands, DataArray):
         is refused, since an autospectrum set has no phase (its display
         is the envelope), and so is a matrix with missing terms.
 
+        Two matrices have no principal shape and are refused too. When
+        every cross term is zero the channels share no phase, and the
+        largest eigenvector is the loudest channel alone (or, with every
+        level equal, whichever channel the eigensolver returns). When the
+        largest eigenvalue is repeated at a line, any mix of its
+        eigenvectors is as dominant as any other.
+
         Parameters
         ----------
         quantity : str, optional
@@ -3971,8 +3988,9 @@ class Psd(_Bands, DataArray):
         ------
         ValueError
             If there are no cross records, no record names a quantity,
-            fewer than two channels have the quantity, or the matrix is
-            incomplete.
+            fewer than two channels have the quantity, the matrix is
+            incomplete, every cross term is zero, or the largest
+            eigenvalue is repeated at a line.
         """
         from .matrix_checks import spectral_matrix
 
@@ -3996,7 +4014,25 @@ class Psd(_Bands, DataArray):
         if not filled.all():
             raise ValueError(f'the {quantity} cross-spectral block is '
                              'incomplete')
+        # A specification written autos-only, cross terms present and
+        # zero, made a scaled identity, and eigh handed back one channel
+        # as the "dominant" shape: one force DOF of twelve moved
+        # (Brandon, 2026-10-31, the BARC random specification).
+        autos = np.real(np.diagonal(matrix, axis1=1, axis2=2))
+        cross = matrix.copy()
+        cross[:, np.arange(n), np.arange(n)] = 0.0
+        scale = np.abs(autos[:, :, None] * autos[:, None, :])
+        if not (np.abs(cross) ** 2 > CROSS_ZERO * scale).any():
+            raise ValueError(f'every cross term is zero: the {quantity} '
+                             'channels share no phase, so there is no '
+                             'principal shape')
         values, vectors = np.linalg.eigh(matrix)
+        top = values[:, -1]
+        tied = (top > 0.0) & (values[:, -2] >= top * (1.0 - EIGEN_TIE))
+        if tied.any():
+            raise ValueError(f'the largest eigenvalue is repeated at '
+                             f'{int(tied.sum())} of {len(top)} lines, so '
+                             'no one shape is the principal one')
         principal = (vectors[:, :, -1]
                      * np.sqrt(np.maximum(values[:, -1:], 0.0)))
         return channels, principal.T.copy(), quantity
@@ -4009,6 +4045,8 @@ class Psd(_Bands, DataArray):
         deflection shape (`principal_shapes`). An autospectrum set has no
         phase, so it shows the envelope instead: two copies deflected
         ±sqrt(PSD), colored by dB below the largest node at that line.
+        So does a CPSD with no principal shape, one whose cross terms are
+        all zero or whose largest eigenvalue is repeated.
         The strongest line is used unless `frequency` picks another;
         `quantity` picks which measurement deflects the geometry.
 

@@ -1480,6 +1480,25 @@ def _draw_project(painter, color):
         painter.drawEllipse(x - 4, y - 4, 8, 8)
 
 
+def _draw_state_space(painter, color):
+    """A block with a force arrow in and a response arrow out, and the
+    state fed back under it: the model a controller integrates."""
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(22, 14, 20, 20), 3, 3)
+    painter.drawLine(QPointF(4, 24), QPointF(20, 24))
+    painter.drawLine(QPointF(20, 24), QPointF(14, 19))
+    painter.drawLine(QPointF(20, 24), QPointF(14, 29))
+    painter.drawLine(QPointF(44, 24), QPointF(60, 24))
+    painter.drawLine(QPointF(60, 24), QPointF(54, 19))
+    painter.drawLine(QPointF(60, 24), QPointF(54, 29))
+    faded = QColor(color)
+    faded.setAlpha(140)
+    painter.setPen(_pen(faded, 4))
+    painter.drawPolyline([QPointF(50, 24), QPointF(50, 50), QPointF(14, 50),
+                          QPointF(14, 24)])
+
+
 def _draw_overlay(painter, color):
     """Two mode curves over each other: the comparison animation."""
     faded = QColor(color)
@@ -2684,6 +2703,7 @@ def control_icon(name: str) -> QIcon:
      'table': _draw_channel_table, 'overlay': _draw_overlay,
      'ratio': _draw_ratio,
      'project': _draw_project,
+     'state_space': _draw_state_space,
      'rotate': _draw_rotate,
      'reset': _draw_reset,
      'rigid': _draw_rigid,

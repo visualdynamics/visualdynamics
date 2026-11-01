@@ -887,9 +887,12 @@ def test_the_target_round_trips_with_its_stated_zeros(tmp_path):
 
 def test_a_hermitian_half_is_completed_and_the_units_are_the_systems(tmp_path):
     """A specification holding one of each pair writes the conjugate for
-    the other, as the transform allows; values go out in the coherent
-    system asked for, and the file cannot say which."""
+    the other, as the transform allows. Values go out in the system asked
+    for, g included, since the controller reads the target in each
+    channel's own unit and the file cannot say which; a coherent system
+    writes what it always did."""
     from visualdynamics.core.author import SpecificationDraft
+    from visualdynamics.io.exporters import units_written
 
     draft = SpecificationDraft.at_dofs(['1Z+', '2Z+']).with_all_pairs(
         0.5, 30.0)
@@ -913,12 +916,24 @@ def test_a_hermitian_half_is_completed_and_the_units_are_the_systems(tmp_path):
         cpsd = d['cpsd']
         assert np.allclose(cpsd[:, 1, 0], np.conj(cpsd[:, 0, 1]))
         assert d['held'].all(), 'a Hermitian half is the whole pair'
-        factor = float(system.coherent.from_si(1.0, 'acceleration**2/frequency'))
-        assert factor != 1.0
+        # the band-average BARC's response specification went out in
+        # (in/s^2)^2/Hz with (g) asked for, 149064 times g^2/Hz, and the
+        # controller would have read it in g (2026-10-31)
+        factor = 1.0 / 9.80665 ** 2
         assert np.allclose(cpsd[:, 0, 0], np.real(spec.ordinate[0]) * factor), \
-            'the coherent system, in/s², not the display g'
+            'g^2/Hz, the system asked for, not its coherent in/s^2'
         assert np.allclose(d['abort_upper'][:, 0],
                            spec.limits['abort_upper'][0] * factor)
+    coherent = tmp_path / 'coherent.npz'
+    visualdynamics.export_file(half, str(coherent),
+                               format='rattlesnake_specification',
+                               unit_system=system.coherent)
+    inch = (0.0254 ** 2) ** -1
+    with np.load(coherent) as d:
+        assert np.allclose(d['cpsd'][:, 0, 0], np.real(spec.ordinate[0]) * inch)
+        assert np.allclose(d['abort_upper'][:, 0],
+                           spec.limits['abort_upper'][0] * inch)
+    assert units_written('rattlesnake_specification', system) == system.name
 
 
 def test_a_modal_specification_writes_no_coordinate(tmp_path):

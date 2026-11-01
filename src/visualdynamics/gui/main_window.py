@@ -1584,6 +1584,13 @@ class MainWindow(QMainWindow):
         self._lining: dict | None = None
         self.data_pane.lines_panel.changed.connect(self._lines_spacing_chosen)
         self.data_pane.lines_panel.apply_asked.connect(self._lines_apply)
+        #: the Export State-Space Model pane while it is open: the (set,
+        #: table) it is open on and the frequencies set
+        self._staging: dict | None = None
+        self.data_pane.state_space_panel.changed.connect(
+            self._state_space_edited)
+        self.data_pane.state_space_panel.apply_asked.connect(
+            self._state_space_apply)
         #: the replication fit last read, as (record, its samples, the
         #: inputs, the fit): a cutoff column picked only changes the
         #: case drawn, and reading the fit again was 0.23 s of filters
@@ -2456,6 +2463,9 @@ class MainWindow(QMainWindow):
         self._dof_table = None
         self._dofs_before = False
         self._dof_geometries = []
+        #: (source, geometry name, geometry) for each geometry the arrows
+        #: may go on, or None for any geometry drawn
+        self._dof_homes = None
 
         # across geometries the comparison's second set animates on its
         # own mesh by default; this switches it to its projection on
@@ -2950,6 +2960,20 @@ class MainWindow(QMainWindow):
     def _dofs_toggled(self, _checked):
         self.render_current()
 
+    def _linked_geometry(self, name):
+        """(name, geometry) for the geometry in `name`'s object group, or
+        None when its group has none. Not `geometry_for`, whose fallback
+        to the active geometry would tie an object in no group to
+        whichever geometry happened to be active."""
+        try:
+            members = self.project.object_group_of(name) or ()
+        except (KeyError, ValueError):
+            return None
+        for member in members:
+            if isinstance(self.project.get(member), Geometry):
+                return member, self.project[member]
+        return None
+
     def _update_dof_controls(self, geometries, series, channels=()):
         """The DOF-arrows toggle is an option only when a geometry and
         the data to read DOFs from are selected together; the quantity
@@ -2974,6 +2998,19 @@ class MainWindow(QMainWindow):
                 self.dofs_action.setChecked(self._dofs_before)
             self.dofs_action.blockSignals(False)
         self._dof_table = table
+        # the arrows go on the geometry the table or the data is linked
+        # with and on no other. Matched by node number on every geometry
+        # drawn, an FE mesh that reuses a test's node numbers got arrows
+        # at points the table says nothing about (Brandon, 2026-10-31).
+        # Something in no group can still be held up against any model.
+        sources = ([channels[0][0]] if table is not None else
+                   [name for name, _obj, _records in self._dof_series])
+        homes = [(source, self._linked_geometry(source))
+                 for source in sources]
+        self._dof_homes = (
+            [(source, *home) for source, home in homes]
+            if homes and all(home is not None for _s, home in homes)
+            else None)
         if table is not None:
             self.dofs_action.setVisible(True)
             self._offer_channel_roles(table)
@@ -5021,6 +5058,8 @@ class MainWindow(QMainWindow):
          'expand_act'),
         ('project_onto_basis', 'Project onto Basis DOFs', 'project',
          'project_onto_basis'),
+        ('export_state_space', 'Export State-Space Model', 'state_space',
+         'export_state_space_act'),
         ('merge', 'Merge into One', 'merge', 'merge_selected'),
         ('merge_coincident_nodes', 'Merge Coincident Nodes', 'merge_nodes',
          'merge_nodes_act'),
@@ -5157,6 +5196,16 @@ class MainWindow(QMainWindow):
                 return [(verb, label, icon, getattr(self, handler), applicable[verb])
                         for verb, label, icon, handler in self.ACTS
                         if verb == 'plan_instrumentation' and verb in applicable]
+            # rows picked in one channel table's grid beside one whole
+            # shape set: the set projected at those channels alone
+            # (Brandon, 2026-10-31); the set's own acts would ignore the
+            # picks, so this is the one offered
+            if self._projection_picks() is not None:
+                return [(verb, label, icon, getattr(self, handler),
+                         ('Project the shape set onto the picked channels\' '
+                          'DOFs, on the table\'s geometry'))
+                        for verb, label, icon, handler in self.ACTS
+                        if verb == 'project_onto_basis']
             # rows picked in one channel table's grid: a signal at the
             # picked reference channels (Brandon, 2026-10-30)
             if not names and self._signal_source() is not None:
@@ -10454,8 +10503,9 @@ class MainWindow(QMainWindow):
         signaling = self._signal_door()
         modaling = self._modal_door()
         lining = self._lines_door()
+        staging = self._state_space_door()
         authoring = (None if signaling is not None or modaling is not None
-                     or lining is not None
+                     or lining is not None or staging is not None
                      else self._authoring(shapes, geometries, series, channels))
         # no 3-D view in edit mode (Brandon, 2026-09-06): every editing
         # gesture is on the flat plot, so the stage stands down while
@@ -10463,7 +10513,8 @@ class MainWindow(QMainWindow):
         self.data_pane.flat_only = (authoring is not None
                                     or signaling is not None
                                     or modaling is not None
-                                    or lining is not None)
+                                    or lining is not None
+                                    or staging is not None)
         # a lone set's transformation is drawn on its geometry, which
         # comes up above the tables (Brandon, 2026-10-23)
         self._values_on = (self._values_geometry(shapes[0][0], shapes[0][1])
@@ -10472,7 +10523,7 @@ class MainWindow(QMainWindow):
                          plots=bool(series) or bool(picture_sets)
                          or bool(sine_specs) or bool(sine_levels)
                          or authoring is not None or signaling is not None
-                         or modaling is not None,
+                         or modaling is not None or staging is not None,
                          table=bool(channels) or shape_table or comparing
                          or bool(reports) or bool(matches)
                          or levels is not None
@@ -10565,6 +10616,8 @@ class MainWindow(QMainWindow):
             parts.append(self._render_modal())
         if lining is not None:
             parts.append(self._render_lines())
+        if staging is not None:
+            parts.append(self._render_state_space())
         if authoring is not None:
             parts.append(self._render_author(authoring))
             if authoring[0] == 'table':
@@ -11426,6 +11479,34 @@ class MainWindow(QMainWindow):
                 if getattr(settings, key, None) is None})
         self._signaling = {'source': name, 'dofs': dofs, 'settings': settings}
         self.render_current()
+
+    def _projection_picks(self) -> tuple[str, str, list[int]] | None:
+        """`(shape set, channel table, rows)` when the selection is one
+        whole shape set and rows picked in one channel table's grid, the
+        two on geometries of their own as Project onto Basis DOFs asks
+        of a whole table; otherwise None. The bar's applicability reads
+        whole objects only, so the picks are read here."""
+        from ..project import _set_and_table_apart
+
+        references = self.selected_references()
+        picked = [(name, detail) for kind, name, _obj, detail in references
+                  if kind == 'channel']
+        whole = [name for kind, name, _obj, _detail in references
+                 if kind == 'object']
+        if (not picked or len(whole) != 1
+                or len(picked) + len(whole) != len(references)):
+            return None
+        tables = {name for name, _row in picked}
+        if len(tables) != 1:
+            return None
+        table, shapes = next(iter(tables)), whole[0]
+        if (not isinstance(self.objects.get(table), ChannelTable)
+                or not isinstance(self.objects.get(shapes), ShapeSet)
+                or not _set_and_table_apart(
+                    self.project, [self.objects[shapes], self.objects[table]])):
+            return None
+        rows = sorted({row for _name, row in picked})
+        return (shapes, table, rows) if None not in rows else None
 
     def _signal_source(self) -> tuple[str, tuple[str, ...] | None] | None:
         """What Generate Signal would be made from: `(name, dofs)` for
@@ -12559,16 +12640,18 @@ class MainWindow(QMainWindow):
             if column is not None:
                 return self._deflect_ods(geometry, name, data, column,
                                          showing=showing)
+            why = None
             if records is None:
                 # a whole CPSD carries phase and answers with its
-                # principal shape; only an autos-only set falls through
-                # to the envelope
-                principal = self._deflect_principal(geometry, name, data,
-                                                    showing=showing)
+                # principal shape; an autos-only set, or a matrix with no
+                # one dominant shape, falls through to the envelope, which
+                # says why its cross records are not shown
+                principal, why = self._deflect_principal(
+                    geometry, name, data, showing=showing)
                 if principal is not None:
                     return principal
             return self._deflect_envelope(geometry, name, data, records,
-                                          showing=showing)
+                                          showing=showing, why=why)
         if (data.abscissa_dim == 'frequency'
                 and np.iscomplexobj(data.ordinate)):
             return self._deflect_ods(geometry, name, data, records,
@@ -12716,7 +12799,7 @@ class MainWindow(QMainWindow):
         return [i for i, kind in zip(records, kinds) if kind == wanted]
 
     def _deflect_envelope(self, geometry, name, data, records,
-                          showing=None):
+                          showing=None, why=None):
         """A PSD's envelope: two copies of the geometry deflected
         ±sqrt(PSD) at the cursor line, colored dB below the loudest
         node at any line.
@@ -12742,7 +12825,8 @@ class MainWindow(QMainWindow):
         self._cursor_dimension = quantity   # the cursor rides this plot
         chosen, notes = animation_records(data, of_kind)
         if crossed:
-            notes += f' — {crossed} cross records not shown'
+            notes += (f' — {crossed} cross records not shown'
+                      + (f' ({why})' if why else ''))
         if left_out:
             notes += (f' — {left_out} records of other quantities not '
                       'shown (the quantity box picks)')
@@ -12796,18 +12880,22 @@ class MainWindow(QMainWindow):
         shape — the dominant eigenvector of the cross-spectral matrix
         per line, each channel's phase relative to the others, no
         reference to choose. A grid-picked column still reads against
-        one channel; this is the matrix's own answer."""
+        one channel; this is the matrix's own answer.
+
+        Returns (status, None) when it is shown, and (None, why) when
+        the matrix has no principal shape (`Psd.principal_shapes`), so
+        the envelope it falls back to can say why."""
         try:
             dofs, shapes, used = data.principal_shapes(
                 self.dofs_combo.currentData())
-        except ValueError:
-            return None
+        except ValueError as refusal:
+            return None, str(refusal)
         self._cursor_dimension = used
         return self._arm_ods(
             geometry, name, data, dofs, shapes,
             f'the principal {used} operating deflection — the '
             'cross-spectral matrix’s dominant shape (a grid column '
-            'reads against one reference instead)', '', showing)
+            'reads against one reference instead)', '', showing), None
 
     def _arm_ods(self, geometry, name, data, dofs, ordinate, flavor,
                  notes, showing):
@@ -12847,12 +12935,14 @@ class MainWindow(QMainWindow):
         table places a sensor on it. Each table is drawn on one geometry,
         its own: two geometries selected together each get the table
         linked with them, and a table selected with geometries goes on
-        the one linked with it. A table's nodes are often in more than one
+        the one linked with it, or on none when that one is not drawn.
+        A table in no group goes on the first geometry that places its
+        sensors. A table's nodes are often in more than one
         geometry (an instrumentation plan keeps the model's node numbers,
         each measured in a turned frame of its own), and drawn on each
         they were the same sensors twice, turned two ways (Brandon,
         2026-10-27). With data or a shape set, it is the table linked
-        with that, on the geometry it moves."""
+        with that, on the geometry it moves when that is the table's own."""
         from ..core.sensors import place
 
         def linked(name):
@@ -12861,6 +12951,10 @@ class MainWindow(QMainWindow):
             except (KeyError, ValueError):
                 found = None
             return found[1] if found is not None else None
+
+        def own(name):
+            found = self._linked_geometry(name)
+            return found[0] if found is not None else None
 
         def home(name):
             try:
@@ -12872,9 +12966,14 @@ class MainWindow(QMainWindow):
         pairs = []
         if geometries and channels:
             name, table = channels[0][0], channels[0][1]
-            own = home(name)
-            order = ([own] if own in geometries else []) + [
-                other for other in geometries if other != own]
+            if own(name) is not None:
+                # drawn by node number on another geometry, they were
+                # sensors at points the table says nothing about
+                order = [own(name)] if own(name) in geometries else []
+            else:
+                first = home(name)
+                order = ([first] if first in geometries else []) + [
+                    other for other in geometries if other != first]
             for other in order:
                 if place(table, geometries[other]['object'])[0]:
                     pairs.append((geometries[other]['object'], table))
@@ -12883,8 +12982,11 @@ class MainWindow(QMainWindow):
             source = series[0][0] if series else shapes[0][0]
             table = linked(source)
             if table is not None:
-                pairs = [(entry['object'], table)
-                         for entry in list(geometries.values())[:1]]
+                drawn = list(geometries)[:1]
+                table_home = own(self.project.name_of(table))
+                pairs = [(geometries[other]['object'], table)
+                         for other in drawn
+                         if table_home in (None, other)]
         else:
             pairs = [(entry['object'], linked(name))
                      for name, entry in geometries.items()]
@@ -12945,6 +13047,15 @@ class MainWindow(QMainWindow):
         self._dof_geometries = []
         if not self.dofs_action.isChecked():
             return ''
+        geometries = list(geometries)
+        if self._dof_homes is not None:
+            geometries = [geometry for geometry in geometries
+                          if any(geometry is home
+                                 for _s, _n, home in self._dof_homes)]
+            if not geometries:
+                source, home, _geometry = self._dof_homes[0]
+                return (f'no DOF arrows — {source!r} is linked with '
+                        f'{home!r}, which is not drawn')
         if self._dof_table is not None:
             self._dof_geometries = list(geometries)
             return self._add_channel_arrows()
@@ -12983,7 +13094,8 @@ class MainWindow(QMainWindow):
 
     def _add_channel_arrows(self):
         """The selected channel table's DOFs in the drop-down's role, on
-        each geometry drawn, replacing any drawn before. Returns what the
+        its linked geometry, or on each geometry drawn when it is in no
+        group, replacing any drawn before. Returns what the
         status bar should add: how many channels have no arrow, or ''.
 
         Named actors, so a cell typed in the table redraws the arrows
@@ -16633,11 +16745,16 @@ class MainWindow(QMainWindow):
 
         A node match tolerance, in percent of the basis model's size, is
         asked for first. The project does the projection and the
-        linking."""
+        linking. Rows picked in a channel table's grid beside the set
+        narrow the target to those channels."""
         names = self._selected_object_names()
         tables = [n for n in names if isinstance(self.objects.get(n), ChannelTable)]
         sets = [n for n in names if isinstance(self.objects.get(n), ShapeSet)]
-        if len(tables) == 1 and len(sets) == 1:
+        picks = self._projection_picks()
+        rows = None
+        if picks is not None:
+            other_name, basis_name, rows = picks
+        elif len(tables) == 1 and len(sets) == 1:
             # the model's modes at a test's channels (Brandon, 2026-10-29)
             basis_name, other_name = tables[0], sets[0]
         else:
@@ -16654,7 +16771,8 @@ class MainWindow(QMainWindow):
             return
         try:
             added = self.project.project_onto_basis(
-                other_name, onto=basis_name, tolerance=percent / 100.0)
+                other_name, onto=basis_name, tolerance=percent / 100.0,
+                **({} if rows is None else {'channels': rows}))
         except ValueError as refusal:
             self._show_status(f'{other_name}: {refusal}')
             return
@@ -16671,8 +16789,168 @@ class MainWindow(QMainWindow):
         self._show_status(
             f'{added}: {report["matched"]} of {report["total"]} basis '
             f'nodes matched (worst {worst:.4g} {unit}){note}'
-            + ('' if tables and basis_name == tables[0]
+            + ('' if isinstance(self.objects.get(basis_name), ChannelTable)
                else f' — select it beside {basis_name} to compare'))
+
+    # ---- a shape set at a channel table's channels, for Rattlesnake -----
+
+    def _state_space_candidates(self):
+        """(set name, table name) when the selection is one real shape
+        set and one channel table, whole; None otherwise."""
+        names = self._selected_object_names()
+        if (len(names) != 2 or 'export_state_space'
+                not in dict(self.project.selection_verbs(*names))):
+            return None
+        return (next(n for n in names if isinstance(self.objects[n], ShapeSet)),
+                next(n for n in names if isinstance(self.objects[n], ChannelTable)))
+
+    def export_state_space_act(self) -> None:
+        """Open Export State-Space Model on the selected shape set and
+        channel table, or put it away when it is open on them. The pane
+        previews the model's drive-point FRFs; Export writes the file
+        (`Project.export_state_space`)."""
+        key = self._state_space_candidates()
+        if key is None:
+            self._show_status('Select a real shape set and a channel table '
+                              'together')
+            return
+        if self._staging is not None and self._staging['key'] == key:
+            self.close_state_space_pane()
+            return
+        # one pane beside the plot at a time
+        self._author_wanted = False
+        self._signaling = self._modaling = self._lining = None
+        for panel in (self.data_pane.signal_panel,
+                      self.data_pane.modal_response_panel,
+                      self.data_pane.lines_panel):
+            panel.hide()
+        self._staging = {'key': key, 'maximum': None, 'rigid': 1.0}
+        self.render_current()
+
+    def close_state_space_pane(self) -> None:
+        """Put the Export State-Space Model pane away."""
+        self._staging = None
+        self.data_pane.state_space_panel.hide()
+        self.render_current()
+
+    def _state_space_door(self):
+        """The pane's state while it is open and the selection is still
+        what it was opened on; otherwise None, and the pane put away."""
+        if self._staging is None:
+            return None
+        if (self._state_space_candidates() != self._staging['key']
+                or self._signaling is not None or self._modaling is not None
+                or self._lining is not None):
+            self._staging = None
+            self.data_pane.state_space_panel.hide()
+            return None
+        return self._staging
+
+    def _render_state_space(self) -> str:
+        """The pane beside a preview: the model's FRF at each drive
+        point, solid, over the whole set's synthesized FRF, dashed, so
+        what the maximum and rigid frequencies change is seen."""
+        from ..core.state_space import OUTPUT_POWER, state_space_model
+        from ..units import si_factor
+
+        state = self._staging
+        set_name, table_name = state['key']
+        shapes, table = self.objects[set_name], self.objects[table_name]
+        panel = self.data_pane.state_space_panel
+        panel.show_settings(state['maximum'], state['rigid'])
+        panel.show()
+        try:
+            model = state_space_model(shapes, table,
+                                      maximum_frequency=state['maximum'],
+                                      rigid_frequency=state['rigid'],
+                                      unit_system=self.unit_system)
+        except ValueError as why:
+            panel.show_reading(note=f'Cannot export: {why}', ready=False)
+            self.data_pane.clear()
+            return f'{set_name} at {table_name}: {why}'
+        notes = []
+        if state['maximum'] is None:
+            notes.append(f'Every mode kept, the highest at '
+                         f'{shapes.frequency.max():.4g} Hz; set the '
+                         "controller's Nyquist frequency to leave out the "
+                         'modes above it')
+        panel.show_reading(
+            modes=f'{len(model.mode_frequency)} of {shapes.num_shapes}',
+            lifted=str(model.lifted), dropped=str(model.dropped),
+            inputs=str(len(model.input_dof)),
+            channels=str(len(model.channel_dof)),
+            units=', '.join(dict.fromkeys(model.channel_unit)),
+            note='; '.join(notes))
+        said = f'{set_name} at {table_name}: {model.summary()}'
+        # the drive points: each input beside the responses at its DOF,
+        # or the first response from every input when none share one
+        kinds, dofs = table.types(), model.channel_dof
+        inputs = [row for row, role in enumerate(table.roles())
+                  if role == 'reference']
+        responses = [row for row in range(len(dofs)) if row not in inputs]
+        pairs = [(row, k) for k, i in enumerate(inputs) for row in responses
+                 if dofs[row].rstrip('+-') == dofs[i].rstrip('+-')]
+        if not pairs and responses:
+            pairs = [(responses[0], k) for k in range(len(inputs))]
+        if not pairs:
+            self.data_pane.clear()
+            return said
+        top = 1.25 * (state['maximum'] or float(model.mode_frequency.max()))
+        lines = np.linspace(top / 1600, top, 1600)
+        h = model.frf(lines)
+        # back to SI, as every stored FRF is, for the display units
+        values = np.array([h[:, row, k] * si_factor(model.channel_unit[row], kinds[row])
+                           / si_factor(model.channel_unit[inputs[k]], 'force')
+                           for row, k in pairs])
+        full = np.array([shapes.synthesize_frf(lines, [dofs[row]], [model.input_dof[k]],
+                                               power=OUTPUT_POWER[kinds[row]])[0]
+                         for row, k in pairs])
+        labels = {'response_dof': [dofs[row] for row, _k in pairs],
+                  'reference_dof': [model.input_dof[k] for _row, k in pairs],
+                  'ordinate_dim': [f'{kinds[row]}/force' for row, _k in pairs]}
+        everything = Frf(lines, full, **labels)
+        everything.synthesized = True
+        status = self._render_series([(f'{set_name} model', Frf(lines, values, **labels), None),
+                                      (f'{set_name}, every mode', everything, None)])
+        return said + (f' | {status}' if status else '')
+
+    def _state_space_edited(self, maximum: float, rigid: float) -> None:
+        if self._staging is not None:
+            self._staging.update(maximum=maximum or None, rigid=rigid)
+            self.render_current()
+
+    def _state_space_apply(self, maximum: float, rigid: float) -> None:
+        """Export: a file name asked for, then the project's verb with
+        only the settings that differ from its defaults, so the journal's
+        line is what a script would write."""
+        if self._staging is None:
+            return
+        set_name, table_name = self._staging['key']
+        path, _ = QFileDialog.getSaveFileName(
+            self, 'Export State-Space Model', f'{set_name}.npz',
+            'State-space model (*.npz)')
+        if not path:
+            return
+        if not path.lower().endswith('.npz'):
+            path += '.npz'
+        extra = {}
+        if maximum:
+            extra['maximum_frequency'] = maximum
+        if rigid != 1.0:
+            extra['rigid_frequency'] = rigid
+        # a blank unit cell takes the display system's unit, as the
+        # preview did; by name, so the journal's line replays
+        if any(not str(unit).strip()
+               for unit in self.objects[table_name].frame['unit']):
+            extra['unit_system'] = self.unit_system.name
+        try:
+            model = self.project.export_state_space(set_name, table_name, path,
+                                                    **extra)
+        except (ValueError, TypeError, OSError) as why:
+            self._show_status(f'{set_name}: {why}')
+            return
+        self.close_state_space_pane()
+        self._show_status(f'Wrote {os.path.basename(path)}: {model.summary()}')
 
     # ---- the transform: a record through a shape set --------------------
 

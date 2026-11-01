@@ -705,7 +705,9 @@ that constraint.
 Both grids are the application's ordinary tables. A column header
 selects a channel, a row header a breakpoint, and Cmd-click adds cells;
 copy, paste, Delete to clear, Batch Edit and the fill handle work as
-they do everywhere else. A frequency typed between two others re-sorts
+they do in every table ([Editing a table](project-tree.md#editing-a-table)),
+so a level dragged across the channels and down the breakpoints sets them
+all. A frequency typed between two others re-sorts
 the breakpoints. There is no Apply button: every edit is written to the
 specification as it is made, so switching to another object never
 leaves an edit behind.
@@ -746,8 +748,11 @@ tests run on autospectra alone, and the controller's form of that is a
 matrix with zeros off the diagonal. So a pair the specification does
 not hold is written as a zero, and a `held` mask records that it was a
 placeholder rather than a statement of independence. The values are
-written in the coherent unit system on display; the file cannot record
-units, so the status line names the system. The same file imports
+written in the unit system on display, g included, because the
+controller reads the target in the unit of each of its own channels
+(usually g for an accelerometer). Choose the system that matches the
+test's channel table before saving. The file cannot record units, so
+the status line names the system. The same file imports
 again, with held cross terms kept and placeholders left out. A target
 file written by the controller or by sdynpy imports too, with an
 off-diagonal that is all zero or NaN read as the placeholder for
@@ -823,6 +828,36 @@ matrix itself, with its conditioning and the residual it leaves against
 frequency, is a `Transformation` ([The transformation to a
 point](transformation.md)).
 
+A shape set and the channel table it was projected onto can be written
+as a modal state-space model, the file Rattlesnake's state-space virtual
+hardware loads in place of a real test article. In the app, select the
+set and the table together and press Export State-Space Model on the bar.
+A pane beside the plot takes the maximum and rigid frequencies, says how
+many modes are kept, moved up and left out, and draws the model's FRF at
+each drive point over the whole set's synthesized FRF, dashed, so the
+effect of each setting can be seen before Export writes the file. From
+a script:
+`project.export_state_space(shapes, table, path, maximum_frequency=4096)`
+([`core.state_space`](../api/visualdynamics.core.state_space.md)). The
+table's reference rows are the inputs, each a force at its DOF, and every
+row of the table is an output in table order, since the controller
+checks the file against its channel table row for row. A response row
+reads the modes at its DOF as its channel type says: displacement,
+velocity or acceleration. A reference row reads back its own input, as
+a force gauge reads the force applied. Each row is in its channel's own
+unit, g or lbf for example, because the controller applies no
+sensitivity to a simulated channel; a blank unit cell takes the unit
+system's unit. Modes at or above `maximum_frequency` are left out. Set it
+to the controller's Nyquist frequency, since the hardware integrates the
+model and keeps every n-th sample with no filter first, and a mode above
+Nyquist would alias into the band. Modes below `rigid_frequency` (1 Hz
+unless set) are moved up to it, because a rigid-body mode at 0 Hz is a
+double integrator whose displacement drifts through a long random run;
+above a few hertz its accelerance is unchanged. The set has to be real
+and mass-normalized with a mass unit. The model's frequency response,
+C (iωI − A)⁻¹ B + D, is the set's own `synthesize_frf` at the same
+DOFs, in the same units.
+
 Methods: `plot`, `animate`, `animate_pair`, `plot_mac`, `auto_mac`,
 `synthesize_frf`, `covers`, `delete_modes`, `save`.
 
@@ -857,7 +892,8 @@ and linked to its source in one call:
 | a shape set, specification or channel table | `author_specification` |
 | an FRF | `fit_modes` |
 | two shape sets | `project_onto_basis`, `match_modes` |
-| a shape set and a channel table on another geometry | `project_onto_basis`, the modes at the table's channels |
+| a shape set and a channel table on another geometry | `project_onto_basis`, the modes at the table's channels; `channels=` takes some of its rows |
+| a shape set and a channel table | `export_state_space`, the pair written as a Rattlesnake state-space model, a file rather than an object |
 | any object with a sibling of its type | `merge` |
 
 Every object also works with the whole-project verbs (`add`, `remove`,

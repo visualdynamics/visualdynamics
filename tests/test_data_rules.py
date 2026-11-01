@@ -130,6 +130,66 @@ def test_a_principal_shape_needs_a_whole_cross_block_of_two_or_more():
         one.principal_shapes()
 
 
+def _uncorrelated(levels, lines=4):
+    """A CPSD with every cross record present and zero: the channels
+    share no phase, as in a specification written autos-only."""
+    f = np.linspace(1.0, 10.0, lines)
+    dofs = [f'{k + 1}X+' for k in range(len(levels))]
+    rows, response, reference = [], [], []
+    for i, a in enumerate(dofs):
+        for j, b in enumerate(dofs):
+            rows.append(np.full(lines, levels[i] if i == j else 0.0))
+            response.append(a)
+            reference.append(b)
+    return Psd(f, np.array(rows), response_dof=response,
+               reference_dof=reference, ordinate_dim='force**2/frequency')
+
+
+def test_a_cpsd_whose_cross_terms_are_all_zero_has_no_principal_shape():
+    """Twelve equal uncorrelated channels make the matrix a multiple of
+    the identity: every eigenvector is as dominant as any other, and
+    eigh hands back one channel. Unequal levels pick the loudest
+    channel alone. Neither is a shape, so both are refused and the
+    envelope is the reading."""
+    with pytest.raises(ValueError, match='every cross term is zero'):
+        _uncorrelated([0.0198] * 12).principal_shapes()
+    with pytest.raises(ValueError, match='every cross term is zero'):
+        _uncorrelated([1.0, 0.5, 0.25]).principal_shapes()
+
+
+def test_a_repeated_largest_eigenvalue_has_no_principal_shape():
+    """Two independent sources of equal power, each coherent across its
+    own pair of channels: the largest eigenvalue is repeated, so any
+    mix of the two source shapes is a dominant eigenvector."""
+    f = np.linspace(1.0, 10.0, 3)
+    dofs = ['1X+', '2X+', '3X+', '4X+']
+    first = np.array([1.0, 1.0, 0.0, 0.0])
+    second = np.array([0.0, 0.0, 1.0, -1.0])
+    matrix = np.outer(first, first) + np.outer(second, second)
+    rows, response, reference = [], [], []
+    for i, a in enumerate(dofs):
+        for j, b in enumerate(dofs):
+            rows.append(np.full(3, matrix[i, j]))
+            response.append(a)
+            reference.append(b)
+    tied = Psd(f, np.array(rows), response_dof=response,
+               reference_dof=reference,
+               ordinate_dim='acceleration**2/frequency')
+    with pytest.raises(ValueError, match='largest eigenvalue is repeated '
+                                         'at 3 of 3 lines'):
+        tied.principal_shapes()
+    # the same pair one percent apart is a shape again: the first source
+    rows = [r * (1.01 if response[k] in ('1X+', '2X+')
+                 and reference[k] in ('1X+', '2X+') else 1.0)
+            for k, r in enumerate(rows)]
+    louder = Psd(f, np.array(rows), response_dof=response,
+                 reference_dof=reference,
+                 ordinate_dim='acceleration**2/frequency')
+    got, shapes, _quantity = louder.principal_shapes()
+    assert got == dofs
+    assert np.allclose(np.abs(shapes[:, 0]), np.sqrt(1.01) * np.array([1, 1, 0, 0]))
+
+
 def test_an_srs_band_runs_from_the_shortest_window_to_a_fifth_of_the_rate():
     """Low enough that the shortest window holds a cycle — never below
     1 Hz — and up to a fifth of the rate, where the filter still

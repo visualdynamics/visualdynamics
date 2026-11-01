@@ -71,6 +71,25 @@ FILL_HANDLE = 9                # the square you drag to fill, in pixels
 FILL_GRAB = 4                  # slack around it, so it is not a pixel hunt
 
 
+def _fill_axis(block: list[int], to: int, count: int) -> list[tuple[int, int]]:
+    """(target, source) for each index one axis of a fill covers.
+
+    The block's own indices are their own sources. Each index beyond the
+    block, out to `to` (held to the `count` there are), takes the block
+    index as many steps from the block's start, wrapping, so the block
+    repeats.
+    """
+    to = min(max(to, 0), count - 1)
+    if to > block[-1]:
+        beyond = range(block[-1] + 1, to + 1)
+    elif to < block[0]:
+        beyond = range(to, block[0])
+    else:
+        beyond = range(0)
+    return ([(i, i) for i in block]
+            + [(t, block[(t - block[0]) % len(block)]) for t in beyond])
+
+
 class ItemCheckStyle(QProxyStyle):
     """The platform's style, with the check box in a table or list cell
     drawn by Fusion.
@@ -783,8 +802,8 @@ class CopyPasteTableView(QTableView):
                              | QTableView.EditTrigger.EditKeyPressed
                              | QTableView.EditTrigger.AnyKeyPressed)
         self.setItemDelegate(ChoiceDelegate(self))
-        self._filling = None       # (rows, columns) being dragged down from
-        self._fill_to = None       # the row the cursor is over, while dragging
+        self._filling = None       # (rows, columns) being dragged from
+        self._fill_to = None       # (row, column) under the cursor, while dragging
         self.viewport().setMouseTracking(True)   # to show the drag cursor
         # the copy button in the corner, shown while the pointer is over
         # the table — the same button every figure and report table
@@ -1228,7 +1247,8 @@ class CopyPasteTableView(QTableView):
         """The small square at the bottom-right of the selection, or None.
 
         It is the spreadsheet fill handle, the fastest way to carry one
-        value down a column without selecting the whole column first.
+        value down a column, or across a row, without selecting the
+        cells first.
         """
         rows, columns = self.selected_block()
         if not rows or self.model() is None:
@@ -1249,16 +1269,41 @@ class CopyPasteTableView(QTableView):
             -FILL_GRAB, -FILL_GRAB, FILL_GRAB, FILL_GRAB).contains(position)
 
     def fill_from_selection(self, through: int) -> tuple[int, int]:
-        """Repeat the selected block over the rows out to `through`, and
-        return (applied, rejected).
+        """Repeat the selected block along the items out to item
+        `through`, and return (applied, rejected).
 
-        The whole block repeats, not only its last row, so filling from
-        two alternating rows carries the alternation, as a spreadsheet
-        does. Columns named in a filled column's `carries` are filled
-        along with it, and hidden rows are skipped. A cell of the block
-        whose property does not apply to its item carries nothing, and a
-        target where the property does not apply refuses the value
-        (`TableModel.set_cells`).
+        This is the fill down a column (across the columns of a
+        transposed table), which double-clicking the handle does to the
+        last item; `fill_to` is the drag, which can also go across.
+        """
+        return self._fill(through, None)
+
+    def fill_to(self, row: int, column: int) -> tuple[int, int]:
+        """Repeat the selected block over the rectangle from it to the
+        cell at (`row`, `column`), and return (applied, rejected).
+
+        This is the drag of the fill handle. The rectangle is the one
+        the selection and that cell span, so a cell level with the
+        selection fills across, one in line with it fills down, and one
+        off both ways fills the whole rectangle between, as a
+        spreadsheet does.
+        """
+        if self._transposed():
+            return self._fill(column, row)
+        return self._fill(row, column)
+
+    def _fill(self, item_to: int, prop_to: int | None) -> tuple[int, int]:
+        """The fill behind `fill_from_selection` and `fill_to`: out to
+        item `item_to` along the items and property `prop_to` across the
+        properties (None stays within the selection's properties).
+
+        The whole block repeats both ways, not only its last row, so
+        filling from two alternating rows carries the alternation, as a
+        spreadsheet does. Columns named in a filled column's `carries`
+        are filled along with it, and hidden rows are skipped. A cell of
+        the block whose property does not apply to its item carries
+        nothing, and a target where the property does not apply refuses
+        the value (`TableModel.set_cells`).
         """
         rows, columns = self.selected_block()
         model = self.model()
@@ -1266,38 +1311,45 @@ class CopyPasteTableView(QTableView):
             return 0, 0
         # the fill runs along the items: down the rows, or across the
         # columns of a transposed table; the properties are the other way
-        along, properties = (columns, rows) if self._transposed() else (rows, columns)
-        # a column can declare companions that fill along with it —
-        # sorted, so a carried Type lands before the Unit that carried it
-        specs = getattr(model, 'columns', None)
-        if specs is not None:
-            wanted = set(properties)
-            for c in properties:
-                wanted.update(j for j, spec in enumerate(specs)
-                              if spec.title in specs[c].carries)
-            properties = sorted(wanted)
-        last = model.item_count() - 1
-        if through > along[-1]:
-            targets = range(along[-1] + 1, min(through, last) + 1)
-        elif through < along[0]:
-            targets = range(max(through, 0), along[0])
-        else:
-            return 0, 0
-        targets = self._shown(targets)
+        items, properties = (columns, rows) if self._transposed() else (rows, columns)
+        along = [(t, s) for t, s in _fill_axis(items, item_to, model.item_count())
+                 if self.row_shown(t)]
+        across = _fill_axis(properties, properties[-1] if prop_to is None else prop_to,
+                            len(model.columns))
+        if len(along) == len(items) and len(across) == len(properties):
+            return 0, 0       # released on the block itself: nothing to fill
+        # a column can declare companions that fill along with it, from
+        # the same column of the source item. Only where the fill runs
+        # along the items in the selected columns: across, a value moves
+        # to another property of the same item, which has no companion
+        # to bring. A companion the rectangle covers is the rectangle's.
+        specs = model.columns
+        covered = {prop for prop, _source in across}
+        carried = sorted({j for c in properties for j, spec in enumerate(specs)
+                          if spec.title in specs[c].carries} - covered)
+        own_items, own_props = set(items), set(properties)
         inapplicable = getattr(model, 'inapplicable', None)
         cells = []
-        for target in targets:
-            # step through the block in order, wrapping, measured from its top
-            source = along[(target - along[0]) % len(along)]
-            for prop in properties:
-                if inapplicable is not None and inapplicable(source, prop):
+        for target, source in along:
+            pairs = [(prop, from_prop) for prop, from_prop in across
+                     if not (target in own_items and prop in own_props)]
+            if target not in own_items:
+                pairs += [(prop, prop) for prop in carried]
+            # sorted, so a carried Type lands before the Unit that carried it
+            for prop, from_prop in sorted(pairs):
+                if inapplicable is not None and inapplicable(source, from_prop):
                     # blank because it does not apply, not because it is
                     # unset: there is nothing to carry, and carrying the
                     # blank would clear a plate's thickness filled from a
                     # beam
                     continue
                 cells.append((target, prop, model.data(
-                    model.cell(source, prop), Qt.ItemDataRole.EditRole)))
+                    model.cell(source, from_prop), Qt.ItemDataRole.EditRole)))
+        # One change, as a paste is: a cell that refuses its value (its
+        # type, its choices, a read-only column, a property that does not
+        # apply) keeps what it had and is counted, and every other cell of
+        # the rectangle still takes its value. Stopping at the first
+        # refusal would leave a fill half done in an order nobody can see.
         applied, rejected, reason = model.set_cells(cells)
         self.edits_applied.emit(applied, rejected, reason)
         return applied, rejected
@@ -1306,9 +1358,8 @@ class CopyPasteTableView(QTableView):
         if (event.button() == Qt.MouseButton.LeftButton
                 and self._on_handle(event.position().toPoint())):
             rows, columns = self.selected_block()
-            along = columns if self._transposed() else rows
-            self._filling = along
-            self._fill_to = along[-1]
+            self._filling = (rows, columns)
+            self._fill_to = (rows[-1], columns[-1])
             event.accept()
             return
         super().mousePressEvent(event)
@@ -1318,7 +1369,7 @@ class CopyPasteTableView(QTableView):
         if self._filling is not None:
             index = self.indexAt(position)
             if index.isValid():
-                self._fill_to = index.column() if self._transposed() else index.row()
+                self._fill_to = (index.row(), index.column())
                 self.viewport().update()
             event.accept()
             return
@@ -1347,7 +1398,7 @@ class CopyPasteTableView(QTableView):
             through, self._filling, self._fill_to = self._fill_to, None, None
             self.viewport().update()
             if through is not None:
-                self.fill_from_selection(through)
+                self.fill_to(*through)
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -1361,16 +1412,11 @@ class CopyPasteTableView(QTableView):
         rows, columns = self.selected_block()
         if self._filling is not None and rows:
             # outline what the drag would cover, before it is committed
-            if self._transposed():
-                left = min(self._fill_to, columns[0])
-                right = max(self._fill_to, columns[-1])
-                area = (self.visualRect(model.index(rows[0], left))
-                        .united(self.visualRect(model.index(rows[-1], right))))
-            else:
-                top = min(self._fill_to, rows[0])
-                bottom = max(self._fill_to, rows[-1])
-                area = (self.visualRect(model.index(top, columns[0]))
-                        .united(self.visualRect(model.index(bottom, columns[-1]))))
+            row, column = self._fill_to
+            area = (self.visualRect(model.index(min(row, rows[0]),
+                                                min(column, columns[0])))
+                    .united(self.visualRect(model.index(max(row, rows[-1]),
+                                                        max(column, columns[-1])))))
             painter.setPen(QPen(self.palette().highlight().color(), 1,
                                 Qt.PenStyle.DashLine))
             painter.drawRect(area.adjusted(0, 0, -1, -1))

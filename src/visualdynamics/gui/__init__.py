@@ -170,6 +170,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         code, message = opengl.check()
         print(message, flush=True)
         return code
+    if '--check-solver' in argv:
+        # and does it factor with the solver it should, oneMKL's PARDISO
+        # on Windows and Linux? (core.sparse_solve.check — 0 yes, 1 no)
+        from ..core import sparse_solve
+
+        code, message = sparse_solve.check()
+        print(message, flush=True)
+        return code
     # The launch itself does not ask: the check runs, once, before the
     # first 3-D view is built (`opengl.ready`, through
     # `opengl.three_d_view`), so a window that shows no 3-D view never

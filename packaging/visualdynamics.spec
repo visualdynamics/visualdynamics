@@ -16,6 +16,7 @@
 # entry point, what to leave out, and the platform wrapping.
 
 import platform
+import re
 import sys
 from pathlib import Path
 
@@ -67,6 +68,54 @@ EXCLUDED = [
     'tkinter', 'PyQt5', 'PyQt6', 'PySide2',
 ]
 
+# oneMKL, PARDISO's library (core.sparse_solve), on x86-64 Windows and
+# Linux where pypardiso is a dependency. pypardiso finds and loads it
+# through ctypes, so the analysis never sees it, and without it the
+# packaged app silently solves through SuperLU (a 193,627-brick model:
+# 70 minutes on Windows, 2026-11-02). The libraries are taken from the
+# Intel wheels' own file lists (Linux keeps them in <prefix>/lib,
+# Windows in <prefix>/Library/bin) and laid in the bundle's library
+# folder, which the bootloader puts on the library search path, so
+# mkl_rt finds the rest of oneMKL by name; entry.py points pypardiso at
+# mkl_rt there. `--check-solver` is what proves the build took it.
+#
+# Only what PARDISO loads, threaded through TBB (Brandon, 2026-11-02;
+# PLAN.md, "PARDISO on Windows and Linux"): the runtime, the core and
+# its interface, the TBB threading layer, every processor's kernels and
+# their vector math (another machine loads another one), and TBB with
+# its allocator and thread manager. Not the OpenMP runtime, which with
+# Intel's GPU runtime is under the developer-tools EULA and which TBB
+# threading does not need (entry.py sets the layer), nor ScaLAPACK,
+# BLACS or CDFT, nor the wheels' extra copies of each versioned name (a
+# wheel cannot hold a symlink): on Linux 795 MB of libraries become
+# about 530.
+INTEL = ('mkl', 'tbb', 'tcmlib')
+MKL_PARTS = (r'rt|core|intel_lp64|tbb_thread|def|mc3|avx2|avx512|avx10'
+             r'|vml_(?:def|mc3|avx2|avx512|avx10|cmpt)')
+INTEL_NAMES = re.compile(
+    rf'(?:libmkl_(?:{MKL_PARTS})|libtbb|libtbbmalloc|libtcm)\.so\.\d+'
+    rf'|(?:mkl_(?:{MKL_PARTS})\.\d+|tbb\d+|tbbmalloc|tcm)\.dll')
+
+
+def intel_libraries():
+    from importlib.metadata import PackageNotFoundError, distribution
+
+    found = []
+    for name in INTEL:
+        try:
+            files = distribution(name).files or ()
+        except PackageNotFoundError:
+            continue
+        for path in files:
+            if INTEL_NAMES.fullmatch(path.name.lower()):
+                found.append((str(Path(path.locate()).resolve()), '.'))
+    return found
+
+
+INTEL_LIBRARIES = [] if MAC else intel_libraries()
+if INTEL_LIBRARIES:
+    HIDDEN += ['pypardiso', 'pypardiso.pardiso_wrapper']
+
 datas = [
     # pint ships its unit definitions as data, and every unit string in
     # the application is parsed through them
@@ -94,7 +143,7 @@ datas = [
 analysis = Analysis(                                       # noqa: F821
     [str(ROOT / 'packaging' / 'entry.py')],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=INTEL_LIBRARIES,
     datas=datas,
     hiddenimports=HIDDEN,
     hookspath=[],

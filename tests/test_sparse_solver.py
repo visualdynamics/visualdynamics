@@ -551,10 +551,12 @@ def test_the_sparse_matrices_are_the_dense_ones():
 
 
 def _blas_pools():
+    """The thread counts of the BLAS pools the solve limits: every one
+    but oneMKL's, which is PARDISO's and keeps its threads."""
     from threadpoolctl import threadpool_info
 
     return sorted(pool['num_threads'] for pool in threadpool_info()
-                  if pool['user_api'] == 'blas')
+                  if pool['user_api'] == 'blas' and pool['internal_api'] != 'mkl')
 
 
 def _pools_during_the_solve(monkeypatch):
@@ -594,6 +596,32 @@ def test_the_sparse_solve_holds_each_blas_pool_to_a_quarter_of_the_cpus(monkeypa
             assert threads == quarter, cpus
 
 
+def test_the_sparse_solve_leaves_pardisos_threads_alone(monkeypatch):
+    """threadpoolctl counts oneMKL among the BLAS pools, and a limit by
+    API held PARDISO's factorization to a quarter of the CPUs; the
+    factorization is the one step every core shortens."""
+    from threadpoolctl import threadpool_info
+
+    from visualdynamics.core import sparse_solve
+
+    if sparse_solve._pypardiso() is None:
+        pytest.skip('oneMKL is built for x86-64 Windows and Linux')
+    monkeypatch.delenv('OPENBLAS_NUM_THREADS', raising=False)
+
+    def mkl():
+        return [pool['num_threads'] for pool in threadpool_info()
+                if pool['internal_api'] == 'mkl']
+
+    before = mkl()
+    assert before, 'oneMKL is loaded once pypardiso is'
+    assert 1 not in before, 'a limit of one has to differ to be seen'
+    monkeypatch.setattr(fem.os, 'cpu_count', lambda: 4)
+    with fem.blas_threads() as threads:
+        assert threads == 1
+        assert mkl() == before
+        assert set(_blas_pools()) <= {1}, 'the others are limited'
+
+
 def test_a_thread_count_the_user_set_is_left_alone(monkeypatch):
     monkeypatch.setenv('OPENBLAS_NUM_THREADS', '3')
     monkeypatch.setattr(fem.os, 'cpu_count', lambda: 4)
@@ -616,14 +644,18 @@ def _lanczos_runs(monkeypatch):
     return asked
 
 
-def test_the_modes_below_a_frequency_are_counted_from_one_factorization():
+@pytest.mark.parametrize('backend', ['', 'superlu'])
+def test_the_modes_below_a_frequency_are_counted_from_one_factorization(
+        backend, monkeypatch):
     """The signs of K - lambda M's pivots count the modes below lambda,
     rigid modes included: the dense solver's count at a frequency
     between two modes, from between the six rigid ones (all at 0 Hz)
-    and the first elastic one to the top of the set."""
-    from visualdynamics.core.sparse_solve import count_below
+    and the first elastic one to the top of the set. PARDISO's count
+    where it is, and SuperLU's."""
+    from visualdynamics.core.sparse_solve import BACKEND_VARIABLE, count_below
     from visualdynamics.demo import plate
 
+    monkeypatch.setenv(BACKEND_VARIABLE, backend)
     model = plate.build()
     dense = model.eigensolution(solver='dense', num_modes=80)
     # the reduced system the solver counts in: the rotations nothing

@@ -1433,7 +1433,8 @@ def blas_threads() -> Iterator[int | None]:
     pool's threads mostly wait on one another, so fewer threads are
     faster and two full pools contend (`BLAS_CPUS_PER_THREAD`). The
     limit is undone on the way out, so the rest of the package keeps
-    every core.
+    every core. oneMKL's pool is left alone: it is PARDISO's, and the
+    factorization is large work that every core shortens.
     """
     from threadpoolctl import threadpool_limits
 
@@ -1442,7 +1443,10 @@ def blas_threads() -> Iterator[int | None]:
         return
     threads = max(1, min(BLAS_MOST_THREADS,
                          (os.cpu_count() or 1) // BLAS_CPUS_PER_THREAD))
-    with threadpool_limits(limits=threads, user_api='blas'):
+    # a library's prefix outranks its API, and None leaves it be
+    # (2026-11-02): threadpoolctl counts oneMKL among the BLAS pools
+    with threadpool_limits(limits={'blas': threads, 'libmkl_rt': None,
+                                   'mkl_rt': None}):
         yield threads
 
 

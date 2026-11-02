@@ -183,6 +183,7 @@ _DIMENSIONALITY = {
     'acceleration': '[length] / [time] ** 2',
     'velocity': '[length] / [time]',
     'pressure': '[mass] / [length] / [time] ** 2',
+    'density': '[mass] / [length] ** 3',
     'temperature': '[temperature]',
     'voltage': '[length] ** 2 * [mass] / [current] / [time] ** 3',
     # pint spells "no dimension" as the empty expression; asking it for the
@@ -221,9 +222,16 @@ _ANGLE_TOKEN = re.compile(r'\b(rad|radian|radians|deg|degree|degrees)\b')
 
 
 def _derived_units(units: dict) -> dict:
-    """The angular, moment and modal units a system's base units imply."""
+    """The angular, moment, density and modal units a system's base
+    units imply."""
     out = {tag: unit for tag, unit in ANGULAR_UNITS.items()
            if tag not in units}
+    # mass per length cubed, coherent with the system: slinch/in**3
+    # where structural models are in in-slinch-lbf-s. Added for flight
+    # data whose trajectory carries air density (2026-11-02): one unit
+    # with no dimension left every record of the object undefined.
+    if 'density' not in units and 'mass' in units and 'length' in units:
+        out['density'] = f"{units['mass']}/{units['length']}**3"
     if 'moment' not in units and 'force' in units and 'length' in units:
         out['moment'] = f"{units['force']}*{units['length']}"
     if 'mass' in units:
@@ -640,8 +648,8 @@ class UnitSystem:
     coherent system (see `coherent`), because most file formats cannot
     label a value as g.
 
-    The angular, moment and modal units are filled in from the base
-    units when the system does not name them.
+    The angular, moment, density and modal units are filled in from
+    the base units when the system does not name them.
     """
 
     name: str

@@ -63,7 +63,10 @@ something that cannot be bought back.
    `QtWidgets`, `QtTest`, `QtWebEngineWidgets`, `QtWebEngineCore`,
    `QtWebChannel`, `QtMultimedia`. Before
    importing a Qt module that is not already used, read that module's
-   own licensing page — some are GPL-or-commercial. Dependencies are
+   own licensing page — some are GPL-or-commercial. A license outside
+   those is the maintainers' decision, recorded beside the dependency
+   in `pyproject.toml`; the one such today is Intel's oneMKL, behind
+   `pypardiso`, on x86-64 Windows and Linux only. Dependencies are
    declared by name with no pin and no upper bound (principle 12);
    never cap a version to work around a break.
 

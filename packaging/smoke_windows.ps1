@@ -126,6 +126,19 @@ switch ($movieCode) {
     }
 }
 
+# 1d. Does the installed build factor with PARDISO? A bundle that left
+# oneMKL out still solves, through SuperLU — a 193,627-brick model took
+# 70 minutes that way (2026-11-02) — and only this check says so
+# (core.sparse_solve.check: 0 PARDISO, 1 anything else, and why).
+$solverLog = 'dist\smoke\solver.log'
+$solverErr = 'dist\smoke\solver-stderr.log'
+$solverCode = Invoke-Bounded @('--check-solver') $solverLog $solverErr 180
+Get-Content $solverLog
+if ($solverCode -ne 0) {
+    Get-Content $solverErr | Select-Object -Last 40
+    throw "the solver check failed (exit $solverCode)"
+}
+
 # 2. A small real project for it to open — made by the *source* tree's
 # python, read by the *installed* build, which is exactly the round
 # trip a colleague's machine performs on a file made on this one.

@@ -6,9 +6,12 @@ with it a few hundred times: every Lanczos step and every polish step
 is a solve. On macOS the factorization is Apple's, in the Accelerate
 framework every Mac carries (Sparse Solvers: a supernodal Cholesky, or
 LDLT when the matrix is not positive definite), reached through ctypes
-from the layouts in its public header. Everywhere else, and wherever
-Accelerate refuses a matrix, it is SuperLU's LU through scipy, told the
-matrix is symmetric so it orders and pivots for that.
+from the layouts in its public header. On Windows and Linux on Intel
+and AMD processors it is PARDISO, the multithreaded supernodal solver
+in Intel's oneMKL, through pypardiso (Cholesky, or LDLT with
+Bunch-Kaufman pivoting). Everywhere else, and wherever those refuse a
+matrix, it is SuperLU's LU through scipy, told the matrix is symmetric
+so it orders and pivots for that.
 """
 
 from __future__ import annotations
@@ -17,14 +20,19 @@ import ctypes as C
 import math
 import os
 import sys
+import weakref
 from typing import Any
 
 import numpy as np
 import scipy.sparse as sp
 
-#: set to 'superlu' to keep Accelerate out, which is how the tests run
-#: both paths on one machine
+#: set to 'superlu' to keep Accelerate and PARDISO out, which is how the
+#: tests run both paths on one machine
 BACKEND_VARIABLE = 'VISUALDYNAMICS_SPARSE_SOLVER'
+
+
+def _superlu_only() -> bool:
+    return os.environ.get(BACKEND_VARIABLE, '').lower() == 'superlu'
 
 
 #: the backward error a probe solve may have before the factor is
@@ -56,10 +64,12 @@ def count_below(stiffness: Any, mass: Any, shift: float) -> int:
     By Sylvester's law of inertia, a symmetric matrix factored as
     L D Lᵀ has as many negative entries in D as it has negative
     eigenvalues, and the negative eigenvalues of K - shift M are the
-    modes below the shift (M positive definite). SuperLU in symmetric
-    mode with no pivoting off the diagonal is that factorization, its
-    U's diagonal being D, which is why the threshold is zero here and
-    not the factor the solves use. A pivot within round-off of zero,
+    modes below the shift (M positive definite). Where PARDISO is
+    available its LDLT reports the count itself; Bunch-Kaufman's 2 x 2
+    pivots keep the count. Elsewhere SuperLU in symmetric mode with no
+    pivoting off the diagonal is that factorization, its U's diagonal
+    being D, which is why the threshold is zero here and not the
+    factor the solves use. A pivot within round-off of zero,
     from a shift on top of an eigenvalue, has a sign that is round-off,
     so a caller allows the count one either way.
 
@@ -79,8 +89,8 @@ def count_below(stiffness: Any, mass: Any, shift: float) -> int:
     Raises
     ------
     RuntimeError
-        If the factorization fails or had to pivot off the diagonal,
-        so its signs are not the inertia.
+        If the factorization fails, had to pivot off the diagonal or
+        perturbed a pivot, so its signs are not the inertia.
 
     References
     ----------
@@ -93,7 +103,12 @@ def count_below(stiffness: Any, mass: Any, shift: float) -> int:
     """
     from scipy.sparse.linalg import splu
 
-    factor = splu(sp.csc_matrix(stiffness - float(shift) * mass),
+    shifted = sp.csc_matrix(stiffness - float(shift) * mass)
+    # 1.5 s where SuperLU took 29 on a 135,000-DOF frame, 5.2 s to 41 on
+    # a 106,000-DOF block of bricks, the same counts (2026-11-02)
+    if not _superlu_only() and _pypardiso() is not None:
+        return _pardiso_negatives(shifted)
+    factor = splu(shifted,
                   permc_spec='MMD_AT_PLUS_A',
                   options={'SymmetricMode': True, 'DiagPivotThresh': 0.0})
     if not np.array_equal(factor.perm_r, factor.perm_c):
@@ -324,9 +339,227 @@ class AccelerateFactor:
             self._factor = None
 
 
-def factor_symmetric(matrix: Any) -> AccelerateFactor | SuperLUFactor:
-    """The matrix factored, by Accelerate where it is and takes the
-    matrix, else by SuperLU; both answer `solve(rhs)` and `shape`.
+# ---- PARDISO, in Intel's oneMKL, through pypardiso -------------------------
+#
+# A dependency on x86-64 Windows and Linux only, where oneMKL is built
+# (Brandon, 2026-11-02). A Windows machine's 193,627-brick modal solve
+# took 70 minutes through SuperLU where a Mac's Accelerate took two;
+# measured on a two-core Linux laptop, PARDISO factored a 106,000-DOF
+# block of bricks in 6.1 s on one thread and 3.6 s on four, against
+# SuperLU's 239 s, and the 608,000-DOF block of 192,000 bricks in 106 s.
+# Its own nested-dissection ordering (METIS) is most of that: the
+# factor had half SuperLU's nonzeros on the block, and fewer on a thin
+# frame as well. PLAN.md, "PARDISO on Windows and Linux".
+
+_pardiso: dict[str, Any] = {}
+
+
+def _pypardiso() -> Any:
+    """The pypardiso module, imported once; None where it or the oneMKL
+    library it loads is not."""
+    if 'module' not in _pardiso:
+        # threaded through TBB, before oneMKL loads (Brandon, 2026-11-02):
+        # the packaged builds carry TBB and not the OpenMP runtime, which
+        # is under Intel's developer-tools EULA, and TBB factored as fast
+        # on the measured machine. A default, so a user's own choice
+        # stands where the library for it is installed
+        os.environ.setdefault('MKL_THREADING_LAYER', 'TBB')
+        try:
+            import pypardiso
+        except (ImportError, OSError) as missing:
+            pypardiso = None
+            _pardiso['why'] = f'{type(missing).__name__}: {missing}'
+        _pardiso['module'] = pypardiso
+    return _pardiso['module']
+
+
+def expected_backend() -> str:
+    """The backend this machine should factor with: 'accelerate' on a
+    Mac, 'pardiso' on x86-64 Windows and Linux (where `pypardiso` is a
+    dependency), 'superlu' anywhere else."""
+    import platform
+
+    if sys.platform == 'darwin':
+        return 'accelerate'
+    if platform.machine() in ('x86_64', 'AMD64'):
+        return 'pardiso'
+    return 'superlu'
+
+
+def check() -> tuple[int, str]:
+    """Check that this installation factors with the solver it should.
+
+    `visualdynamics --check-solver` runs this and exits with the
+    returned code. The packaged builds are tested with it, because a
+    bundle that leaves oneMKL out still solves, through SuperLU, many
+    times slower on a large model.
+
+    Returns
+    -------
+    tuple of (int, str)
+        0 and the backend, with the library it loaded, when a small
+        model's factorization took `expected_backend` and its solve
+        and mode count are right; 1 and what happened otherwise.
+    """
+    n = 1000
+    matrix = sp.diags([np.full(n - 1, -1.0), np.full(n, 2.5), np.full(n - 1, -1.0)],
+                      [-1, 0, 1], format='csc')
+    expected = expected_backend()
+    try:
+        factor = factor_symmetric(matrix)
+        rhs = np.cos(np.arange(n, dtype=np.float64))
+        residual = float(np.linalg.norm(matrix @ factor.solve(rhs) - rhs)
+                         / np.linalg.norm(rhs))
+        below = count_below(matrix, sp.identity(n, format='csc'), 1.0)
+    except Exception as failure:  # noqa: BLE001 — whatever the packaged app would hit
+        return 1, f'the factorization failed: {type(failure).__name__}: {failure}'
+    # the eigenvalues are 2.5 - 2 cos(k pi / (n + 1)), k = 1 to n
+    eigenvalues = 2.5 - 2.0 * np.cos(np.arange(1, n + 1) * np.pi / (n + 1))
+    exact = int(np.count_nonzero(eigenvalues < 1.0))
+    where = ''
+    if factor.backend == 'pardiso':
+        from threadpoolctl import threadpool_info
+
+        layers = {pool.get('threading_layer') for pool in threadpool_info()
+                  if pool['internal_api'] == 'mkl'}
+        where = f' ({factor._solver.libmkl._name}, threaded by {", ".join(sorted(map(str, layers)))})'
+    said = f'{factor.backend}{where}: residual {residual:.1e}, {below} of {n} modes below 1.0'
+    if factor.backend != expected:
+        why = _pardiso.get('why', '') if expected == 'pardiso' else ''
+        return 1, f'expected {expected}, got {said}' + (f'; {why}' if why else '')
+    if not (residual < 1e-12 and below == exact):
+        return 1, f'wrong answers from {said}; {exact} are below 1.0'
+    return 0, said
+
+
+def _upper_triangle(matrix: Any) -> Any:
+    """The upper triangle, CSR, every diagonal entry stored even where
+    it is zero, as PARDISO requires of a symmetric matrix."""
+    strict = sp.triu(matrix, k=1, format='coo')
+    index = np.arange(matrix.shape[0])
+    # built from triplets: a sum of matrices would drop the zeros
+    upper = sp.csr_matrix(
+        (np.concatenate([np.asarray(matrix.diagonal(), dtype=np.float64),
+                         strict.data.astype(np.float64)]),
+         (np.concatenate([index, strict.row]), np.concatenate([index, strict.col]))),
+        shape=matrix.shape)
+    upper.sort_indices()
+    return upper
+
+
+#: PARDISO's iparm, 1-based as its manual numbers them: the settings
+#: given rather than oneMKL's defaults (1), nested dissection by
+#: parallel METIS (2), pivots perturbed at 1e-8 in LDLT (10), no
+#: scaling (11) and no matching (13), which the matrix's own symmetric
+#: scaling makes needless, Bunch-Kaufman pivots (21), and the two-level
+#: factorization that spreads over many cores (24)
+PARDISO_SETTINGS = {1: 1, 2: 3, 10: 8, 11: 0, 13: 0, 21: 1, 24: 1}
+
+#: iterative refinement steps on each solve (iparm 8), by matrix type.
+#: None for Cholesky: its factor is exact, and a refined answer is
+#: corrected by its own residual, so the operator is no longer
+#: symmetric. oneMKL's default of two steps left it 1.3e-8 off
+#: symmetric on the rigid-link test model, against 7e-16 unrefined, and
+#: the block Lanczos, which reads that asymmetry as part of every
+#: pair's residual, left a free plate's 60th mode 1.2e-5 off where
+#: SuperLU's solves gave 1.7e-12. Two for LDLT: its perturbed pivots
+#: factor a nearby matrix, and refinement brings the solve back, a
+#: shifted Laplacian's backward error 1.5e-8 to 8e-16 (2026-11-02)
+PARDISO_REFINEMENT = {2: 0, -2: 2}
+
+
+def _pardiso_solver(mtype: int) -> Any:
+    """A pypardiso solver for matrix type `mtype` (2 positive definite,
+    -2 symmetric indefinite), with `PARDISO_SETTINGS` and the type's
+    `PARDISO_REFINEMENT`."""
+    # the matrix is kept, not hashed, to tell the factored one at each
+    # solve: a hash of a large model's matrix took longer than the solve
+    # it guarded
+    solver = _pypardiso().PyPardisoSolver(mtype=mtype, size_limit_storage=math.inf)
+    for index, value in PARDISO_SETTINGS.items():
+        solver.set_iparm(index, value)
+    solver.set_iparm(8, PARDISO_REFINEMENT[mtype])
+    return solver
+
+
+def _pardiso_negatives(matrix: Any) -> int:
+    """The negative eigenvalue count of a symmetric matrix, from
+    PARDISO's LDLT (`count_below`)."""
+    from pypardiso.pardiso_wrapper import PyPardisoError
+
+    solver = _pardiso_solver(-2)
+    try:
+        solver.factorize(_upper_triangle(matrix))
+        perturbed = int(solver.get_iparm(14))
+        negatives = int(solver.get_iparm(23))
+    except (PyPardisoError, ValueError) as failure:
+        raise RuntimeError(f'PARDISO could not factor the matrix: {failure}') from None
+    finally:
+        solver.free_memory(everything=True)
+    if perturbed:
+        raise RuntimeError(f'PARDISO perturbed {perturbed} pivots')
+    return negatives
+
+
+class PardisoFactor:
+    """PARDISO's supernodal factorization of a symmetric matrix:
+    Cholesky, or LDLT when the matrix is not positive definite.
+
+    Raises `ValueError` when PARDISO is not available or refuses the
+    matrix, so the caller can fall back.
+    """
+
+    backend = 'pardiso'
+
+    def __init__(self, matrix: Any) -> None:
+        pypardiso = _pypardiso()
+        if pypardiso is None:
+            raise ValueError('PARDISO is not available here')
+        from pypardiso.pardiso_wrapper import PyPardisoError
+
+        self._upper = _upper_triangle(matrix)
+        n = self._upper.shape[0]
+        self.shape: tuple[int, int] = (n, n)
+        self._solver = None
+        failure: Exception | None = None
+        for mtype, kind in ((2, 'Cholesky'), (-2, 'LDLT')):
+            solver = _pardiso_solver(mtype)
+            try:
+                solver.factorize(self._upper)
+            except (PyPardisoError, ValueError) as refused:
+                solver.free_memory(everything=True)
+                failure = refused
+                continue
+            self._solver, self.kind = solver, kind
+            # oneMKL's own memory, which Python does not see, freed when
+            # the factor is dropped: without it a factor held its
+            # gigabytes until exit. A finalizer rather than __del__,
+            # which ran during interpreter shutdown, after the modules
+            # pypardiso's release calls on were gone
+            self._finalizer = weakref.finalize(self, solver.free_memory, True)
+            # LDLT perturbs a pivot within round-off of zero and reports
+            # success on a singular matrix, as Accelerate's LDLT does;
+            # one probe solve tells, and is cheap beside the factor
+            if not probe_backward_error(matrix, self.solve) < PROBE_LIMIT:
+                self._release()
+                raise ValueError('PARDISO found the matrix singular')
+            return
+        raise ValueError(f'PARDISO refused the matrix: {failure}')
+
+    def solve(self, rhs: Any) -> np.ndarray:
+        """X with A X = `rhs`, for one right-hand side or a block of
+        them, in the shape `rhs` came in."""
+        return self._solver.solve(self._upper, np.asarray(rhs, dtype=np.float64))
+
+    def _release(self) -> None:
+        self._finalizer()
+        self._solver = None
+
+
+def factor_symmetric(matrix: Any) -> AccelerateFactor | PardisoFactor | SuperLUFactor:
+    """The matrix factored by the fastest solver here that takes it:
+    Accelerate on a Mac, PARDISO on x86-64 Windows and Linux, else
+    SuperLU. Each answers `solve(rhs)` and `shape`.
 
     Parameters
     ----------
@@ -335,11 +568,12 @@ def factor_symmetric(matrix: Any) -> AccelerateFactor | SuperLUFactor:
 
     Returns
     -------
-    AccelerateFactor or SuperLUFactor
+    AccelerateFactor, PardisoFactor or SuperLUFactor
     """
-    if os.environ.get(BACKEND_VARIABLE, '').lower() != 'superlu':
-        try:
-            return AccelerateFactor(matrix)
-        except ValueError:
-            pass
+    if not _superlu_only():
+        for fast in (AccelerateFactor, PardisoFactor):
+            try:
+                return fast(matrix)
+            except ValueError:
+                pass
     return SuperLUFactor(matrix)

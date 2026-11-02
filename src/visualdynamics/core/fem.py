@@ -230,6 +230,16 @@ POLISH_STEPS = 12
 #: (`Ticker.extend_to`)
 EIGEN_SOLVES_PER_MODE = 6
 LANCZOS_GUARD = 8
+#: the sparse solve's bar, in units: the assembly's share and the eigen
+#: iterations' and polish's, each stage's own count spread over its
+#: share (`Ticker.share`). Counted per element and per solve as they
+#: were, a 190,000-element model's assembly was nearly the whole bar,
+#: which read full after 30 seconds of a 70-minute solve on Windows
+#: (2026-11-02). The factorization between them cannot count itself
+#: and shows as busy. The polish has its own share: counted in with the
+#: iterations, its steps arrived after their estimate was spent, and
+#: the bar stood full for the last tenth of a solve.
+SOLVE_BAR = {'assembly': 200, 'eigen': 550, 'polish': 250}
 #: which eigensolver the sparse solve runs on the shift-inverted
 #: operator: 'block', the block Lanczos written here
 #: (`block_lanczos_modes`), or 'arpack', scipy's `eigsh`. The block
@@ -2637,13 +2647,16 @@ class Model:
             Which solver; 'auto' is dense up to `SPARSE_ABOVE` degrees of
             freedom and sparse beyond.
         progress : callable, optional
-            Told ``(done, total)`` as the solve advances: the assembly per
-            element, the factorization, the eigen iterations (an estimated
-            length, extended while they run), and the polish. The dense
-            solver's eigensolution is one call that cannot count itself,
-            and is announced as ``(done, core.progress.BUSY)``. The
-            window's progress bar reads it, and anything it raises stops
-            the solve.
+            Told ``(done, total)`` as the solve advances. The sparse
+            solver gives the assembly, the eigen iterations and the
+            polish each a fixed part of the total, counted in the
+            stage's own pieces: per element, then per solve against an
+            estimate that is extended while they run, then per polish
+            step. A stage that is one call and cannot count itself
+            (the sparse factorization, the dense eigensolution) is
+            announced as ``(done, core.progress.BUSY)``. The window's
+            progress bar reads it, and anything it raises stops the
+            solve.
 
         Returns
         -------
@@ -2871,8 +2884,14 @@ class Model:
                 f'a model of {self.num_dof} degrees of freedom is solved '
                 'for its lowest modes: say how many (num_modes) or up to '
                 'what frequency (maximum_frequency)')
+        if ticker is not None:
+            assembly, eigen, polish = (ticker.share(SOLVE_BAR[stage])
+                                       for stage in ('assembly', 'eigen',
+                                                     'polish'))
+        else:
+            assembly = eigen = polish = None
         reduced_k, reduced_m, transform, scale, sigma, stiffness = \
-            self.scaled_system(fixed, ticker)
+            self.scaled_system(fixed, assembly)
         size = reduced_m.shape[0]
         # the shifted factor, once: eigsh's shift-invert and the polish
         # both solve with it, and eigsh built its own until the bar
@@ -2882,7 +2901,7 @@ class Model:
         # (`sparse_solve`, 2026-10-18): the factorization and its solves
         # were 23 of a 270,000-DOF model's 29 seconds, on one core
         if ticker is not None:
-            ticker.add(1)
+            ticker.busy()
         try:
             factor = factor_symmetric((reduced_k - sigma * reduced_m).tocsc())
         except RuntimeError as failure:
@@ -2893,8 +2912,8 @@ class Model:
                 'with neither mass nor stiffness'
                 + (f' ({len(empty)} of them)' if len(empty) else '')
                 + f' — {failure}') from None
-        if ticker is not None:
-            ticker.tick()
+        # the iterations' solves count against the eigen share
+        ticker = eigen
 
         def solve(vector):
             if ticker is not None:
@@ -2935,6 +2954,8 @@ class Model:
             # asked outright). The check below still holds a miscount
             # to the answer, at the cost of another run.
             from .sparse_solve import count_below
+            if ticker is not None:
+                ticker.busy()
             try:
                 wanted = count_below(reduced_k, reduced_m, limit) + 2
             except RuntimeError:
@@ -2983,7 +3004,7 @@ class Model:
         # step also makes the modes mass-normal exactly.
         eigenvalues, vectors, _residuals = polish_modes(
             reduced_k, reduced_m, sigma, vectors, wanted, factor=factor,
-            ticker=ticker)
+            ticker=polish)
         return eigenvalues, transform @ (scale @ vectors), stiffness
 
     def constraint_transform(self, fixed: Sequence[str] = (),

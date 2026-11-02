@@ -12,6 +12,7 @@ import pytest
 from test_fem import ALUMINUM
 
 from visualdynamics.core.fem import Model, Section
+from visualdynamics.core.progress import BUSY
 
 ROD = Section.rod('rod', 0.01)
 #: every direction but X, on the nodes of a spring-and-mass chain
@@ -164,4 +165,5 @@ def test_the_progress_bar_counts_the_springs():
     told = []
     model.eigensolution(num_modes=8, solver='sparse',
                         progress=lambda done, total: told.append((done, total)))
-    assert told and all(done <= total for done, total in told), told
+    assert told and all(done <= total for done, total in told
+                        if total != BUSY), told

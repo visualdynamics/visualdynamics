@@ -2405,6 +2405,30 @@ def test_fit_modes_trusts_the_sessions_own_judgment():
     assert abs(teeth[1] - teeth[0]) < 1.5
 
 
+def test_fit_modes_bounds_that_miss_the_lines_raise():
+    """The session widens a range holding no line to the whole band, as
+    the screen's view needs; a script's bounds that miss the data used
+    to fit everything that way. Bounds above the data and bounds between
+    two lines (the plate's spacing is 2 Hz) raise; bounds overlapping
+    the data's start still fit only inside them."""
+    from conftest import fixture_path
+
+    import visualdynamics
+
+    project = visualdynamics.Project('check')
+    project.add('FRF', visualdynamics.import_file(
+        fixture_path('plate', 'frfs.npz')))
+    for bounds in [(5000.0, 6000.0), (301.2, 301.8)]:
+        with pytest.raises(ValueError, match='hold none of'):
+            project.fit_modes('FRF', bounds=bounds, limit=1)
+    assert 'FRF Modes' not in project.names
+    fitted = project[project.fit_modes('FRF', bounds=(-100.0, 700.0),
+                                       limit=2)]
+    frequencies = sorted(np.atleast_1d(fitted.frequency))
+    assert len(frequencies) == 2
+    assert frequencies[-1] < 700.0, frequencies
+
+
 # ---- the plot bar during a fit ------------------------------------------
 
 

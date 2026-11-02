@@ -484,3 +484,26 @@ def test_an_abscissa_unit_not_understood_is_noted_and_left(tmp_path):
         project = escdf_objects.load(path)
     np.testing.assert_allclose(project['Run'].abscissa, [0.0, 0.01, 0.02])
     np.testing.assert_allclose(project['Run (2)'].abscissa, [0.0, 10.0, 20.0])
+
+
+def test_a_trajectory_with_air_density_keeps_its_units(tmp_path):
+    """A flight trajectory's density had no dimension, and that one unit
+    left km, Pa and K undefined with it (2026-11-02). A blank unit
+    stays undefined on its own."""
+    file = escdf.File(created_by='x')
+    run = escdf.Dataset('t', 'data', 'Trajectory')
+    run.values = {'data_type': 'time response',
+                  'channel': np.array([['1X+'], ['2X+'], ['3X+'], ['4X+'], ['5X+']]),
+                  'ordinate_unit': np.array(['km', '', 'kg/m^3', 'Pa', 'K'], dtype=object),
+                  'abscissa_unit': 's', 'abscissa_start': 0.0, 'abscissa_step': 0.1,
+                  'ordinate': np.ones((5, 3))}
+    file.activities['a'] = escdf.Activity('a', 'Flight', data={'t': run})
+    path = tmp_path / 'trajectory.escdf'
+    escdf.write(file, path)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        trajectory = escdf_objects.load(path)['Trajectory']
+    assert trajectory.ordinate_unit == ['km', None, 'kg/m**3', 'Pa', 'K']
+    assert trajectory.ordinate_dim == ['length', 'unknown', 'density',
+                                       'pressure', 'temperature']
+    assert trajectory.ordinate[0, 0] == pytest.approx(1000.0)

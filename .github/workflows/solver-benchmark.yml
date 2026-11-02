@@ -1,0 +1,37 @@
+name: solver benchmark
+
+# The sparse modal solve timed on a hosted runner: blocks of bricks up
+# to the 193,627 of a model that took 70 minutes on Windows through
+# SuperLU (2026-11-02), through the machine's own factorization
+# (PARDISO on Windows and Linux) and, for the smaller blocks, SuperLU.
+# By hand only: it measures, it gates nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner image'
+        default: 'windows-latest'
+      blocks:
+        description: 'Blocks of bricks, nx x ny x nz'
+        default: '40x40x20 60x40x40 80x60x40'
+      superlu_up_to:
+        description: 'Also solve blocks of up to this many bricks by SuperLU'
+        default: '32000'
+
+jobs:
+  benchmark:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: '3.14', cache: pip}
+      - run: pip install -e .
+      # the inputs through the environment, not pasted into the script;
+      # bash on every runner, so the block list splits the same way
+      - name: Solve
+        shell: bash
+        env:
+          BLOCKS: ${{ inputs.blocks }}
+          SUPERLU_UP_TO: ${{ inputs.superlu_up_to }}
+        run: python tools/solver_benchmark.py --superlu-up-to "$SUPERLU_UP_TO" $BLOCKS

@@ -172,3 +172,145 @@ def test_the_venvs_are_levelled_eagerly_and_gated_by_pytest_s_own_code():
     with open(os.path.join(ROOT, 'REMAINING-TASKS.md'),
               encoding='utf-8') as handle:
         assert 'tools/level_venv.sh' in handle.read()
+
+
+def test_the_windows_and_linux_builds_check_they_factor_with_pardiso():
+    """A bundle that leaves oneMKL out still solves, through SuperLU,
+    and nothing else would say so: the Windows smoke test runs the
+    installed app's `--check-solver` and fails on anything but 0, and
+    the Linux build runs it on the bundle before making the AppImage."""
+    with open(os.path.join(ROOT, 'packaging', 'smoke_windows.ps1'),
+              encoding='utf-8') as handle:
+        smoke = handle.read()
+    assert "Invoke-Bounded @('--check-solver')" in smoke
+    assert 'throw "the solver check failed' in smoke
+    assert smoke.index('--check-solver') < smoke.index('# 2. A small real project')
+    with open(os.path.join(ROOT, 'packaging', 'build_linux.sh'),
+              encoding='utf-8') as handle:
+        build = handle.read()
+    assert 'set -euo pipefail' in build
+    line = next(line for line in build.splitlines() if '--check-solver' in line)
+    assert line == 'dist/VisualDynamics/VisualDynamics --check-solver'
+    assert build.index('PyInstaller') < build.index(line) < build.index('appimagetool "$ROOT"')
+
+
+def test_the_spec_collects_onemkl_where_pypardiso_is_a_dependency():
+    """pypardiso loads oneMKL through ctypes, which PyInstaller's
+    analysis cannot see; the spec takes every shared library the Intel
+    wheels list, off the Mac, and entry.py points pypardiso at them."""
+    with open(os.path.join(ROOT, 'packaging', 'visualdynamics.spec'),
+              encoding='utf-8') as handle:
+        spec = handle.read()
+    assert "INTEL = ('mkl', 'tbb', 'tcmlib')" in spec
+    assert 'INTEL_LIBRARIES = [] if MAC else intel_libraries()' in spec
+    assert 'binaries=INTEL_LIBRARIES,' in spec
+    with open(os.path.join(ROOT, 'packaging', 'entry.py'),
+              encoding='utf-8') as handle:
+        entry = handle.read()
+    main = entry[entry.index("if __name__ == '__main__':"):]
+    assert main.index('bundled_mkl()') < main.index('from visualdynamics.gui import main')
+
+
+def test_entry_points_pypardiso_at_the_bundled_mkl(monkeypatch, tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        'packaged_entry', os.path.join(ROOT, 'packaging', 'entry.py'))
+    entry = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(entry)
+    monkeypatch.delenv('PYPARDISO_MKL_RT', raising=False)
+    monkeypatch.delenv('MKL_THREADING_LAYER', raising=False)
+    entry.bundled_mkl()
+    assert 'PYPARDISO_MKL_RT' not in os.environ, 'from source: pypardiso finds its own'
+    assert 'MKL_THREADING_LAYER' not in os.environ
+    for name in ('libmkl_rt.so.2', 'libmkl_core.so.2', 'mkl_rt.2.dll', 'mkl_rt.dll.bak'):
+        (tmp_path / name).write_bytes(b'')
+    monkeypatch.setattr(entry.sys, '_MEIPASS', str(tmp_path), raising=False)
+    monkeypatch.setenv('PYPARDISO_MKL_RT', '/somewhere/else/libmkl_rt.so')
+    monkeypatch.setenv('MKL_THREADING_LAYER', 'INTEL')
+    entry.bundled_mkl()
+    assert os.environ['PYPARDISO_MKL_RT'] == str(tmp_path / 'mkl_rt.2.dll')
+    assert os.environ['MKL_THREADING_LAYER'] == 'TBB', 'the one layer the build carries'
+    # a renamed copy is not the library, though Windows would load it
+    (tmp_path / 'mkl_rt.2.dll').unlink()
+    (tmp_path / 'libmkl_rt.so.2').unlink()
+    monkeypatch.setenv('PYPARDISO_MKL_RT', 'unset by the test')
+    entry.bundled_mkl()
+    assert os.environ['PYPARDISO_MKL_RT'] == 'unset by the test'
+
+
+def _spec_library_names():
+    """The spec's INTEL_NAMES pattern, run from its own source: the spec
+    is not importable, since PyInstaller injects its globals."""
+    import ast
+    import re
+
+    with open(os.path.join(ROOT, 'packaging', 'visualdynamics.spec'),
+              encoding='utf-8') as handle:
+        tree = ast.parse(handle.read())
+    wanted = [node for node in tree.body if isinstance(node, ast.Assign)
+              and getattr(node.targets[0], 'id', '') in ('MKL_PARTS', 'INTEL_NAMES')]
+    assert len(wanted) == 2
+    space = {'re': re}
+    # the spec's own two assignments, from its source and nothing else
+    exec(compile(ast.Module(body=wanted, type_ignores=[]), 'spec', 'exec'), space)  # noqa: S102
+    return space['INTEL_NAMES']
+
+
+#: the shared libraries the oneMKL, TBB, TCM, OpenMP and GPU-runtime
+#: wheels list, as measured on 2026-11-02 (a sample of each kind)
+LINUX_WHEELS = [
+    'libiomp5.so', 'libiomp5_db.so', 'libmkl_avx10.so.3',
+    'libmkl_avx2.so.3', 'libmkl_avx512.so.3',
+    'libmkl_blacs_intelmpi_ilp64.so.2', 'libmkl_cdft_core.so.2',
+    'libmkl_core.so.3', 'libmkl_def.so.3', 'libmkl_gnu_thread.so.3',
+    'libmkl_intel_ilp64.so.3', 'libmkl_intel_lp64.so.3',
+    'libmkl_intel_thread.so.3', 'libmkl_mc3.so.3', 'libmkl_rt.so.3',
+    'libmkl_scalapack_lp64.so.2', 'libmkl_sequential.so.3',
+    'libmkl_tbb_thread.so.3', 'libmkl_vml_avx10.so.3',
+    'libmkl_vml_avx2.so.3', 'libmkl_vml_avx512.so.3',
+    'libmkl_vml_cmpt.so.3', 'libmkl_vml_def.so.3', 'libmkl_vml_mc3.so.3',
+    'libtbbbind_2_0.so', 'libtbbbind.so.3', 'libtbbmalloc_proxy.so.2',
+    'libtbbmalloc.so', 'libtbbmalloc.so.2', 'libtbbmalloc.so.2.20',
+    'libtbb.so', 'libtbb.so.12', 'libtbb.so.12.20', 'libtcm_debug.so.1',
+    'libtcm.so', 'libtcm.so.1', 'libtcm.so.1.6.0', 'libumf.so.1',
+    'libur_loader.so.0',
+]
+WINDOWS_WHEELS = [
+    'UMF.dll', 'libiomp5md.dll', 'mkl_avx10.3.dll', 'mkl_avx2.3.dll',
+    'mkl_avx512.3.dll', 'mkl_blacs_ilp64.2.dll', 'mkl_cdft_core.2.dll',
+    'mkl_core.3.dll', 'mkl_def.3.dll', 'mkl_intel_thread.3.dll',
+    'mkl_mc3.3.dll', 'mkl_rt.3.dll', 'mkl_scalapack_lp64.2.dll',
+    'mkl_sequential.3.dll', 'mkl_tbb_thread.3.dll', 'mkl_vml_avx10.3.dll',
+    'mkl_vml_avx2.3.dll', 'mkl_vml_avx512.3.dll', 'mkl_vml_cmpt.3.dll',
+    'mkl_vml_def.3.dll', 'mkl_vml_mc3.3.dll', 'tbb12.dll', 'tbbbind.dll',
+    'tbbbind_2_5.dll', 'tbbmalloc.dll', 'tbbmalloc_proxy.dll', 'tcm.dll',
+    'tcm_debug.dll', 'ur_adapter_level_zero.dll',
+]
+KERNELS = ['def', 'mc3', 'avx2', 'avx512', 'avx10']
+
+
+@pytest.mark.parametrize('system', ['linux', 'windows'])
+def test_the_spec_keeps_only_what_pardiso_loads_threaded_by_tbb(system):
+    """Measured on the Linux bundle (LD_DEBUG=files) with TBB threading:
+    the runtime, the core, the interface, the TBB layer, a kernel and its
+    vector math per processor, TBB, its allocator and the thread manager.
+    Every processor's kernel stays, since another machine loads another;
+    the OpenMP runtime and its threading layer, the GPU runtime,
+    ScaLAPACK, BLACS and CDFT go, and each versioned name keeps one
+    copy (Brandon, 2026-11-02)."""
+    names = _spec_library_names()
+    listed = LINUX_WHEELS if system == 'linux' else WINDOWS_WHEELS
+    kept = sorted(name for name in listed if names.fullmatch(name.lower()))
+    if system == 'linux':
+        parts = ['rt', 'core', 'intel_lp64', 'tbb_thread', *KERNELS,
+                 *(f'vml_{k}' for k in [*KERNELS, 'cmpt'])]
+        expected = [f'libmkl_{part}.so.3' for part in parts]
+        expected += ['libtbb.so.12', 'libtbbmalloc.so.2', 'libtcm.so.1']
+    else:
+        parts = ['rt', 'core', 'tbb_thread', *KERNELS,
+                 *(f'vml_{k}' for k in [*KERNELS, 'cmpt'])]
+        expected = [f'mkl_{part}.3.dll' for part in parts]
+        expected += ['tbb12.dll', 'tbbmalloc.dll', 'tcm.dll']
+    assert kept == sorted(expected)
+    assert not any('iomp' in name or 'intel_thread' in name for name in kept)

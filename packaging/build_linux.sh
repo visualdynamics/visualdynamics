@@ -30,6 +30,11 @@ rm -rf build dist
 "$PYTHON" -m PyInstaller packaging/visualdynamics.spec --noconfirm \
   --distpath dist --workpath build
 
+# the bundle loads oneMKL and factors with PARDISO (core.sparse_solve.check):
+# a build that left it out still runs, through SuperLU, many times slower
+# on a large model, and only this says so. Before Qt, so no display needed
+dist/VisualDynamics/VisualDynamics --check-solver
+
 if ! command -v appimagetool >/dev/null; then
   echo "appimagetool not found; dist/VisualDynamics/ is the application." >&2
   exit 0

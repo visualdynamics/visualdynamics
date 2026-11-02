@@ -50,6 +50,11 @@ HAND_CHECKED = [
     ('kg', 1.0, 0.0), ('tonne', 1e3, 0.0), ('lbm', 0.45359237, 0.0),
     ('slug', LBF / 0.3048, 0.0), ('slinch', LBF / IN, 0.0),
     ('dimensionless', 1.0, 0.0),
+    # densities: a mass over a length cubed
+    ('kg/m**3', 1.0, 0.0), ('slinch/in**3', LBF / IN / IN ** 3, 0.0),
+    ('slug/ft**3', LBF / 0.3048 / 0.3048 ** 3, 0.0),
+    ('lbm/in**3', 0.45359237 / IN ** 3, 0.0),
+    ('lbm/ft**3', 0.45359237 / 0.3048 ** 3, 0.0),
     # rotations at a virtual point, per radian, and the moments
     # conjugate to them
     ('rad', 1.0, 0.0), ('deg', math.pi / 180.0, 0.0),
@@ -295,3 +300,21 @@ def test_deleting_out_of_range_records_is_refused():
         data.delete_records([5])
     with pytest.raises(ValueError, match='every record'):
         data.delete_records([0])
+
+
+def test_density_is_a_quantity_with_a_unit_in_every_system():
+    """Air density in a flight trajectory, kg/m**3, had no dimension, and
+    the one unit left every record of the object undefined (2026-11-02)."""
+    assert units.dimension_of('kg/m^3') == 'density'
+    assert units.dimension_of('slug/ft**3') == 'density'
+    assert units.si_factor('slinch/in**3', 'density') == pytest.approx(
+        LBF / IN / IN ** 3, rel=1e-12)
+    assert units.SI.unit('density') == 'kg/m**3'
+    assert units.SYSTEMS['in-slinch-lbf-s (g)'].unit('density') == 'slinch/in**3'
+    assert units.SYSTEMS['ft-slug-lbf-s'].unit('density') == 'slug/ft**3'
+    trajectory = TimeHistory(np.linspace(0, 1, 4), np.ones((5, 4)),
+                             response_dof=[f'{i}X+' for i in range(1, 6)])
+    trajectory.define_units(['km', None, 'kg/m**3', 'Pa', 'K'])
+    assert trajectory.ordinate_dim == ['length', 'unknown', 'density',
+                                       'pressure', 'temperature']
+    assert trajectory.ordinate[0, 0] == pytest.approx(1000.0)

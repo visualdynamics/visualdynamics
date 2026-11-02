@@ -50,6 +50,8 @@ ORDINATE_UNITS = {
     # downstream would have said so.
     'strain': ['strain', 'microstrain', 'm/m'],
     'temperature': ['degC', 'degF', 'K', 'degR'],
+    # no grams per cubic centimeter: 'g' is standard gravity here
+    'density': ['kg/m**3', 'slinch/in**3', 'slug/ft**3', 'lbm/in**3', 'lbm/ft**3'],
     # rotations at a virtual point, and the moments conjugate to them
     'angle': ['rad', 'deg'],
     'angular_velocity': ['rad/s', 'deg/s'],

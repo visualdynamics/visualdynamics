@@ -746,6 +746,24 @@ def _axis_groups(abscissa: np.ndarray) -> list[tuple[list[int], np.ndarray]]:
     return groups
 
 
+def _in_si(name: str, abscissa: np.ndarray, unit: str, dimension: str) -> np.ndarray:
+    """An abscissa in seconds or hertz from the unit the file names. A
+    unit not understood leaves it as it is, with a note."""
+    if not unit:
+        return abscissa
+    from ..units import UnitError, si_transform
+
+    try:
+        scale, offset = si_transform(unit, dimension)
+    except UnitError as failure:
+        warnings.warn(ImportNote(f'{name}: abscissa_unit {unit!r} was not understood '
+                                 f'({failure}); the abscissa is taken as '
+                                 f'{"seconds" if dimension == "time" else "hertz"}'),
+                      stacklevel=4)
+        return abscissa
+    return abscissa * scale + offset
+
+
 def _data_from(dataset: escdf.Dataset) -> list[DataArray]:
     """The data objects a data dataset holds: one, or one per abscissa
     when its rows are on different ones."""
@@ -757,20 +775,35 @@ def _data_from(dataset: escdf.Dataset) -> list[DataArray]:
     reference = [str(c) for c in channel[:, 1]] if channel.shape[1] > 1 else None
     ordinate = np.asarray(v['ordinate'])
     if 'abscissa' in v:
-        # A data object shares one abscissa across its records, so rows
-        # on different ones are one object each, as the UNV reader
-        # splits them. They were put on the first row's abscissa, with
-        # a note, and every other row's samples sat at the wrong times
-        # (Brandon, 2026-10-30).
-        groups = _axis_groups(np.asarray(v['abscissa'], dtype=np.float64))
-        if len(groups) > 1:
-            warnings.warn(ImportNote(
-                f'{dataset.name}: its rows are on {len(groups)} different '
-                f'abscissas, so it is read as {len(groups)} objects'),
-                stacklevel=2)
+        abscissa = np.asarray(v['abscissa'], dtype=np.float64)
     else:
         start, step = float(v['abscissa_start']), float(v['abscissa_step'])
-        groups = [([], start + step * np.arange(ordinate.shape[1]))]
+        abscissa = start + step * np.arange(ordinate.shape[1])
+    # the file's abscissa is in whatever it says, one unit for all rows
+    # or one per row; here time is seconds and frequency hertz. Each row
+    # is converted in its own unit before the rows are grouped, so rows
+    # in seconds and in milliseconds on the same times are one object.
+    # Read as one unit, a unit per row raised numpy's ambiguous truth
+    # value and the file did not open (2026-11-02).
+    dimension = 'time' if cls in (TimeHistory,) else 'frequency'
+    abscissa_units = [u.strip() for u in _strings(v.get('abscissa_unit'))]
+    if len(set(abscissa_units)) > 1:
+        rows = (abscissa if abscissa.ndim == 2 else
+                np.broadcast_to(abscissa, (ordinate.shape[0], abscissa.size)))
+        abscissa = np.array([_in_si(dataset.name, row, unit, dimension)
+                             for row, unit in zip(rows, abscissa_units)])
+    elif abscissa_units:
+        abscissa = _in_si(dataset.name, abscissa, abscissa_units[0], dimension)
+    # A data object shares one abscissa across its records, so rows on
+    # different ones are one object each, as the UNV reader splits them.
+    # They were put on the first row's abscissa, with a note, and every
+    # other row's samples sat at the wrong times (Brandon, 2026-10-30).
+    groups = _axis_groups(abscissa)
+    if len(groups) > 1:
+        warnings.warn(ImportNote(
+            f'{dataset.name}: its rows are on {len(groups)} different '
+            f'abscissas, so it is read as {len(groups)} objects'),
+            stacklevel=2)
     units = [u.replace('^', '**') for u in _strings(v.get('ordinate_unit'))]
     units = units * ordinate.shape[0] if len(units) == 1 else units
     reference_units: list[str | None] | None = None
@@ -784,22 +817,6 @@ def _data_from(dataset: escdf.Dataset) -> list[DataArray]:
         reference_units = [p[1] for p in pairs]
     elif cls in (Coherence, MultipleCoherence):
         units = ['' for _ in units]              # dimensionless
-    # the file's abscissa is in whatever it says; here time is seconds
-    # and frequency hertz
-    abscissa_unit = str(v.get('abscissa_unit') or '').strip()
-    if abscissa_unit:
-        from ..units import UnitError, si_transform
-
-        dimension = 'time' if cls in (TimeHistory,) else 'frequency'
-        try:
-            scale, offset = si_transform(abscissa_unit, dimension)
-            groups = [(rows, axis * scale + offset) for rows, axis in groups]
-        except UnitError as failure:
-            warnings.warn(ImportNote(f'{dataset.name}: abscissa_unit '
-                                     f'{abscissa_unit!r} was not understood '
-                                     f'({failure}); the abscissa is taken as '
-                                     f'{"seconds" if dimension == "time" else "hertz"}'),
-                          stacklevel=2)
     kwargs: dict[str, Any] = {}
     if cls is Srs:
         damping = float(v.get('percent_damping', 5.0))

@@ -719,8 +719,9 @@ def _hears(solver):
 def test_the_solve_tells_its_progress(solver):
     """`progress` hears (done, total) on either path: done never falls,
     never passes a counted total, and the last word is done == total.
-    The dense path's eigensolution, one call that cannot count itself,
-    is the one report with the total BUSY instead."""
+    The one call on each path that cannot count itself (the dense
+    eigensolution, the sparse factorization) is the one report with the
+    total BUSY instead."""
     from visualdynamics.core.progress import BUSY
 
     heard, found = _hears(solver)
@@ -729,7 +730,7 @@ def test_the_solve_tells_its_progress(solver):
     assert done == sorted(done)
     counted = [(d, t) for d, t in heard if t != BUSY]
     assert all(d <= t for d, t in counted)
-    assert len(heard) - len(counted) == (1 if solver == 'dense' else 0)
+    assert len(heard) - len(counted) == 1
     assert heard[-1][0] == heard[-1][1] > 0
 
 

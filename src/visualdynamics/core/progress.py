@@ -80,6 +80,20 @@ class Ticker:
             self.total = self.done + int(count)
             self._tell()
 
+    def share(self, units: int) -> Share:
+        """A stage given a fixed `units` of this ticker's total, whatever
+        its own count turns out to be.
+
+        Stages counted in their own pieces are not comparable: a model's
+        assembly ticks once per element and its eigen iterations once
+        per solve, so 190,000 elements left a few hundred solves a
+        sliver of the bar, and the bar read full for the whole of the
+        solve. Each share is added to the total at once, so the bar's
+        length is known from the start, and the stage's own count is
+        spread over its units.
+        """
+        return Share(self, units)
+
     def _tell(self) -> None:
         if self.callback is None:
             return
@@ -87,3 +101,43 @@ class Ticker:
         if self.done >= self.total or now - self._told >= self.interval:
             self._told = now
             self.callback(self.done, self.total)
+
+
+class Share:
+    """A stage's own count, spread over a fixed number of its parent's
+    units (`Ticker.share`). It answers `add`, `tick`, `extend_to` and
+    `busy` as a `Ticker` does, so a stage takes either. The parent is
+    never ticked back: a stage whose estimate grows holds the bar where
+    it is until its count catches up."""
+
+    def __init__(self, parent: Ticker, units: int) -> None:
+        self.parent, self.units = parent, int(units)
+        self.done: int = 0
+        self.total: int = 0
+        self._given = 0
+        parent.add(self.units)
+
+    def add(self, count: int) -> None:
+        self.total += int(count)
+        self._pass()
+
+    def tick(self, count: int = 1) -> None:
+        self.done += int(count)
+        self._pass()
+
+    def extend_to(self, count: int) -> None:
+        if self.done + int(count) > self.total:
+            self.total = self.done + int(count)
+            self._pass()
+
+    def busy(self) -> None:
+        self.parent.busy()
+
+    def _pass(self) -> None:
+        reached = (self.units * min(self.done, self.total) // self.total
+                   if self.total > 0 else 0)
+        # ticked even when nothing is owed, so a count after `busy`
+        # brings the bar back from its moving state
+        owed = max(0, reached - self._given)
+        self._given += owed
+        self.parent.tick(owed)

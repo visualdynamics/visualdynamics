@@ -1361,6 +1361,53 @@ def test_every_mode_comes_out_with_its_leading_component_positive():
             solver
 
 
+
+def hex_block(nx, ny, nz, size=0.01):
+    """A block of nx x ny x nz aluminum hexahedra, free."""
+    model = fem.Model('block')
+    aluminum = fem.material('6061-T6')
+
+    def node(i, j, k):
+        return 1 + i + (nx + 1) * (j + (ny + 1) * k)
+
+    for k in range(nz + 1):
+        for j in range(ny + 1):
+            for i in range(nx + 1):
+                model.add_node(node(i, j, k), size * i, size * j, size * k)
+    for k in range(nz):
+        for j in range(ny):
+            for i in range(nx):
+                model.add_solid([node(i, j, k), node(i + 1, j, k),
+                                 node(i + 1, j + 1, k), node(i, j + 1, k),
+                                 node(i, j, k + 1), node(i + 1, j, k + 1),
+                                 node(i + 1, j + 1, k + 1),
+                                 node(i, j + 1, k + 1)], aluminum)
+    return model
+
+
+def test_the_sparse_bar_is_not_full_before_the_factorization(monkeypatch):
+    """The assembly counted per element and the iterations per solve,
+    so a model of many elements had the bar full once assembled: a
+    190,000-hex model read 100% after 30 seconds of a 70-minute solve
+    on Windows (2026-11-02). The assembly has its share of the bar, the
+    factorization is BUSY, and the iterations fill the rest."""
+    from visualdynamics.core.progress import BUSY, Ticker
+
+    # every tick told, not one per 0.05 s, so a small model's stages show
+    monkeypatch.setattr(fem, 'Ticker', lambda told: Ticker(told, interval=0.0))
+    told = []
+    hex_block(12, 12, 6).eigensolution(
+        num_modes=10, progress=lambda d, t: told.append((d, t)))
+    total = sum(fem.SOLVE_BAR.values())
+    busy = next(i for i, (_d, t) in enumerate(told) if t == BUSY)
+    done = told[busy][0]     # reports are throttled; BUSY's is current
+    assert done / total == pytest.approx(
+        fem.SOLVE_BAR['assembly'] / total), told[:busy + 1]
+    after = [d / t for d, t in told[busy + 1:] if t != BUSY]
+    assert len(after) > 5 and after[0] < 0.5, 'the iterations climb the bar'
+    assert told[-1] == (total, total), 'and it ends full'
+
+
 def test_a_tie_between_two_components_is_broken_by_order_not_round_off():
     """An antisymmetric mode has two components of equal size and
     opposite sign; the first of them in order leads, whichever is a
@@ -1375,11 +1422,12 @@ def test_the_dense_eigensolution_is_announced_as_busy():
     """The dense solver's eigensolution is one call that reports
     nothing while it runs, and the bar stood still at half for all of
     it. It is announced as BUSY between the factorization's tick and
-    the solve's end; the sparse solver counts its iterations instead."""
+    the solve's end. The sparse solver counts its iterations, and only
+    its factorization is BUSY."""
     from visualdynamics.core.progress import BUSY
 
     model = straight_beam(1.0, fem.Section.rod('rod', 0.01), 8)
-    for solver, expected in (('dense', 1), ('sparse', 0)):
+    for solver, expected in (('dense', 1), ('sparse', 1)):
         told = []
         model.eigensolution(num_modes=4, fixed=['100'], solver=solver,
                             progress=lambda d, t, out=told: out.append((d, t)))

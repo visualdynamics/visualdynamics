@@ -5208,7 +5208,8 @@ class Project(dict):
             The FRF set to fit.
         bounds : tuple of float, optional
             (low, high) frequency limits to fit within, in Hz. Defaults
-            to the whole band.
+            to the whole band. Bounds that hold none of the FRF's lines
+            raise ValueError.
         limit : int, default 30
             The most modes to accept.
         name : str, optional
@@ -5248,6 +5249,18 @@ class Project(dict):
         from .core.modal_fit import ModalFitSession
 
         source = self.name_of(source)
+        # The session widens a range that holds no line to the whole band,
+        # which is right for the screen's view (zoomed past the data, or
+        # in between two lines) and wrong for a script's bounds: a band
+        # that missed the data silently fitted everything (2026-11-02).
+        if bounds is not None and at is None:
+            lines = np.asarray(self[source].abscissa, dtype=float)
+            low, high = sorted(float(b) for b in bounds)
+            if not np.any((lines >= low) & (lines <= high)):
+                raise ValueError(
+                    f'bounds {low:g} to {high:g} Hz hold none of '
+                    f'{source!r}\'s lines, which run {lines[0]:g} to '
+                    f'{lines[-1]:g} Hz')
         if isinstance(coherence, str):
             coherence = self[self.name_of(coherence)]
         session = ModalFitSession(self[source], records, coherence)

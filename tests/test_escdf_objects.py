@@ -429,3 +429,58 @@ def test_rows_on_one_abscissa_given_per_row_are_one_object(tmp_path):
         warnings.simplefilter('error')
         project = escdf_objects.load(path)
     assert list(project) == ['Run'] and project['Run'].num_records == 2
+
+
+def test_an_abscissa_unit_per_row_is_read(tmp_path):
+    """The format allows one abscissa unit per row as well as one for all.
+    Read as one, an array of them raised 'The truth value of an array
+    ... is ambiguous' and the file did not open (a user's flight data,
+    2026-11-02). Each row is converted in its own unit, so rows in
+    seconds and in milliseconds that agree once converted are one
+    object."""
+    file = escdf.File(created_by='x')
+    mixed = escdf.Dataset('m', 'data', 'Mixed')
+    mixed.values = {'data_type': 'time response',
+                    'channel': np.array([['1X+'], ['2X+']]),
+                    'ordinate_unit': 'g',
+                    'abscissa_unit': np.array(['s', 'ms'], dtype=object),
+                    'abscissa': np.array([[0.0, 0.01, 0.02, 0.03],
+                                          [0.0, 10.0, 20.0, 30.0]]),
+                    'ordinate': np.ones((2, 4))}
+    even = escdf.Dataset('e', 'data', 'Even')
+    even.values = {'data_type': 'time response',
+                   'channel': np.array([['1X+'], ['2X+'], ['3X+']]),
+                   'ordinate_unit': 'g',
+                   'abscissa_unit': np.array(['ms', 'ms', 'ms'], dtype=object),
+                   'abscissa_start': 0.0, 'abscissa_step': 10.0,
+                   'ordinate': np.ones((3, 4))}
+    file.activities['a'] = escdf.Activity('a', 'Flight', data={'m': mixed, 'e': even})
+    path = tmp_path / 'per_row.escdf'
+    escdf.write(file, path)
+    assert escdf.read(path).problems() == []
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        project = escdf_objects.load(path)
+    assert set(project) == {'Mixed', 'Even'}
+    np.testing.assert_allclose(project['Mixed'].abscissa, [0.0, 0.01, 0.02, 0.03])
+    assert project['Mixed'].num_records == 2
+    np.testing.assert_allclose(project['Even'].abscissa, [0.0, 0.01, 0.02, 0.03])
+    assert project['Even'].num_records == 3
+
+
+def test_an_abscissa_unit_not_understood_is_noted_and_left(tmp_path):
+    file = escdf.File(created_by='x')
+    run = escdf.Dataset('r', 'data', 'Run')
+    run.values = {'data_type': 'time response',
+                  'channel': np.array([['1X+'], ['2X+']]),
+                  'ordinate_unit': 'g',
+                  'abscissa_unit': np.array(['ms', 'blinks'], dtype=object),
+                  'abscissa_start': 0.0, 'abscissa_step': 10.0,
+                  'ordinate': np.ones((2, 3))}
+    file.activities['a'] = escdf.Activity('a', 'A', data={'r': run})
+    path = tmp_path / 'blinks.escdf'
+    escdf.write(file, path)
+    with pytest.warns(ImportNote, match="abscissa_unit 'blinks' was not understood"):
+        project = escdf_objects.load(path)
+    np.testing.assert_allclose(project['Run'].abscissa, [0.0, 0.01, 0.02])
+    np.testing.assert_allclose(project['Run (2)'].abscissa, [0.0, 10.0, 20.0])

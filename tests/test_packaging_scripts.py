@@ -137,6 +137,21 @@ def test_the_bounded_run_reads_the_exit_code_powershell_hides():
     assert body.index('$null -eq $p.ExitCode') < returned, 'an empty code is a failure, not a pass'
 
 
+def test_the_close_is_asked_of_the_window_as_it_is_now():
+    """`MainWindowHandle` is cached from the refresh that found the
+    title, and Qt can remake the native window after that; asking the
+    stale handle to close reached nothing, and the smoke test killed a
+    window that would have closed."""
+    with open(os.path.join(ROOT, 'packaging', 'smoke_windows.ps1'),
+              encoding='utf-8') as handle:
+        smoke = handle.read()
+    asked = smoke.index('$proc.CloseMainWindow()')
+    refreshed = smoke.rindex('$proc.Refresh()', 0, asked)
+    found = smoke.index("Write-Host \"window up: '$title' after ${tick}s\"")
+    assert found < refreshed < asked
+    assert '$proc.MainWindowHandle) at close' in smoke[refreshed:asked]
+
+
 def test_both_packaged_builds_check_they_can_save_an_animation():
     """The bundle carrying QtMultimedia proves nothing about the encoder
     answering; each packaged build writes and reads back a movie."""

@@ -224,7 +224,16 @@ if ((Test-Path $err) -and (Select-String -Path $err -Pattern 'Traceback|Unhandle
 # 5. Ask it to close; insist only if it will not. A hang on close is
 # worth knowing about but not worth failing a build the screenshot
 # already vouches for — it goes to the log, loudly.
-$proc.CloseMainWindow() | Out-Null
+# MainWindowHandle is cached from the Refresh that found the title, and
+# Qt can destroy and remake the top-level native window after that, as
+# a view needing OpenGL arrives. CloseMainWindow then posted WM_CLOSE to
+# a handle that no longer existed: the close witness wrote nothing in
+# a85, and every stalled close since a80 had found the window at 3 s,
+# every clean one at 4 s or later (2026-11-03). Refresh, then ask.
+$foundHandle = $proc.MainWindowHandle
+$proc.Refresh()
+Write-Host "main window handle: $foundHandle when found, $($proc.MainWindowHandle) at close"
+if (-not $proc.CloseMainWindow()) { Write-Warning 'CloseMainWindow found no window to ask' }
 if (-not $proc.WaitForExit(15000)) {
     Write-Warning 'did not close within 15 s of being asked; killed'
     # what was on screen while it would not close, and where it was
@@ -239,6 +248,6 @@ Remove-Item Env:\VISUALDYNAMICS_CLOSE_WITNESS
 if (Test-Path $closeLog) {
     Write-Host "--- $closeLog"; Get-Content $closeLog
 } else {
-    Write-Host 'the close witness wrote nothing: the window never began to close'
+    Write-Host 'the close witness wrote nothing: the close never reached the window'
 }
 Write-Host 'smoke test passed'

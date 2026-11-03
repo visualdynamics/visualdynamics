@@ -3239,6 +3239,9 @@ class MainWindow(QMainWindow):
         # bars have the same interactor, the same GL context and the same
         # timers, and the scene-only version left them to take their
         # chances (Brandon's crash report, 2026-08-30).
+        from . import close_witness
+
+        close_witness('close asked')
         self.set_playing(False)
         # a synthesis waiting for its settings to rest would otherwise
         # iterate and draw into a window being torn down
@@ -3261,6 +3264,7 @@ class MainWindow(QMainWindow):
             if plotter is not None:
                 with contextlib.suppress(Exception):  # never block closing
                     plotter.close()
+        close_witness('views closed')
         super().closeEvent(event)
 
     # ---- the run log ---------------------------------------------------------

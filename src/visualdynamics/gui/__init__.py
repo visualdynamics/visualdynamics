@@ -253,6 +253,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # units dialog, which cannot be displayed before app.exec() starts.
         QTimer.singleShot(0, lambda: [window.import_path(p) for p in argv])
     code = app.exec()
+    close_witness('event loop ended')
     # A mime object handed to the clipboard (copying a tree item) is
     # Qt's to delete, and Qt deletes it from its static destructors —
     # after the interpreter has gone, where the Python-made object's
@@ -262,7 +263,59 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.clipboard().clear()
     app.processEvents()
     release_widgets(app)
+    close_witness('windows released')
     return code
+
+
+#: the environment variable naming a file that `close_witness` writes
+#: to; unset, it does nothing
+CLOSE_WITNESS = 'VISUALDYNAMICS_CLOSE_WITNESS'
+
+#: seconds between the stack dumps `close_witness` arms
+CLOSE_WITNESS_INTERVAL = 5.0
+
+_close_witness: dict[str, Any] = {}
+
+
+def close_witness(step: str) -> None:
+    """Write a step of closing to the file `CLOSE_WITNESS` names, and on
+    the first step arrange for every thread's stack to be written there
+    every `CLOSE_WITNESS_INTERVAL` seconds until the process ends.
+
+    For a close that stalls where no debugger can reach, such as a
+    packaged build on a CI runner: the steps say how far it got, and
+    the stacks say what it is waiting on. A close that finishes within
+    the interval writes the steps alone. With the variable unset this
+    does nothing.
+    """
+    # the Windows release smoke test asked the window to close and it
+    # was still running 15 s later in a80, a82, a83 and a84, closing at
+    # once in a78, a79 and a81, with nothing on screen but the window
+    # (2026-11-03); this is the witness, before any theory
+    import os
+
+    path = os.environ.get(CLOSE_WITNESS)
+    if not path:
+        return
+    import time
+
+    log = _close_witness.get('file')
+    if log is None:
+        import atexit
+        import faulthandler
+
+        # held open to the end: faulthandler writes to its descriptor
+        log = _close_witness['file'] = open(path, 'a', encoding='utf-8')  # noqa: SIM115
+        # faulthandler writes from its own C thread, without the GIL, so
+        # a stall inside Qt, VTK or a thread join is dumped all the same
+        faulthandler.dump_traceback_later(CLOSE_WITNESS_INTERVAL, repeat=True,
+                                          file=log)
+        # atexit runs after the interpreter has joined its non-daemon
+        # threads, a thread pool's workers among them: this line written
+        # means none of them held the exit
+        atexit.register(close_witness, 'threads joined')
+    log.write(f'{time.monotonic():.3f} {step}\n')
+    log.flush()
 
 
 def release_widgets(app: Any) -> int:

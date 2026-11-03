@@ -85,9 +85,10 @@ dependencies = [
     # unmodified binaries with Intel's notices, and forbid reverse
     # engineering them. The packaged builds carry only the libraries
     # PARDISO loads, threaded through TBB, so none of the EULA'd OpenMP
-    # runtime (Brandon, 2026-11-02). oneMKL is built for x86-64 only and no longer
-    # for the Mac, which has Accelerate, hence the marker; every other
-    # machine uses SuperLU. PLAN.md, "PARDISO on Windows and Linux".
+    # runtime (Brandon, 2026-11-02). oneMKL is built for x86-64 only and
+    # no longer for the Mac, which has Accelerate, hence the marker;
+    # every other machine uses SuperLU. PLAN.md, "PARDISO on Windows
+    # and Linux".
     "pypardiso; sys_platform != 'darwin' and (platform_machine == 'x86_64' or platform_machine == 'AMD64')",
     "h5py",
     "netCDF4",

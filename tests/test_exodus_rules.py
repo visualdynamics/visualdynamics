@@ -19,7 +19,8 @@ FAMILY_OF_NAME = (('TRISHELL', 'triangles'), ('TRIANGLE', 'triangles'), ('TRI', 
                   ('QUAD', 'quads'), ('SHELL', 'quads'), ('TETRA', 'tetras'),
                   ('TET', 'tetras'), ('WEDGE', 'wedges'), ('HEX', 'hexes'),
                   ('PYRAMID', 'pyramids'), ('BAR', 'beams'), ('BEAM', 'beams'),
-                  ('TRUSS', 'beams'), ('SPRING', 'beams'), ('SPHERE', 'points'))
+                  ('TRUSS', 'beams'), ('SPRING', 'beams'), ('SPHERE', 'points'),
+                  ('CIRCLE', 'points'))
 
 
 def _family(name):
@@ -39,6 +40,29 @@ def test_each_exodus_name_reads_as_an_element_of_its_shape_and_count():
         count = _count(name)
         if count is not None:
             assert ELEMENT_TYPES[code][1] == (8 if count == 9 else count), name
+
+
+def test_a_circle_block_reads_as_points(tmp_path):
+    """A CIRCLE block, the one-node element some models carry their
+    lumped masses in, reads as a point on its node."""
+    import netCDF4
+
+    path = tmp_path / 'circles.exo'
+    with netCDF4.Dataset(path, 'w') as ds:
+        ds.createDimension('num_dim', 3)
+        ds.createDimension('num_nodes', 2)
+        ds.createDimension('num_el_blk', 1)
+        ds.createDimension('num_el_in_blk1', 2)
+        ds.createDimension('num_nod_per_el1', 1)
+        for axis, values in zip('xyz', ([0, 1], [0, 0], [0, 0])):
+            ds.createVariable(f'coord{axis}', 'f8', ('num_nodes',))[:] = values
+        ds.createVariable('eb_prop1', 'i4', ('num_el_blk',))[:] = [38]
+        block = ds.createVariable('connect1', 'i4', ('num_el_in_blk1', 'num_nod_per_el1'))
+        block.elem_type = 'CIRCLE'
+        block[:] = [[1], [2]]
+    geometry = exodus.load(path)
+    assert [int(t) for t in geometry.elem_type] == [161, 161]
+    assert [list(c) for c in geometry.elem_conn] == [[1], [2]]
 
 
 def test_each_element_is_written_as_an_exodus_type_of_its_shape_and_count():

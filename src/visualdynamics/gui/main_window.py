@@ -855,6 +855,10 @@ class _InputGate(QObject):
         return True
 
 
+INT_MAX = 2 ** 31 - 1
+STRIP_STEPS = 1000               # the strip's bar is 200 pixels wide
+
+
 class _LongVerbRelay(QObject):
     """The long-verb worker's way back to the window: its progress and
     its end, emitted on the worker and delivered on the window's thread.
@@ -866,7 +870,9 @@ class _LongVerbRelay(QObject):
     reference cycle, and Python's collector frees that on whichever
     thread happens to allocate, often the worker."""
 
-    told = Signal(int, int)
+    # objects, not ints: a reader counting bytes passes 2**31 on a
+    # 5 GB file, and an int signal overflowed on every tick past it
+    told = Signal(object, object)
     finished = Signal()
 
 
@@ -8871,8 +8877,13 @@ class MainWindow(QMainWindow):
             # animates on this thread while the work runs on its own
             bar.setRange(0, 0)
         else:
-            bar.setRange(0, max(int(total), 1))
-            bar.setValue(int(done))
+            done, total = int(done), max(int(total), 1)
+            if total > INT_MAX:
+                # QProgressBar's range is a 32-bit int, and a count of
+                # bytes runs past it: painted in fixed steps instead
+                done, total = round(STRIP_STEPS * min(done, total) / total), STRIP_STEPS
+            bar.setRange(0, total)
+            bar.setValue(done)
         if bar.isHidden():
             bar.show()
             # show() only *posts* the layout request, and the loop

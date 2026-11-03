@@ -272,3 +272,17 @@ def test_a_lone_nc4_import_moves_the_bar(window, pump, monkeypatch):
     assert all(strip and bar for _d, _t, strip, bar in seen)
     assert not window._import_strip.isVisibleTo(window), 'put away after'
     assert not window._importing
+
+
+def test_a_count_past_a_32_bit_int_moves_the_bar(window, pump):
+    """A reader counting the bytes of a 5 GB file passes 2**31: the
+    relay carries the count and the bar paints its share, where an int
+    signal and the bar's own int range both overflowed."""
+    from visualdynamics.gui.main_window import STRIP_STEPS
+
+    bar = window._import_progress
+    window._long_relay.told.emit(5_242_880_000, 4 * 2 ** 31)
+    pump()
+    assert bar.maximum() == STRIP_STEPS
+    assert bar.value() == round(STRIP_STEPS * 5_242_880_000 / 2 ** 33)
+    bar.hide()

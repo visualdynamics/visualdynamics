@@ -318,3 +318,23 @@ def test_a_movie_asks_for_its_bits_per_pixel(h264, tmp_path, monkeypatch):
         'rate': round(movie.BITS_PER_PIXEL * 640 * 480 * movie.MOVIE_FPS),
         'mode': QMediaRecorder.EncodingMode.AverageBitRateEncoding}
     assert movie.BITS_PER_PIXEL == 0.12
+
+
+def test_asking_for_h264_prints_no_ffmpeg_banner():
+    """The first question asked of Qt's FFmpeg backend logs its version
+    and license, a line on the terminal at every launch; asking whether
+    a movie can be saved prints nothing. In a process of its own: the
+    backend announces itself once per process."""
+    import os
+    import subprocess
+    import sys
+
+    if movie._unloadable() is not None:
+        pytest.skip('Qt Multimedia does not load here')
+    ran = subprocess.run(
+        [sys.executable, '-c',
+         'from visualdynamics.gui import movie; print(movie.unavailable_reason())'],
+        check=False, capture_output=True, text=True, timeout=120,
+        env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen'})
+    assert ran.returncode == 0, ran.stderr
+    assert 'FFmpeg version' not in ran.stdout + ran.stderr

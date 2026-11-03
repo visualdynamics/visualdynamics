@@ -85,7 +85,16 @@ def _unloadable() -> str | None:
     links PulseAudio, and a machine without `libpulse.so.0` — GitHub's
     Ubuntu runner, a minimal desktop — fails the import (PySide6 6.12,
     2026-10-09). Asked once: a failed import is not cached by Python,
-    and the window asks on every selection."""
+    and the window asks on every selection.
+
+    Qt's FFmpeg backend announces its version and license on the first
+    question asked of it, a line on the terminal at every launch that
+    selected an animation. It is filtered here, before anything loads
+    the backend; its warnings still print, and `QT_LOGGING_RULES`,
+    applied after this, can bring the line back."""
+    from PySide6.QtCore import QLoggingCategory
+
+    QLoggingCategory.setFilterRules('qt.multimedia.ffmpeg.info=false')
     try:
         import PySide6.QtMultimedia  # noqa: F401
     except ImportError as error:

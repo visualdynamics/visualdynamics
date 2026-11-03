@@ -169,6 +169,11 @@ $err = 'dist\smoke\stderr.log'
 # window takes input, and nothing here can tick it — without the flag
 # the test stopped at the dialog and never opened the project
 # (2026-09-14, Brandon's call). The flag is what a script uses too.
+# The close witness (gui.close_witness): the steps of closing and, past
+# five seconds, every thread's stack, in a file. The close stalled in
+# a80, a82, a83 and a84 and nothing said where (2026-11-03).
+$closeLog = Join-Path (Resolve-Path dist\smoke) 'close.log'
+$env:VISUALDYNAMICS_CLOSE_WITNESS = $closeLog
 $proc = Start-Process -FilePath $exe -ArgumentList '--no-disclaimer', "`"$vdyn`"" -PassThru `
     -RedirectStandardOutput $out -RedirectStandardError $err
 $title = ''
@@ -222,8 +227,18 @@ if ((Test-Path $err) -and (Select-String -Path $err -Pattern 'Traceback|Unhandle
 $proc.CloseMainWindow() | Out-Null
 if (-not $proc.WaitForExit(15000)) {
     Write-Warning 'did not close within 15 s of being asked; killed'
+    # what was on screen while it would not close, and where it was
+    $graphics.CopyFromScreen($screen.Left, $screen.Top, 0, 0, $bitmap.Size)
+    $bitmap.Save('dist\smoke\close-stalled.png')
+    Write-Host 'screenshot: dist\smoke\close-stalled.png'
     Stop-Process -Id $proc.Id -Force
 } else {
     Write-Host "closed cleanly (exit $($proc.ExitCode))"
+}
+Remove-Item Env:\VISUALDYNAMICS_CLOSE_WITNESS
+if (Test-Path $closeLog) {
+    Write-Host "--- $closeLog"; Get-Content $closeLog
+} else {
+    Write-Host 'the close witness wrote nothing: the window never began to close'
 }
 Write-Host 'smoke test passed'

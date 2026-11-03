@@ -56,7 +56,9 @@ _ELEM_TYPES = {
     'HEX': 115, 'HEX8': 115,
     'HEX20': 116, 'HEX27': 117,
     'PYRAMID': 201, 'PYRAMID5': 201, 'PYRAMID13': 202,
-    'SPHERE': 161, 'SPRING': 136,
+    # CIRCLE is the one-node element of a 2-D model, SPHERE its 3-D
+    # twin; both are a point here, and a point goes out as SPHERE
+    'SPHERE': 161, 'CIRCLE': 161, 'SPRING': 136,
 }
 
 EXTENSIONS = ('.exo', '.e', '.exo2', '.g', '.gen')

@@ -4162,9 +4162,9 @@ class MainWindow(QMainWindow):
                     read = hexmesh.likely_to_fold(geometry, shown, entry['size'])
                     if read['likely']:
                         # the size it is likely to hold at, counted as the
-                        # limit counts: bricks by volume, and the grid
-                        suggested_bricks = solids.brick_count(geometry, shown,
-                                                              read['suggested'])
+                        # limit counts: bricks by volume and pillow, and the grid
+                        suggested_bricks = solids.fitted_brick_count(geometry, shown,
+                                                                     read['suggested'])
                         suggested_cells = hexmesh.grid_cells(geometry, shown,
                                                              read['suggested'], piece=True)
                         break

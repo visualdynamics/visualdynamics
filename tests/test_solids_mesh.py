@@ -911,23 +911,46 @@ def test_the_preview_waits_for_the_size_box_to_settle(window, pump, monkeypatch)
 
 
 def test_a_preview_past_the_budget_is_counted_not_drawn(window, pump):
-    """A fine size on a large part: the bricks are counted from the
-    part's volume and said, the preview is taken down, and Mesh is what
-    makes them. The grid over it is 500,000 cells, its holes among them,
-    and the count is what the mesh holds (2026-10-20)."""
+    """A fine size on a large part: the bricks are counted and said, the
+    preview is taken down, and Mesh is what makes them. The grid over it
+    is 500,000 cells, its holes among them (2026-10-20)."""
     from visualdynamics.gui.main_window import MESH_PREVIEW_BRICKS
 
     panel = _holed_part(window, pump)
     assert 'plane-preview' in window.scene.plotter.actors
     panel.size.setValue(0.02)        # 200 x 100 x 25 cells
     _settled(window, pump)
-    bricks = solids.brick_count(window.objects['Part'], [3], 0.02 * 0.0254)
+    bricks = solids.extrusion_bricks(window.objects['Part'], [3], 0.02 * 0.0254)
     assert panel.reading_label.text() == (
         f'About {bricks:,} bricks at this size. The preview stops past '
         f'{MESH_PREVIEW_BRICKS:,}; press Mesh to make them.')
     assert 'plane-preview' not in window.scene.plotter.actors
     cells = solids.grid_cells(window.objects['Part'], [3], 0.02 * 0.0254)
     assert cells == 500_000 and MESH_PREVIEW_BRICKS < bricks < 0.98 * cells
+
+
+def test_the_count_past_the_budget_is_what_mesh_makes(window, pump, monkeypatch):
+    """The pane said the volume over a brick's, and the bar below said
+    the bricks made: the rings about a hole hold more than their area
+    (Brandon, 2026-11-03: the two did not match). Said past the budget,
+    the count is the one the status line gives once Mesh has run."""
+    import re
+
+    from visualdynamics.gui import main_window
+
+    monkeypatch.setattr(main_window, 'MESH_PREVIEW_BRICKS', 1_000)
+    panel = _holed_part(window, pump)
+    panel.size.setValue(0.05)
+    _settled(window, pump)
+    said = re.match(r'About ([\d,]+) bricks at this size', panel.reading_label.text())
+    assert said, panel.reading_label.text()
+    panel.mesh_button.click()
+    pump()
+    made = len(window.objects['Part'].elem_conn)
+    assert int(said.group(1).replace(',', '')) == made
+    assert window._status_text.startswith(f'Part: meshed into {made:,} bricks')
+    volume = solids.brick_count(window.objects['Part'], [3], 0.05 * 0.0254)
+    assert volume != made, 'the volume alone is not the count'
 
 
 def test_mesh_runs_with_the_bar_up(window, pump, monkeypatch):

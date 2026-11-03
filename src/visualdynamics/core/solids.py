@@ -1347,6 +1347,51 @@ def brick_count(geometry: Any, ids, size: float) -> int:
     -------
     int
     """
+    inside, span = _sampled(geometry, ids, size)
+    held = float(inside.mean()) * float(np.prod(span))
+    return round(held / float(size) ** 3)
+
+
+def fitted_brick_count(geometry: Any, ids, size: float) -> int:
+    """About how many bricks `hexmesh.overlay_mesh` makes of these parts
+    at `size`: the grid's cubes the parts hold (`brick_count`) and the
+    pillow, a brick on each face where the grid steps from inside to
+    outside, those faces counted on the same samples. Kernel-free.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+    size : float
+        The brick size, as the geometry holds its coordinates.
+
+    Returns
+    -------
+    int
+    """
+    # the volume alone was what the pane said, and a fitted mesh holds
+    # half again to twice that: the pillow is a layer over the whole
+    # skin, and on a stair-stepped grid the skin is the area read along
+    # each axis, not the area (2026-11-03, a sphere 1,032 made against
+    # 552 said; volume and faces say 1,017)
+    inside, span = _sampled(geometry, ids, size)
+    step = span / np.array(inside.shape)
+    padded = np.pad(inside, 1)
+    faces = 0.0
+    for k in range(3):
+        across = np.prod([step[j] for j in range(3) if j != k])
+        faces += np.count_nonzero(np.diff(padded, axis=k)) * across
+    held = float(inside.mean()) * float(np.prod(span))
+    return round((held / float(size) + faces) / float(size) ** 2)
+
+
+def _sampled(geometry, ids, size):
+    """Which of the samples over the parts' box the parts hold, on a
+    grid as fine as `size` or `_SAMPLES` along each axis, whichever is
+    coarser, the samples at the cells' centers: (inside, the box's
+    span)."""
     ids = [int(i) for i in ids]
     low, high = zip(*(_box(geometry, i) for i in ids))
     low, high = np.min(low, axis=0), np.max(high, axis=0)
@@ -1357,18 +1402,18 @@ def brick_count(geometry: Any, ids, size: float) -> int:
     inside = np.zeros(len(at), dtype=bool)
     for i in ids:
         inside |= contains(geometry, i, at)
-    held = float(inside.mean()) * float(np.prod(span))
-    return round(held / float(size) ** 3)
+    return inside.reshape(counts), span
 
 
-def _within_limits(geometry: Any, ids, size: float, cells: int) -> None:
+def _within_limits(geometry: Any, ids, size: float, cells: int, count=None) -> None:
     """Refuse a mesh whose grid is past `GRID_LIMIT` cells, or whose
-    bricks are past `MESH_LIMIT` (`brick_count`), each saying which."""
+    bricks are past `MESH_LIMIT` (by `count`, `brick_count` unless
+    given), each saying which."""
     if cells > GRID_LIMIT:
         raise ValueError(f'the grid over these parts at that size is {cells:,} cells, '
                          f'over the {GRID_LIMIT:,} it can hold: use a larger size, or '
                          'tetrahedra')
-    bricks = brick_count(geometry, ids, size)
+    bricks = (count or brick_count)(geometry, ids, size)
     if bricks > MESH_LIMIT:
         raise ValueError(f'about {bricks:,} bricks at that size, over the limit of '
                          f'{MESH_LIMIT:,}: use a larger one')
@@ -2277,6 +2322,65 @@ def grid_cells(geometry: Any, ids, size: float, piece: bool = False) -> int:
     return (nu - 1) * (nv - 1) * (nw - 1)
 
 
+def extrusion_bricks(geometry: Any, ids, size: float, piece: bool = False) -> int:
+    """How many bricks `extrusion_mesh` makes of these parts at `size`,
+    rings and all, without making them: the section holds between two
+    of the grid's cuts along the extrusion, so the plane is laid once
+    for each such span and its bricks counted for every layer in it. A
+    span a cylinder across the extrusion passes through keeps all its
+    layers, the section changing within it.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+    size : float
+        The element size, as the geometry holds its coordinates.
+    piece : bool, default False
+        A union's operand, as `grid_cells` takes it.
+
+    Returns
+    -------
+    int
+
+    Raises
+    ------
+    ValueError
+        As `extrusion_mesh` does, for parts or a size it would refuse.
+    """
+    # the volume over the size cubed was what the pane said, and the
+    # rings about a circle hold more bricks than their area: a plate on
+    # four round legs made 56,960 where 33,156 were said (2026-11-03)
+    ids = [int(i) for i in ids]
+    axis, order, lines = _grid_lines(geometry, ids, size, piece)
+    w = lines[2]
+    across = _cross_cylinders(geometry, ids, axis)
+    crossed = [(_box(geometry, c)[0][axis], _box(geometry, c)[1][axis]) for c in across]
+    ends = np.searchsorted(w, _cuts(geometry, ids)[axis])
+    kept, weight = [w[0]], []
+    for a, b in pairwise(ends):
+        if any(low < w[b] and high > w[a] for low, high in crossed):
+            kept.extend(w[a + 1:b + 1])
+            weight.extend([1] * (b - a))
+        else:
+            kept.append(w[b])
+            weight.append(b - a)
+    kept = np.asarray(kept)
+    xyz, conn, _groups, _made = _mesh_grid(
+        [lines[0], lines[1], kept], order, size,
+        lambda points: _owners(geometry, ids, points), _circles(geometry, ids, axis),
+        held_plane=(lambda points: _owners(geometry, ids, points, across))
+        if across else None,
+        cross=_cross_circles(geometry, ids, axis))
+    if not len(conn):
+        return 0
+    middle = xyz[conn - 1][:, :, axis].mean(axis=1)
+    layer = np.clip(np.searchsorted(kept, middle) - 1, 0, len(weight) - 1)
+    return int(np.asarray(weight)[layer].sum())
+
+
 def extrusion_mesh(geometry: Any, ids, size: float,
                    parts_apart: bool = False,
                    progress: Any = None, piece: bool = False,
@@ -2561,8 +2665,9 @@ def piece_plan(geometry: Any, ids, size: float, sizes: Any = None) -> list[dict]
     """How `brick_mesh` would mesh these parts in pieces: for each
     piece its id, 'name', 'method' ('extrusion' for a sweep, 'overlay'
     for a fit), 'size', 'cells', the grid's cells at that size (voids
-    included), and 'bricks', about how many the mesh holds
-    (`brick_count`), and 'cuts', the solids cut from the piece. The
+    included), and 'bricks', how many the mesh holds (exactly for
+    an extrusion, `extrusion_bricks`; about, for a fit,
+    `fitted_brick_count`), and 'cuts', the solids cut from the piece. The
     pieces are `piece_cuts`', as deep as unions go.
     One entry, for the parts together, where they are one extrusion or
     no union to take apart; the pane reads it for its preview budget
@@ -2618,9 +2723,12 @@ def _plan(geometry: Any, parts, size: float, sizes: dict, found, made) -> list[d
     plan = []
     for part in parts:
         held = sizes.get(part[0], float(size)) if len(part) == 1 else float(size)
+        # the bricks as each mesher counts them: an extrusion's exactly,
+        # a fit's volume and its pillow
         try:
             cells = grid_cells(geometry, part, held, piece=True)
             method = 'extrusion'
+            bricks = extrusion_bricks(geometry, part, held, piece=True)
         except NotAnExtrusion:
             try:
                 # turned off the axes, swept along its own: the cells of
@@ -2628,15 +2736,18 @@ def _plan(geometry: Any, parts, size: float, sizes: dict, found, made) -> list[d
                 if len(part) != 1:
                     raise
                 item = _turned_primitive(geometry, part[0])
-                cells = grid_cells(_unturned(geometry, item), [item.id], held, piece=True)
+                unturned = _unturned(geometry, item)
+                cells = grid_cells(unturned, [item.id], held, piece=True)
                 method = 'extrusion'
+                bricks = extrusion_bricks(unturned, [item.id], held, piece=True)
             except NotAnExtrusion:
                 cells = fitted_cells(geometry, part, held, piece=True)
                 method = 'overlay'
+                bricks = fitted_brick_count(geometry, part, held)
         plan.append({'id': piece_of.get(part[0], part[0]) if len(part) == 1 else None,
                      'name': ', '.join(piece_name(geometry, i) for i in part),
                      'method': method, 'size': held, 'cells': int(cells),
-                     'bricks': brick_count(geometry, part, held),
+                     'bricks': bricks,
                      'cuts': cuts_of.get(part[0], ()) if len(part) == 1 else ()})
     return plan
 

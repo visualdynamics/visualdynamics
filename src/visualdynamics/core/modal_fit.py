@@ -279,14 +279,19 @@ class ModalFitSession:
         """The measured matrix minus the synthesis of the confirmed modes,
         (lines, responses, references).
 
-        The result is cached against the number of confirmed modes. It
-        does not depend on the cursor, and a drag asks for it on every
-        mouse move.
+        The result is cached against each confirmed mode's frequency and
+        damping. It does not depend on the cursor, and a drag asks for it
+        on every mouse move.
         """
         # The SVD over the residual is 4.7 ms on the airplane's FRFs, a
         # third of a frame at 60 Hz, which is why the drag path must not
         # recompute it.
-        stamp = len(self.modes)
+        # stamped on the count alone, a damping typed into the table for
+        # a confirmed mode moved the synthesis and left Find Mode and the
+        # half-power reading on the old residual until a mode was added
+        # or deleted (2026-11-03)
+        stamp = tuple((float(mode['frequency']), float(mode['damping']))
+                      for mode in self.modes)
         if self._residual is None or self._residual_stamp != stamp:
             self._residual = self.matrix - self.synthesis_matrix()
             self._residual_stamp = stamp

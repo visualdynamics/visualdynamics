@@ -43,7 +43,7 @@ from .solids import (
     _cuts,
     _owners,
     _within_limits,
-    brick_count,
+    fitted_brick_count,
     refuse_parts_of_another,
     smallest_feature,
     solid,
@@ -265,7 +265,7 @@ def likely_to_fold(geometry: Any, ids, size: float) -> dict:
         fitting, said for what it is (0, uncounted, when the grid is
         past `GRID_LIMIT` or its bricks past `MESH_LIMIT`); 'cells', the
         grid's cells; 'bricks', about how many the mesh holds
-        (`brick_count`); 'likely', True
+        (`fitted_brick_count`); 'likely', True
         under four and a half across or under two and a half through;
         'suggested', the size `suggested_size` gives.
     """
@@ -281,7 +281,7 @@ def likely_to_fold(geometry: Any, ids, size: float) -> dict:
     # fit will refuse it in a moment with the count (2026-10-20: the
     # check raised out of the pane at 2.3 million cells)
     cells = grid_cells(geometry, ids, float(size))
-    bricks = brick_count(geometry, ids, float(size))
+    bricks = fitted_brick_count(geometry, ids, float(size))
     flat = 0
     if cells <= GRID_LIMIT and bricks <= MESH_LIMIT:
         xyz, hexes, groups = _grid(geometry, ids, float(size))
@@ -340,7 +340,9 @@ def _grid(geometry, ids, size, cuts_from=()):
     face, as the extrusion mesher's do."""
     lines = _lines(geometry, ids, size, cuts_from)
     nx, ny, nz = (len(line) for line in lines)
-    _within_limits(geometry, ids, size, (nx - 1) * (ny - 1) * (nz - 1))
+    # the pillow counted too: by volume alone a fit could pass the limit
+    # at twice it
+    _within_limits(geometry, ids, size, (nx - 1) * (ny - 1) * (nz - 1), fitted_brick_count)
     grid = np.stack(np.meshgrid(*lines, indexing='ij'), axis=-1).reshape(-1, 3)
     node = np.arange(nx * ny * nz).reshape(nx, ny, nz)
     mids = [(line[:-1] + line[1:]) / 2.0 for line in lines]

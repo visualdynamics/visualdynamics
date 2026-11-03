@@ -574,6 +574,52 @@ def test_bricks_are_counted_from_the_volume():
     assert hexmesh.grid_cells(geometry, [box], 0.25 * INCH) == 16 ** 3
 
 
+def test_an_extrusions_count_is_the_bricks_it_makes_rings_and_all():
+    """The rings about a circle hold more bricks than their area: a
+    plate on four round legs made 56,960 where its volume said 33,156
+    (2026-11-03). Counted a span at a time, the count is exact, with a
+    hole drilled across the extrusion too."""
+    project, name, geometry = _project()
+    plate = project.add_solid_block(name, (0, 0, 5.25), (10, 10, 0.5), unit='in')
+    legs = [project.add_solid_cylinder(name, (x, y, 2.5), 0.5, 5.0, unit='in')
+            for x in (-4, 4) for y in (-4, 4)]
+    table = project.combine_solids(name, 'union', [plate, *legs], 'table')
+    size = 0.25 * INCH
+    _part, made = solids.extrusion_mesh(geometry, [table], size)
+    assert solids.extrusion_bricks(geometry, [table], size) == made['bricks'] == 8384
+    assert solids.brick_count(geometry, [table], size) < 0.6 * made['bricks']
+    block = project.add_solid_block(name, (20, 0, 0), (4, 2, 2), unit='in')
+    along = project.add_solid_cylinder(name, (21, 0, 0), 0.4, 3.0, unit='in')
+    across = project.add_solid_cylinder(name, (19, 0, 0), 0.3, 3.0, angles=(90, 0, 0),
+                                        unit='in')
+    drilled = project.combine_solids(name, 'subtract', [block, along, across], 'drilled')
+    _part, made = solids.extrusion_mesh(geometry, [drilled], 0.1 * INCH)
+    assert solids.extrusion_bricks(geometry, [drilled], 0.1 * INCH) == made['bricks']
+
+
+def test_a_fits_count_holds_its_pillow(monkeypatch):
+    """A fitted grid is pillowed, a brick on every face where it steps
+    out of the part: half again to twice the volume's count. Read with
+    the stepped faces, the count is within a few percent of the fit."""
+    project, name, geometry = _project()
+    block = project.add_solid_block(name, (0, 0, 0), (4, 2, 1), unit='in')
+    hole = project.add_solid_cylinder(name, (0, 0, 0), 0.6, 3.0, angles=(30, 0, 0), unit='in')
+    cut = project.combine_solids(name, 'subtract', [block, hole])
+    size = 0.25 * INCH
+    _part, made = hexmesh.overlay_mesh(geometry, [cut], size)
+    assert solids.fitted_brick_count(geometry, [cut], size) == pytest.approx(
+        made['bricks'], rel=0.05)
+    assert solids.brick_count(geometry, [cut], size) < 0.6 * made['bricks']
+    assert hexmesh.likely_to_fold(geometry, [cut], size)['bricks'] == \
+        solids.fitted_brick_count(geometry, [cut], size)
+    # and the limit reads it so: a fit under the limit by its volume and
+    # over it with its pillow is refused before the grid is laid
+    fitted = solids.fitted_brick_count(geometry, [cut], size)
+    monkeypatch.setattr(solids, 'MESH_LIMIT', (fitted + solids.brick_count(geometry, [cut], size)) // 2)
+    with pytest.raises(ValueError, match=f'about {fitted:,} bricks at that size'):
+        hexmesh.overlay_mesh(geometry, [cut], size)
+
+
 def test_a_mostly_empty_box_is_held_to_its_bricks_and_its_grid_to_memory(monkeypatch):
     """Two small blocks far apart: their grid is mostly empty, its cells
     past the brick limit and its bricks under it, and it meshes, the
@@ -606,10 +652,10 @@ def test_a_fit_counts_the_bricks_it_keeps_again(monkeypatch):
     block = project.add_solid_block(name, (0, 0, 0), (4, 2, 1), unit='in')
     hole = project.add_solid_cylinder(name, (0, 0, 0), 0.3, 2.0, angles=(30, 0, 0), unit='in')
     cut = project.combine_solids(name, 'subtract', [block, hole])
-    monkeypatch.setattr(hexmesh, 'brick_count', lambda *args: 0)
-    monkeypatch.setattr(solids, 'brick_count', lambda *args: 0)
+    monkeypatch.setattr(hexmesh, 'fitted_brick_count', lambda *args: 0)
     monkeypatch.setattr(hexmesh, 'MESH_LIMIT', 100)
-    with pytest.raises(ValueError, match='bricks at that size, over the limit of 100'):
+    # the fit's own count, not the estimate's 'about'
+    with pytest.raises(ValueError, match=r'^[\d,]+ bricks at that size, over the limit of 100'):
         hexmesh.overlay_mesh(geometry, [cut], 0.25 * INCH)
 
 

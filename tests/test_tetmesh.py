@@ -294,15 +294,15 @@ def test_the_pane_offers_tets_where_bricks_refuse_and_meshes_them(window, pump):
     assert panel.element_kind == 'hexes'
     assert [panel.elements.itemText(k) for k in range(2)] == ['Hexes', 'Tetras']
     # not an extrusion: bricks are fitted to the shape (test_hexmesh.py),
-    # here past the fitted preview's budget, so the count alone is said,
-    # from the volume: the grid's 4,096 cells less the hole
+    # here past the fitted preview's budget, so the count alone is said:
+    # the volume's and the pillow's, past the grid's 4,096 cells
     panel.size.setValue(0.125)
     _settled(window, pump)
     from visualdynamics.core import solids
 
-    bricks = solids.brick_count(project[name], [solids.top_level(project[name])[0].id],
-                                0.125 * 0.0254)
-    assert bricks < 4096
+    bricks = solids.fitted_brick_count(project[name], [solids.top_level(project[name])[0].id],
+                                       0.125 * 0.0254)
+    assert bricks > 4096
     assert panel.reading_label.text().startswith(f'About {bricks:,} bricks at this size')
     assert panel.mesh_button.isEnabled()
     panel.elements.setCurrentIndex(1)

@@ -217,10 +217,13 @@ def test_solve_modes_is_the_modes_panes_other_kind(window, pump):
     assert panel.fem_derived['dofs'].text() == \
         f"6 × {window.objects['Skin'].num_nodes:,}"
     select_objects(window, pump, 'Bare')
+    assert not window.scene.modes_action.isChecked(), 'it ended with the move'
+    _modes(window, pump)
     assert not panel.kind_box.isVisibleTo(panel), 'one kind, no choice'
     assert panel.kind == 'rigid' and panel.rigid_section.isVisibleTo(panel)
     assert window._rigid_preview[0] == 'Bare'
     select_objects(window, pump, 'Skin')
+    _modes(window, pump)
     panel.kind_box.setCurrentIndex(panel.kind_box.findData('rigid'))
     pump()
     assert panel.rigid_section.isVisibleTo(panel)

@@ -1841,6 +1841,9 @@ class MainWindow(QMainWindow):
         self._compare_active = False
         #: how an FRF and a shape set together read: 'fit' | 'overlay'
         self.pair_mode: str = 'fit'
+        #: {name: object} a reading on the bar was asked for on, narrowed
+        #: as they leave the selection (`_selection_moved`)
+        self._reading_on: dict[str, Any] = {}
         self._pair_selected = False
         self._pair_with_picks = False
         self._units_restate = QTimer(self)
@@ -4615,7 +4618,7 @@ class MainWindow(QMainWindow):
             self.tree.blockSignals(True)
             item.setSelected(False)
             self.tree.blockSignals(False)
-            self._show_picks()
+            self._grid_moved()
             return
         adding = self._adding_to_selection()
         if not adding:
@@ -4664,6 +4667,18 @@ class MainWindow(QMainWindow):
                 self.tree.setCurrentItem(
                     item, 0, QItemSelectionModel.SelectionFlag.NoUpdate)
             self.tree.blockSignals(False)
+        self._grid_moved()
+
+    def _grid_moved(self) -> None:
+        """A grid's pick moved the selection with the tree's signals
+        blocked, so `_selection_changed` never heard: what it would have
+        ended, end here."""
+        # 2026-11-03: a channel picked in another object's grid left a
+        # geometry's edit table and every pane on the 3-D view up.
+        self._selection_moved()
+        if self.editing is not None and not self._selection_is_being_edited():
+            self.stop_editing()
+            return
         self._show_picks()
 
     def _show_picks(self) -> None:
@@ -10030,41 +10045,7 @@ class MainWindow(QMainWindow):
 
     def _selection_changed(self, *_):
         self.data_pane.reset_plot_mode()
-        # the box being placed belongs to its geometry: selecting
-        # anything else puts the pane away rather than leave a preview
-        # drawn over a different object
-        if self._mesh is not None:
-            current = self.tree.currentItem()
-            # a solid's own row, picked while its pane is open on it
-            editing = self._mesh.get('editing')
-            on_it = (current is not None and editing is not None
-                     and current.data(0, ROLE_REFERENCE) == ('solid', *editing))
-            # and held through the rows' rebuild an Apply makes
-            if (not on_it and not self._mesh.get('holding')
-                    and (current is None or current.text(0) != self._mesh['name'])):
-                self.close_mesh_pane()
-        # the places belong to the groups picked when the pane opened:
-        # picking anything else puts it away
-        if self._merging is not None and not self._merge_holding:
-            self.close_merge_pane(redraw=False)
-        # the patches belong to the groups picked when the pane opened, or
-        # to the set it edits: picking anything else puts it away
-        mating = self.__dict__.get('_mating')
-        if (mating is not None and not self._mate_holding
-                and not self._mate_selection_holds(mating)):
-            self.close_mate_pane(redraw=False)
-        # the bricks previewed belong to the solids picked when the pane
-        # opened, likewise
-        if self.__dict__.get('_meshing') is not None:
-            self.close_mesh_solids_pane(redraw=False)
-        if self.__dict__.get('_patterning') is not None:
-            self.close_pattern_pane(redraw=False)
-        # the plan belongs to the shape set it was opened on: picking its
-        # modes plans for them, picking anything else puts it away
-        planning = self.__dict__.get('_planning')
-        if (planning is not None and not planning['holding']
-                and not self._planning_selection_holds(planning)):
-            self.close_instrumentation_pane(redraw=False)
+        self._selection_moved()
         # Making the owner row current means "the whole object", so its
         # grid picks are released — a cell selected minutes ago must not
         # silently turn a later delete-the-object into delete-that-record.
@@ -10111,6 +10092,86 @@ class MainWindow(QMainWindow):
             # state (Brandon watched the storm, 2026-08-23).
             return
         self._show_picks()
+
+    def _end_readings_left_behind(self) -> None:
+        """Turn the readings off when the selection has moved to another
+        object.
+
+        A reading stays on while any object it was asked for on stays
+        selected: picking that object's channels is the same object, and
+        so is adding another beside it. A rename is the same object under
+        a new name, and a rewrite a new object under the old one, so
+        either match counts. Each object that leaves is gone for good,
+        so a reading on A does not follow A and B on to B alone. Nothing
+        selected is not another object (a drag in the tree passes through
+        it, and a click on a gray slot, which cannot be selected, lands
+        on it); the project row is.
+        """
+        selected = self.tree.selectedItems()
+        if not selected:
+            return
+        now = {} if all(item is self.test_item for item in selected) else {
+            name: obj for _kind, name, obj, _detail in self.selected_references()}
+        if not (self.data_pane.holding_a_reading() or self.scene.modes_wanted
+                or self.pair_mode != 'fit'):
+            self._reading_on = now
+            return
+        objects = {id(obj) for obj in self._reading_on.values()}
+        kept = {name: obj for name, obj in now.items()
+                if name in self._reading_on or id(obj) in objects}
+        if kept:
+            self._reading_on = kept
+            return
+        self._reading_on = now
+        self.data_pane.end_readings()
+        self.scene.end_modes()
+        # Resynthesis, an FRF and a shape set's other reading: the next
+        # pair selected reads the way a pair does until told otherwise
+        self.pair_mode = 'fit'
+
+    def _selection_moved(self) -> None:
+        """End whatever belonged to what the selection has left: the
+        readings on the bars, and the panes on the 3-D view.
+
+        The tree's own changes and a grid's picks both come through
+        here, so there is one place that says what ends.
+        """
+        self._end_readings_left_behind()
+        # the box being placed belongs to its geometry: selecting
+        # anything else puts the pane away rather than leave a preview
+        # drawn over a different object
+        if self._mesh is not None:
+            current = self.tree.currentItem()
+            # a solid's own row, picked while its pane is open on it
+            editing = self._mesh.get('editing')
+            on_it = (current is not None and editing is not None
+                     and current.data(0, ROLE_REFERENCE) == ('solid', *editing))
+            # and held through the rows' rebuild an Apply makes
+            if (not on_it and not self._mesh.get('holding')
+                    and (current is None or current.text(0) != self._mesh['name'])):
+                self.close_mesh_pane()
+        # the places belong to the groups picked when the pane opened:
+        # picking anything else puts it away
+        if self._merging is not None and not self._merge_holding:
+            self.close_merge_pane(redraw=False)
+        # the patches belong to the groups picked when the pane opened, or
+        # to the set it edits: picking anything else puts it away
+        mating = self.__dict__.get('_mating')
+        if (mating is not None and not self._mate_holding
+                and not self._mate_selection_holds(mating)):
+            self.close_mate_pane(redraw=False)
+        # the bricks previewed belong to the solids picked when the pane
+        # opened, likewise
+        if self.__dict__.get('_meshing') is not None:
+            self.close_mesh_solids_pane(redraw=False)
+        if self.__dict__.get('_patterning') is not None:
+            self.close_pattern_pane(redraw=False)
+        # the plan belongs to the shape set it was opened on: picking its
+        # modes plans for them, picking anything else puts it away
+        planning = self.__dict__.get('_planning')
+        if (planning is not None and not planning['holding']
+                and not self._planning_selection_holds(planning)):
+            self.close_instrumentation_pane(redraw=False)
 
     def _follow_picked_groups(self) -> None:
         """A table opened from element group rows holds the groups picked
@@ -10286,6 +10347,11 @@ class MainWindow(QMainWindow):
         self.scene.clear()
         self.scene.offer_modes(False)
         self.data_pane.clear()
+        # and the bar and the panes beside the plot: with nothing selected
+        # no renderer came to put them away, and a filter's pane stayed up
+        # with no record under it (2026-11-03)
+        self.data_pane.reset_controls()
+        self.data_pane.put_panels_away()
         self.table.setModel(None)
         if self.report_editor is not None:
             # hidden, not forgotten. `_clear_views` runs whenever nothing
@@ -10345,7 +10411,8 @@ class MainWindow(QMainWindow):
                 return
             self.stop_fitting()
         # one FRF and one shape set, both whole, read two ways — the
-        # Edit Fit / Resynthesis buttons choose, and the choice sticks.
+        # Edit Fit / Resynthesis buttons choose, and the choice lasts until
+        # the selection moves to another object.
         # Sub-item picks keep their own meanings (a mode pick beside an
         # FRF is always the synthesis overlay), so they do not enter here.
         chosen = {name: obj for _kind, name, obj, _detail in references}
@@ -12137,10 +12204,11 @@ class MainWindow(QMainWindow):
             made.add(self._author_made.get(self._author_door[1]))
             if not (was & now) and not (now & made):
                 self._author_wanted = False
-        elif door is None and any(kind == 'object' for kind, *_rest
-                                  in self.selected_references()):
+        elif door is None and self.selected_references():
             # an object that is no door at all ends the edit too, so
-            # coming back to the specification shows it, not the sheet
+            # coming back to the specification shows it, not the sheet;
+            # and so does a row inside one (2026-11-03: a channel picked
+            # in another object's grid left the sheet waiting to reopen)
             self._author_wanted = False
         wanted = door is not None and self._author_wanted
         if wanted:

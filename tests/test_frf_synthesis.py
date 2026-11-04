@@ -248,7 +248,7 @@ def test_a_specification_and_its_response_are_a_pair(window, pump):
 
 def test_the_pair_toggle_switches_between_edit_and_resynthesis(shown, pump):
     """One selection, two readings: Edit Fit is the fitting screen,
-    Resynthesis the overlay — a sticky choice on the plot bar."""
+    Resynthesis the overlay — a choice on the plot bar."""
     window, shapes, _frfs = shown
     window.tree.setCurrentItem(window._item_for_object('FRF'))
     window.tree.clearSelection()

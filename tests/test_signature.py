@@ -796,6 +796,8 @@ def test_a_new_pair_clears_the_modes_named_for_the_last(window, pump):
     window.add_object('Again', signature(AFTER))
     select_objects(window, pump, 'Before', 'Again')
     pump()
+    window.data_pane.signature_action.trigger()
+    pump()
     assert panel.modes_edit.text() == ''
     assert panel.find_box.isVisibleTo(panel)
     assert '(modes found)' in window._status_text

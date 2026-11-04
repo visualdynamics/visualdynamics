@@ -188,9 +188,14 @@ def test_settings_are_kept_per_record_and_the_pane_follows(window, pump):
     pump()
     _set(pane.fatigue_panel, pump, duration=60.0)
     _show(window, pump, 'Two')
+    assert not pane.fatigue_panel.isVisible(), 'it ended with the move'
+    pane.fatigue_action.trigger()
+    pump()
     assert pane.fatigue_panel.duration_box.value() == 0.0
     assert 'duration is not given' in pane.fatigue_panel.verdict.text()
     _show(window, pump, 'One')
+    pane.fatigue_action.trigger()
+    pump()
     assert pane.fatigue_panel.duration_box.value() == 60.0
     assert window._fatigue_cache[1].label == window.objects['One'] \
         .record_label(0)

@@ -143,7 +143,8 @@ def test_realizability_reads_a_specification_and_makes_it_realizable(window,
     pump()
     assert 'Spec Realizable' in window.project
     assert window.current_object() is window.project['Spec Realizable']
-    window.render_current()
+    assert not panel.isVisible(), 'it ended on the object it made'
+    pane.realizability_action.trigger()
     pump()
     assert 'realizable at all 100 lines' in panel.verdict.text()
     assert not panel.apply_button.isEnabled(), 'nothing left to repair'
@@ -240,12 +241,17 @@ def test_the_reading_and_the_repair_run_off_the_window_thread(window, pump,
     pump()
     assert 'Spec Realizable' in window.project
     assert all(thread is not threading.main_thread() for thread in threads)
-    assert len(threads) == 3, 'the repair, then the repaired reading'
+    assert len(threads) == 2, 'the repair'
+    pane.realizability_action.trigger()
+    pump()
+    assert all(thread is not threading.main_thread() for thread in threads)
+    assert len(threads) == 3, 'and the repaired one read when it is asked for'
 
 
 def test_the_reading_follows_its_object(window, pump):
     """A reading held is let go when the object it was made of changes or
-    another is shown: the pane reads what is selected now."""
+    another is shown: asked for there, the pane reads what is selected
+    now."""
     pane = _show(window, pump, 'Spec', _specification())
     pane.realizability_action.trigger()
     pump()
@@ -257,6 +263,8 @@ def test_the_reading_follows_its_object(window, pump):
     pump()
     assert 'realizable at all 100 lines' in panel.verdict.text()
     _show(window, pump, 'Other', _specification())
+    pane.realizability_action.trigger()
+    pump()
     assert 'not realizable at 100 of 100 lines' in panel.verdict.text()
     assert window._matrix_check['name'] == 'Other'
 

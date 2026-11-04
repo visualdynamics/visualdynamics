@@ -816,6 +816,8 @@ def test_the_marks_are_kept_on_the_reference_and_saved_with_it(
     window.add_object('Other', other)
     select_objects(window, pump, 'Run', 'Other')
     pump()
+    window.data_pane.replication_actions['segments'].trigger()
+    pump()
     assert panel.segments() == [] and other.segments is None
     select_objects(window, pump, 'Run', 'Reference')
     pump()

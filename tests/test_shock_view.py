@@ -77,10 +77,10 @@ def test_the_button_takes_them_away_again(shown):
     assert not overlays(window)
 
 
-def test_the_choice_survives_moving_to_another_object(window, pump):
-    """Sticky, like the averaging button: a view asked for once stays
-    asked for until it is turned off — asked for by the user, since no
-    project type pre-selects it any more (Brandon, 2026-08-30)."""
+def test_the_choice_ends_moving_to_another_object(window, pump):
+    """Like the averaging button: a view asked for belongs to the object
+    it was asked for on — asked for by the user, since no project type
+    pre-selects it any more (Brandon, 2026-08-30)."""
     window.import_paths([fixture_path('plate', 'shock.nc4')])
     pump()
     window.set_project_type('Shock')
@@ -97,7 +97,7 @@ def test_the_choice_survives_moving_to_another_object(window, pump):
     pump()
     window.show_object(name)
     pump()
-    assert window.data_pane.shocks_wanted, 'asked for once, still on'
+    assert not window.data_pane.shocks_wanted, 'it ended with the move'
     assert not window.data_pane.averaging_wanted
 
 

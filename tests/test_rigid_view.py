@@ -70,13 +70,15 @@ def test_the_toggle_is_offered_to_a_lone_geometry_only(window, pump):
     assert not scene.modes_action.isVisible(), 'nothing selected, nothing offered'
 
 
-def test_the_wish_survives_the_selection(window, pump):
+def test_the_wish_ends_with_the_selection(window, pump):
     _plate(window, pump)
     scene = _toggle(window, pump)
     window.add_object('Other', _geometry())
     _select(window, pump, 'Other')
-    assert scene.modes_action.isChecked(), \
-        'the reading comes back up on the next geometry, the data pane\'s rule'
+    assert not scene.modes_action.isChecked(), \
+        'it was asked for on the plate, the data pane\'s rule'
+    assert window._rigid_preview is None
+    scene = _toggle(window, pump)
     assert window._rigid_preview[0] == 'Other'
     _select(window, pump, 'Plate', 'Other')
     assert not scene.modes_action.isVisible()
@@ -226,12 +228,13 @@ def test_generate_makes_the_set_in_the_group(window, pump):
     status = window.statusBar().currentMessage()
     assert status.startswith('Plate Rigid Body Modes: 6 modes about (')
     assert 'linked to Plate' in status
-    # the result is shown, as every act shows what it made; the
-    # reading stands down with it and comes back on the geometry
+    # the result is shown, as every act shows what it made, and the
+    # reading ends with the move; what was typed is still there
     assert window.current_object() is made
     assert not scene.modes_action.isVisible()
     _select(window, pump, 'Plate')
-    assert scene.modes_action.isChecked()
+    assert not scene.modes_action.isChecked()
+    _toggle(window, pump)
     assert geometry.mass_properties.point[2] == pytest.approx(
         float(window.unit_system.to_si(3.0, 'length')))
     # and the badge: moving the point after the act marks the set

@@ -203,6 +203,8 @@ def test_a_tolerance_moved_judges_again_without_reading_again(window, pump,
     assert panel.derived['verdict'].text() == 'passes'
     window.add_object('Run 2', measured(phase=60.0))
     select_objects(window, pump, 'Spec', 'Run 2')
+    window.data_pane.matrix_action.trigger()
+    pump()
     assert reads == [1]
     assert panel.derived['verdict'].text() == 'fails'
 

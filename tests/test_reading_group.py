@@ -219,11 +219,13 @@ def test_every_reading_panel_lives_inside_the_pane(pane):
                                   in DataPane._READINGS if reading.flat])
 def test_a_spectrum_after_a_flat_reading_keeps_its_3d_form(window, pump,
                                                            flat):
-    """A flat reading hides the 2-D/3-D toggle while it is up, and its
-    choice is sticky; a spectrum selected next is not that reading's,
-    and keeps the toggle. Read from whether the reading is up, not
-    whether it is wanted: by the wanted flag the stroke, the statistics
-    and the kurtosis each took the toggle from the next spectrum."""
+    """A flat reading hides the 2-D/3-D toggle while it is up; a spectrum
+    selected next is not that reading's, and keeps the toggle. Read from
+    whether the reading is up, not whether it is wanted: by the wanted
+    flag the stroke, the statistics and the kurtosis each took the toggle
+    from the next spectrum. The move ends the reading now, so the flag is
+    set again to hold the rule: one is still set while the object it was
+    asked for on stays selected beside something it is not offered for."""
     looking_at(window, pump)
     pane = window.data_pane
     action = getattr(pane, f'{flat}_action')
@@ -239,7 +241,10 @@ def test_a_spectrum_after_a_flat_reading_keeps_its_3d_form(window, pump,
     item.setSelected(True)
     window.tree.setCurrentItem(item)
     pump()
-    assert getattr(pane, f'{flat}_wanted'), 'the choice is still sticky'
+    assert not getattr(pane, f'{flat}_wanted'), 'it ended with the move'
+    setattr(pane, f'{flat}_wanted', True)
+    window.render_current()
+    pump()
     assert not action.isVisible()
     assert pane.waterfall_action.isVisible()
 

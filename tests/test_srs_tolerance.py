@@ -831,7 +831,9 @@ def test_several_polarities_are_read_by_the_points_rule_alone(window, pump):
     window.add_object('Positive', measured(spec, kind='positive'))
     window.add_object('Negative', measured(spec, -2.0, kind='negative'))
     pane = window.data_pane
-    pane.srs_view = 'error'
+    select_objects(window, pump, 'Requirement', 'Positive')
+    pane.srs_actions['error'].trigger()
+    pump()
     select_objects(window, pump, 'Requirement', 'Positive', 'Negative')
     assert not pane.srs_actions['curves'].isVisible()
     assert not pane.srs_actions['error'].isVisible()

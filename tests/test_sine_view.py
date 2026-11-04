@@ -124,7 +124,8 @@ def test_the_button_makes_the_levels_with_the_setting_shown(window, pump):
     # and a later edit badges the levels stale, as a filter edit does
     # (the press selected the levels; the edit is made on the record)
     select_objects(window, pump, 'Record')
-    window.render_current()
+    assert not panel.isVisible(), 'it ended on the levels'
+    pane.sine_action.trigger()
     pump()
     assert panel.isVisible()
     panel.cycles_box.setValue(80.0)

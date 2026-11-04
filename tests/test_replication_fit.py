@@ -844,7 +844,8 @@ def test_the_ratings_stay_with_the_window_across_records(window, pump):
     panel.boxes['stroke'].setValue(3.0)
     pump()
     _looking_at(window, pump, tone(), name='Tone')
-    assert window.data_pane.fit_action.isChecked()
+    assert not window.data_pane.fit_action.isChecked()
+    _reading(window, pump)
     assert panel.boxes['stroke'].value() == pytest.approx(3.0)
     assert window.data_pane.fit_settings['stroke'] == pytest.approx(
         3.0 * INCH)

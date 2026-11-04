@@ -343,7 +343,7 @@ class DataPane(QWidget):
         self.fatigue_wanted: bool = False
         self.sweep_rate_wanted: bool = False
         self.sine_profile_wanted: bool = False
-        #: the kurtosis reading, sticky like every other view choice
+        #: the kurtosis reading, on until the selection moves on
         self.kurtosis_wanted: bool = False
         #: and the time statistics, the same way
         self.statistics_wanted: bool = False
@@ -388,24 +388,24 @@ class DataPane(QWidget):
         self.resample_settings: dict[str, Any] | None = None
         #: where its band has been dragged to, if it has
         self.kurtosis_bounds: tuple[float, float] | None = None
-        #: 'curves', 'error', 'lines', 'chance' or 'composite' — sticky,
-        #: like the other view choices, so it survives a redraw
-        #: ('composite' only where two or more control channels can be
-        #: combined)
+        #: 'curves', 'error', 'lines', 'chance' or 'composite' — kept
+        #: through a redraw, and 'curves' again once the selection moves
+        #: to another object ('composite' only where two or more control
+        #: channels can be combined)
         self.comparison_view: str = 'curves'
         #: where the bar charts' thresholds have been dragged to
         self.error_bounds: tuple[float, float] | None = None
         self.lines_bound: float | None = None
         #: 'overlay', 'waveform' or 'segments' — the transient's own
         #: readings, kept apart from the random ones above because they
-        #: are different questions and a single sticky choice shared
-        #: between them would carry a random answer into a transient
+        #: are different questions and a single choice shared between
+        #: them would carry a random answer into a transient
         self.replication_view: str = 'overlay'
         #: 'curves', 'error' or 'points' — the same for a pair of
         #: shock spectra ('points' is theirs alone, not the sine's)
         self.srs_view: str = 'curves'
         #: 'overlay', 'ratio' or 'snr' — how two selected densities
-        #: read together; sticky like every view choice
+        #: read together
         self.spectra_view: str = 'overlay'
         #: where the RMS signal-to-noise bars' floor has been dragged
         self.snr_bound: float | None = None
@@ -645,6 +645,11 @@ class DataPane(QWidget):
         plot_row.addWidget(self.replication_fit_panel)
         plot_row.addWidget(self.stroke_panel)
         plot_row.addWidget(self.resample_panel)
+        #: every pane that sits beside the plot, the sheet's included
+        self._side_panels: list[QWidget] = [
+            self.author_panel,
+            *(plot_row.itemAt(k).widget()
+              for k in range(1, plot_row.count()))]
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1440,7 +1445,7 @@ class DataPane(QWidget):
         self.residual_action.toggled.connect(self.residual_toggled.emit)
         toolbar.addAction(self.residual_action)
         # an FRF beside a shape set reads two ways: edit the fit, or see
-        # the resynthesis over the measurement. One sticky choice.
+        # the resynthesis over the measurement. One choice, the window's.
         self.pair_group: QActionGroup = QActionGroup(self)
         self.pair_edit_action: QAction = QAction(control_icon('edit'),
                                         'Edit Fit', self)
@@ -1576,6 +1581,80 @@ class DataPane(QWidget):
         offer_acts(self.toolbar, self.__dict__.setdefault('_acts', {}), acts)
         self.sync_toolbar()
 
+    #: the readings outside that list that keep a pane: each has
+    #: `<key>_action`, `<key>_wanted` and `<key>_panel`
+    _PANE_TOGGLES: ClassVar[tuple[str, ...]] = (
+        'octave', 'tone', 'transmissibility', 'confidence', 'rms_check',
+        'conditioning', 'realizability', 'prediction', 'notch',
+        'partial_coherence', 'transformation', 'field_limit', 'fatigue',
+        'sweep_rate', 'sine_profile')
+    #: each group of a comparison's readings and the one it falls back
+    #: to: (view attribute, actions attribute, the plain choice)
+    _VIEWS: ClassVar[tuple[tuple[str, str, str], ...]] = (
+        ('comparison_view', 'comparison_actions', 'curves'),
+        ('replication_view', 'replication_actions', 'overlay'),
+        ('srs_view', 'srs_actions', 'curves'),
+        ('spectra_view', 'spectra_actions', 'overlay'))
+
+    def holding_a_reading(self) -> bool:
+        """Whether anything `end_readings` would end is on."""
+        return (any(getattr(self, f'{reading.key}_wanted')
+                    for reading in self._READINGS)
+                or any(getattr(self, f'{key}_wanted')
+                       for key in self._PANE_TOGGLES)
+                or self.signature_action.isChecked()
+                or self.matrix_action.isChecked()
+                or self.rms_action.isChecked()
+                or self.cmif_action.isChecked()
+                or any(getattr(self, view) != plain
+                       for view, _actions, plain in self._VIEWS))
+
+    def end_readings(self) -> None:
+        """Turn off every reading, those with a pane and those with
+        nothing to set, and put each group of a comparison's readings
+        back on its plain choice.
+
+        A reading belongs to the object it was asked for on, so the
+        window calls this when the selection moves to another object.
+        What was typed into the panes stays on this object as
+        `<key>_settings`, for the next time the reading is asked for, and
+        so does how anything is drawn (3D, the frequency axis).
+        """
+        # Brandon, 2026-11-03: "when the user changes to another object,
+        # the status of editing or setting computation settings doesn't
+        # clear." Every reading here was sticky by decision, from
+        # 2026-08-27 on, so a filter left up reopened over the next
+        # record, its button down, previewing settings nobody had set for it.
+        # The readings with no pane stayed on at first, for stepping through
+        # a set of comparisons on one reading; asked, Brandon: "End them too".
+        for reading in self._READINGS:
+            getattr(self, f'{reading.key}_action').setChecked(False)
+        self._readings_settled()
+        for key in self._PANE_TOGGLES:
+            setattr(self, f'{key}_wanted', False)
+            getattr(self, f'{key}_action').setChecked(False)
+            getattr(self, f'{key}_panel').hide()
+        for action, panel in ((self.signature_action, self.signature_panel),
+                              (self.matrix_action, self.matrix_panel)):
+            action.setChecked(False)
+            panel.hide()
+        self.rms_action.setChecked(False)
+        self.cmif_action.setChecked(False)
+        for view, actions, plain in self._VIEWS:
+            if getattr(self, view) != plain:
+                setattr(self, view, plain)
+                getattr(self, actions)[plain].setChecked(True)
+        for panel in (self.chance_panel, self.multi_point_panel,
+                      self.segments_panel, self.srs_tolerance_panel):
+            panel.hide()
+
+    def put_panels_away(self) -> None:
+        """Hide every pane beside the plot, ending nothing: with nothing
+        selected there is nothing for one to edit, and the renderer of
+        whatever is selected next puts back the one it wants."""
+        for panel in self._side_panels:
+            panel.hide()
+
     def _readings_settled(self) -> None:
         """Bring the flags and the panels into line with the buttons.
 
@@ -1695,8 +1774,8 @@ class DataPane(QWidget):
 
         Kept on the pane as `<key>_settings` rather than in the panel,
         so a tuned range, a pulse or a shaker's ratings survive clicking
-        away to another object and back: the same stickiness every
-        other view choice on this bar has.
+        away to another object and back, though the reading itself ends
+        there (`end_readings`).
         """
         setattr(self, f'{key}_settings', dict(settings))
         self.reread.emit()
@@ -1791,7 +1870,7 @@ class DataPane(QWidget):
             self.comparison_actions[reading].setChecked(True)
 
     def comparison_reading(self, composite: bool = False) -> str:
-        """The reading a comparison shows: the sticky choice, or
+        """The reading a comparison shows: the choice on the bar, or
         'curves' when the choice is the Composite and `composite` says
         this comparison cannot make one (a single control channel)."""
         if self.comparison_view == 'composite' and not composite:
@@ -1869,12 +1948,12 @@ class DataPane(QWidget):
 
     def srs_reading(self, kind: str = 'srs',
                     readings: Sequence[str] | None = None) -> str:
-        """The reading a comparison of `kind` shows: the sticky choice,
+        """The reading a comparison of `kind` shows: the choice on the bar,
         or the first one offered when the choice is one this comparison
         does not have (the points rule, carried from a shock to a sine
         comparison, reads as its curves). `readings` narrows the ones
-        offered, as for `show_srs_views`. The sticky choice is kept, so
-        the comparison it belongs to shows it again."""
+        offered, as for `show_srs_views`. The choice is kept, so the
+        comparison it belongs to shows it again."""
         offered = [key for key in self.SRS_LABELS[kind]
                    if readings is None or key in readings]
         return self.srs_view if self.srs_view in offered else offered[0]
@@ -1971,8 +2050,8 @@ class DataPane(QWidget):
     # `read_record_as` used to pre-select a reading from the type:
     # random and transient opened with the averaging view up (marks
     # before the data had been looked at), shock opened on detection.
-    # The toggles are sticky once touched, and that is the whole of
-    # the mechanism now.
+    # A toggle stays as it was left until the selection moves to another
+    # object (`end_readings`), and that is the whole of the mechanism now.
 
     def _choose_plot_mode(self, mode: str) -> None:
         """An explicit choice, which outranks the default until the
@@ -2092,9 +2171,10 @@ class DataPane(QWidget):
         # half of principle 3, and the half that survives: it is the
         # readings that stay offered whichever one is chosen (Brandon,
         # 2026-08-27).
-        # by whether a reading is up, not wanted: the choice is sticky
-        # across a selection it is not offered for, such as a spectrum,
-        # which keeps its 3-D form
+        # by whether a reading is up, not wanted: a reading stays wanted
+        # across a selection it is not offered for while the object it
+        # was asked for on stays selected, and what is offered instead
+        # keeps its 3-D form
         from .opengl import refusal
 
         flat = self.flat_only or refusal() is not None or any(
@@ -2609,8 +2689,9 @@ class ScenePane(QWidget):
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.theme_name: str = theme_name
-        #: the wish survives the selection, the data pane's rule: pick
-        #: another geometry and the reading comes back up
+        #: the wish lasts as long as its geometry stays selected, the data
+        #: pane's rule: a part of it picked and the reading steps aside,
+        #: the whole of it again and the reading comes back up
         self.modes_wanted: bool = False
         # the orientation triad is useful at a glance; the labeled box
         # around the geometry is clutter until asked for
@@ -2796,6 +2877,14 @@ class ScenePane(QWidget):
         if not checked:
             self.modes_panel.hide()
         self.modes_toggled.emit(bool(checked))
+
+    def end_modes(self) -> None:
+        """Turn the Modes reading off, for the selection moving to
+        another object (`DataPane.end_readings`). The numbers typed into
+        its pane stay."""
+        self.modes_wanted = False
+        self.modes_action.setChecked(False)
+        self.modes_panel.hide()
 
     def offer_modes(self, offered: bool) -> None:
         """Show or hide the Modes toggle. The window offers it

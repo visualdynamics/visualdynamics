@@ -33,7 +33,10 @@ Datasets read:
   followed by the values as raw floats. Read in either byte order at
   single or double precision. Only IEEE 754 floats are read; DEC VMS
   and IBM 5/370 floats are refused by name, because reading them as
-  IEEE would return wrong numbers without an error.
+  IEEE would return wrong numbers without an error. A marker line with
+  no fields after the `58b` is read too: the size comes from record 7
+  and has to end at a delimiter, and the values are taken as little
+  endian IEEE 754, which such a file cannot confirm.
 
 A file with several objects returns a dict keyed 'geometry', 'shapes'
 and the function names ('time', 'frf', 'coherence', 'psd', 'spectrum',
@@ -80,6 +83,7 @@ _58_DATA_TYPES = {
     1: (None, 0, 0),  # general: exponents come from the record itself
     2: ('pressure', -2, 1),
     3: ('dimensionless', 0, 0),
+    5: ('temperature', 0, 0),  # by the 164's factor and offset, not exponents
     8: ('length', 1, 0),
     9: ('force', 0, 1),
     11: ('velocity', 1, 0),
@@ -117,6 +121,14 @@ def _ints(line):
 _BINARY_MARKER = re.compile(r'\s*(\d+)b\s*(-?\d+)\s+(-?\d+)\s+'
                             r'(-?\d+)\s+(-?\d+)')
 
+#: The marker line of a binary dataset that gives its number and nothing
+#: else. Some writers stop there, so the byte order, the float format and
+#: the byte count have to come from elsewhere (`_implied_size`).
+_BARE_MARKER = re.compile(r'\s*(\d+)b\s*$')
+
+#: The ASCII records of a dataset 58, before its values.
+_58_HEADER_LINES = 11
+
 #: Byte ordering method, field 3.
 LITTLE_ENDIAN, BIG_ENDIAN = 1, 2
 
@@ -144,14 +156,45 @@ class Binary:
     data: bytes
 
 
+def _implied_size(records, data, position):
+    """How many bytes of values a 58b with a bare marker holds, by its
+    record 7, confirmed by the delimiter that has to follow them.
+
+    Raises ValueError when no size the record allows ends at a delimiter,
+    because reading on regardless would return numbers from the wrong
+    place in the file.
+    """
+    form = _ints(records[6][:30])
+    ordinate_type, count, even = form[0], form[1], form[2]
+    width = _58_PRECISION.get(ordinate_type)
+    if width is None:
+        raise ValueError(f'ordinate data type {ordinate_type} has no defined '
+                         f'float width, so the binary data cannot be read')
+    values = 2 if ordinate_type in (5, 6) else 1
+    # the format's 4-byte X first, then an X as wide as the values
+    sizes = ([count * values * width] if even
+             else [count * (4 + values * width), count * (1 + values) * width])
+    for size in dict.fromkeys(sizes):
+        rest = data[position + size:position + size + 16].lstrip(b'\r\n ')
+        if (position + size <= len(data)
+                and (not rest or rest.startswith(b'-1'))):
+            return size
+    raise ValueError(
+        f'a binary dataset 58 gives no byte count, and its values do not end '
+        f'where its record 7 says ({count} values of ordinate type '
+        f'{ordinate_type})')
+
+
 def iter_datasets(
-        data: str | bytes) -> Iterator[tuple[int | None, list[str], bytes]]:
+        data: str | bytes, unread: list[str] | None = None,
+) -> Iterator[tuple[int | None, list[str], bytes]]:
     """Yield (dataset_number, record_lines, payload) for each dataset.
 
     `payload` is None for an ordinary ASCII dataset and a `Binary` for a
     binary one (dataset 58b), whose eleven header records are still
     ASCII and come back in `record_lines` like any other. A dataset
-    whose number line is not an integer is not yielded.
+    whose number line is not an integer is not yielded, and that line
+    is appended to `unread` when it is given.
 
     `data` is read as bytes, a line at a time, rather than split into
     lines first, because a binary payload is not text: its float bytes
@@ -200,10 +243,33 @@ def iter_datasets(
                     position += 1
                 payload = Binary(order, fp, blob)
                 continue
+            bare = _BARE_MARKER.match(line)
+            if bare and int(bare.group(1)) == 58:
+                number = 58
+                for _ in range(_58_HEADER_LINES):
+                    stop = data.find(b'\n', position)
+                    if stop == -1:
+                        stop = len(data)
+                    records.append(data[position:stop].decode('utf-8', 'replace')
+                                   .rstrip('\r'))
+                    position = stop + 1
+                size = _implied_size(records, data, position)
+                blob = data[position:position + size]
+                position += size
+                # the same optional newline as the full marker's. With no
+                # field to say so, little endian IEEE 754 is assumed: the
+                # file cannot confirm it, and a byte order misread would
+                # give numbers rather than an error.
+                if data[position:position + 1] == b'\n':
+                    position += 1
+                payload = Binary(LITTLE_ENDIAN, IEEE_754, blob)
+                continue
             try:
                 number = int(line.strip())
             except ValueError:
                 number = None
+                if unread is not None:
+                    unread.append(line.strip())
         elif state == 'in':
             records.append(line)
     if state == 'in' and number is not None:
@@ -450,8 +516,15 @@ def _build_shapes(modes, path):
 _58_PRECISION = {2: 4, 4: 8, 5: 4, 6: 8}
 
 
-def _decode_58b(payload, ordinate_type):
-    """The floats a binary dataset 58 carries, in file order."""
+def _decode_58b(payload, ordinate_type, num_values=0, even=True):
+    """The floats a binary dataset 58 carries, in file order.
+
+    The format's abscissa is always single precision, so double-precision
+    data with uneven spacing is a 4-byte X followed by 8-byte values.
+    Some writers, this module's `save` among them, write that X as 8
+    bytes as well, so the byte count says which it is: anything short of
+    the all-double size is the format's mixed layout.
+    """
     if payload.fp_format != IEEE_754:
         raise ValueError(
             f'this universal file stores its binary data as '
@@ -465,6 +538,15 @@ def _decode_58b(payload, ordinate_type):
             f'width, so the binary data cannot be read')
     end = '<' if payload.order == LITTLE_ENDIAN else '>'
     dtype = np.dtype(f'{end}f{width}')
+    per_point = 2 if ordinate_type == 6 else 1
+    if (not even and width == 8
+            and len(payload.data) < num_values * 8 * (1 + per_point)):
+        pairs = np.frombuffer(
+            payload.data,
+            dtype=[('x', f'{end}f4'), ('y', f'{end}f8', (per_point,))],
+            count=len(payload.data) // (4 + 8 * per_point))
+        return np.column_stack([pairs['x'].astype(float),
+                                pairs['y'].astype(float)]).reshape(-1)
     usable = len(payload.data) - len(payload.data) % width
     return np.frombuffer(payload.data[:usable], dtype=dtype).astype(float)
 
@@ -519,7 +601,7 @@ def _parse_58(records, functions, payload=None):
             values.extend(_floats(line))
         values = np.array(values)
     else:
-        values = _decode_58b(payload, ordinate_type)
+        values = _decode_58b(payload, ordinate_type, num_values, even)
 
     if even:
         ordinate = values
@@ -551,7 +633,8 @@ def _parse_58(records, functions, payload=None):
     })
 
 
-def _build_data_objects(functions, factors, ordinate_unit, path):
+def _build_data_objects(functions, factors, ordinate_unit, path,
+                        temperature=None):
     """Group parsed 58 entries by function type into visualdynamics data objects.
 
     With a 164 present the ordinate scale to SI is known from the unit
@@ -581,18 +664,41 @@ def _build_data_objects(functions, factors, ordinate_unit, path):
                 grouped.append([entry])
         for which, entries in enumerate(grouped):
             _build_one(out, name if which == 0 else f'{name} ({which + 1})',
-                       code, entries, factors, ordinate_unit)
+                       code, entries, factors, ordinate_unit, temperature)
     return out
 
 
-def _build_one(out, name, code, entries, factors, ordinate_unit):
+def _build_one(out, name, code, entries, factors, ordinate_unit,
+               temperature=None):
     from ..core.data import class_for_function_type
-    from ..units import UNKNOWN, si_factor
+    from ..units import UNKNOWN, si_factor, si_transform
 
     abscissa = entries[0]['abscissa']
-    scales, dims, hints = [], [], []
+    scales, offsets, dims, hints = [], [], [], []
     for entry in entries:
-        if factors is not None:
+        offsets.append(0.0)
+        if entry['ordinate_dim'] == 'temperature':
+            # A temperature's scale has an offset, so its exponents say
+            # nothing. Without a 164 or a declared unit the values are
+            # in an unstated scale, and calling them kelvin would put a
+            # 20 degC reading at 20 K: named but left unit-less instead.
+            if temperature is not None:
+                factor, offset = temperature
+                scales.append(1.0 / factor)
+                offsets[-1] = offset / factor
+                dims.append('temperature')
+                hints.append(None)
+            elif ordinate_unit is not None:
+                scale, offset = si_transform(ordinate_unit, 'temperature')
+                scales.append(scale)
+                offsets[-1] = offset
+                dims.append('temperature')
+                hints.append(None)
+            else:
+                scales.append(1.0)
+                dims.append(UNKNOWN)
+                hints.append('temperature')
+        elif factors is not None:
             length_factor, force_factor = factors
             scales.append(1.0 / (length_factor ** entry['lexp']
                                  * force_factor ** entry['fexp']))
@@ -616,8 +722,8 @@ def _build_one(out, name, code, entries, factors, ordinate_unit):
     cls = class_for_function_type(code)
     out[name] = cls(
         abscissa=abscissa,
-        ordinate=np.array([e['ordinate'] * s
-                           for e, s in zip(entries, scales)]),
+        ordinate=np.array([e['ordinate'] * s + o
+                           for e, s, o in zip(entries, scales, offsets)]),
         response_dof=[e['response'] for e in entries],
         reference_dof=([e['reference'] for e in entries]
                        if cls.needs_reference
@@ -639,13 +745,15 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
     with open(path, 'rb') as f:
         text = f.read()
 
-    factors = None
+    factors, temperature, unread = None, None, []
     nodes, tracelines, elements = [], [], []
     functions, mode_shapes, systems = [], [], []
-    for number, records, payload in iter_datasets(text):
+    for number, records, payload in iter_datasets(text, unread):
         if number == 164:
             fields = _floats(' '.join(records[1:]))
             factors = (fields[0], fields[1])  # length, force
+            if len(fields) >= 4:
+                temperature = (fields[2], fields[3])  # factor, offset
         elif number == 2411:
             _parse_2411(records, nodes)
         elif number == 15:
@@ -661,7 +769,8 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
         elif number == 2420:
             _parse_2420(records, systems)
 
-    out = _build_data_objects(functions, factors, ordinate_unit, path)
+    out = _build_data_objects(functions, factors, ordinate_unit, path,
+                              temperature)
     if mode_shapes:
         out['shapes'] = _build_shapes(mode_shapes, path)
 
@@ -675,9 +784,26 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
         out['geometry'] = _build_geometry(nodes, tracelines, elements, scale,
                                           geometry_unit, systems)
     elif not out:
-        raise ValueError(f"No supported datasets found in {path}")
+        raise ValueError(f'No supported datasets found in {path}'
+                         + _what_was_skipped(functions, unread))
 
     return next(iter(out.values())) if len(out) == 1 else out
+
+
+def _what_was_skipped(functions, unread):
+    """What the file held that was passed over, for the refusal: "no
+    supported datasets" alone reads as an empty file, and it is usually
+    a function type or a dataset line this module does not read."""
+    parts = []
+    skipped = sorted({f['function_type'] for f in functions})
+    if skipped:
+        known = ', '.join(str(code) for code in _58_NAMES)
+        parts.append(f'dataset 58 of function type '
+                     f'{", ".join(map(str, skipped))} (read: {known})')
+    if unread:
+        parts.append(f'{len(unread)} dataset(s) whose first line could not '
+                     f'be read, the first being {unread[0][:40]!r}')
+    return '. Skipped: ' + '; '.join(parts) if parts else ''
 
 
 def _origin_scale(scale):
@@ -769,7 +895,7 @@ def handles_binary(obj: Any) -> bool:
 # visualdynamics dimension -> the dataset 58 specific data type that means it
 _58_CODES = {'length': 8, 'force': 9, 'velocity': 11, 'acceleration': 12,
              'pressure': 15, 'mass': 16, 'time': 17, 'frequency': 18,
-             'dimensionless': 3}
+             'dimensionless': 3, 'temperature': 5}
 
 DELIMITER = '    -1\n'
 

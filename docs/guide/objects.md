@@ -758,6 +758,25 @@ file written by the controller or by sdynpy imports too, with an
 off-diagonal that is all zero or NaN read as the placeholder for
 autospectra alone.
 
+Two forms of a cross term are in common use, and they are conjugates of
+each other, so the phase of one is the reverse of the other. Visual
+Dynamics stores \(G_{xy} = \overline{X} Y\), as Bendat and Piersol write
+it. The controller and sdynpy hold \(X \overline{Y}\). The Rattlesnake
+specification file, the controller's `.nc4` and the sdynpy data array
+file are converted on the way in and on the way out, so a cross term
+means the same thing in the program as it does in those tools. Every
+other format that can hold a cross term (the universal file, MATLAB,
+delimited text, Excel, ESCDF) has the values exactly as they are stored
+here, in the first form, because none of them says which form it holds.
+
+Version 0.1.0a89 and earlier did not convert, so older files are in the
+wrong form and nothing in them says so. A project saved by one of those
+versions keeps its imported cross terms as they were, and importing the
+file again corrects them. A specification `.npz` written by one of those
+versions reversed the phase of every cross term for the controller, and
+it reads back reversed here too. Save it again from the project before
+using it for a test.
+
 ## Sine — [`core.sine`](../api/visualdynamics.core.sine.md)
 
 Two kinds that are not data arrays, because each tone sweeps its own

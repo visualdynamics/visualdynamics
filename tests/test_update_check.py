@@ -199,21 +199,17 @@ def test_a_fetch_with_no_platform_store_still_reaches_the_site():
                SSL_CERT_DIR='/nonexistent')
     probe = ('import json, sys\n'
              'from visualdynamics import update\n'
-             'print(json.dumps(update.fetch(timeout=6.0)))\n')
+             'print(json.dumps(update.attempt(timeout=6.0)))\n')
     out = subprocess.run([sys.executable, '-c', probe], env=env,
                          capture_output=True, text=True, timeout=30,
                          check=False)
     assert out.returncode == 0, out.stderr[-400:]
-    manifest = json.loads(out.stdout.strip())
-    if manifest is None:
-        online = subprocess.run(
-            [sys.executable, '-c', ('from visualdynamics import update; '
-                                    'import json; print(json.dumps('
-                                    'update.fetch(timeout=6.0)))')],
-            capture_output=True, text=True, timeout=30,
-            check=False).stdout.strip()
-        if json.loads(online) is None:
-            pytest.skip('visualdynamics.org is not reachable from here')
-        pytest.fail('reachable with the platform store, not without it: '
-                    'the certifi fallback did not engage')
+    manifest, reason = json.loads(out.stdout.strip())
+    # By the reason, not by a second try with the store: that read one
+    # slow answer under a loaded gate as "the fallback did not engage"
+    # (2026-11-04, 1 fail then 3 passes, and the first reason was thrown
+    # away, so the slow answer is the likely cause rather than a known one).
+    if manifest is None and 'could not be verified' not in reason:
+        pytest.skip(reason)
+    assert manifest is not None, reason
     assert 'version' in manifest

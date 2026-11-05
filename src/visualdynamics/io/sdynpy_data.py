@@ -11,6 +11,11 @@ The format is a NumPy .npz with two entries:
   or (2,) for response and reference. Directions use the signed
   universal file code, 1 to 6.
 
+sdynpy holds a cross-spectral density as X·conj(Y), and this package
+stores it as conj(X)·Y (`DataArray.compute_cpsds`). The two are
+elementwise conjugates and the file does not say which it holds, so a
+PSD is conjugated in both directions. No other kind of data is touched.
+
 The files have no units. Units may be declared at import:
 
 - time and spectrum data: `ordinate_unit` (for example 'm/s**2', 'g'
@@ -38,6 +43,7 @@ import numpy as np
 from ..core.data import (
     DataArray,
     Frf,
+    Psd,
     class_for_function_type,
     direction_code,
     dof_string,
@@ -77,9 +83,10 @@ def load(path: str | os.PathLike, ordinate_unit: str | None = None,
                           if (s := str(rec[f'comment{i}']).strip()))
                 for rec in data]
 
+    ordinate = np.stack(list(data['ordinate']))
     array = cls(
         abscissa=abscissa[0],
-        ordinate=np.stack(list(data['ordinate'])),
+        ordinate=np.conj(ordinate) if issubclass(cls, Psd) else ordinate,
         response_dof=response_dof,
         reference_dof=reference_dof,
         comment=comments,
@@ -140,7 +147,7 @@ def save(data: DataArray, path: str | os.PathLike, unit_system: UnitSystem | Non
               (2 if data.reference_dof is not None else 1,))]
     records = np.zeros(data.num_records, dtype=dtype)
     records['abscissa'] = abscissa
-    records['ordinate'] = ordinate
+    records['ordinate'] = np.conj(ordinate) if isinstance(data, Psd) else ordinate
     records['coordinate'] = _coordinate_pairs(data)
     np.savez(path, data=records,
              function_type=np.array(data.function_type))

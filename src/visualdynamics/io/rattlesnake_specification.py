@@ -20,6 +20,12 @@ were held in `held`, an `(n, n)` boolean mask. The controller ignores
 read back as a specified zero cross term. A missing Hermitian half is
 filled with the conjugate of the half that was held.
 
+The controller holds a cross term as X·conj(Y), and this package stores
+it as conj(X)·Y (`DataArray.compute_cpsds`). The two are elementwise
+conjugates, and the file has no field saying which it holds, so this
+module conjugates in both directions: the file means what the controller
+reads it to mean.
+
 The file has no place for units. Values are written in the unit system
 asked for, g included: the controller reads the target in the unit of
 each channel of its own channel table, which for an accelerometer is
@@ -124,8 +130,11 @@ def save(spec: Specification, path: str | os.PathLike,
                 # not hold: the conjugate of the one it did
                 cpsd[:, index[a], index[b]] = np.conj(cpsd[:, index[b], index[a]])
                 stated[index[a], index[b]] = True
+    # the controller's X·conj(Y), from the conj(X)·Y held here. Written
+    # unconverted until 2026-11-04, and a round trip could not show it:
+    # the reader had the same gap, so the two errors cancelled
     out: dict[str, Any] = {'f': np.asarray(frequencies, dtype=np.float64),
-                           'cpsd': cpsd,
+                           'cpsd': np.conj(cpsd),
                            'dof': np.asarray(channels, dtype=str),
                            'held': stated}
     for name in BANDS:
@@ -169,7 +178,7 @@ def load(path: str | os.PathLike,
     """
     with np.load(path, allow_pickle=False) as d:
         frequencies = np.asarray(d['f'], dtype=np.float64).reshape(-1)
-        cpsd = np.asarray(d['cpsd'])
+        cpsd = np.conj(np.asarray(d['cpsd']))    # to conj(X)·Y, as `save`
         if cpsd.ndim != 3 or cpsd.shape[1] != cpsd.shape[2] \
                 or cpsd.shape[0] != len(frequencies):
             raise ValueError(f'{os.path.basename(str(path))}: cpsd is '

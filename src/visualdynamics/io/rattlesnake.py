@@ -1217,8 +1217,12 @@ def _spectra(env_name, group, dofs, scales_dims, sample_rate, drives):
             ('drive_cpsd', drive_rows, 'drive_cpsd')):
         if f'{prefix}_real' not in group.variables or channels is None:
             continue
-        matrix = (np.asarray(group.variables[f'{prefix}_real'][()])
-                  + 1j * np.asarray(group.variables[f'{prefix}_imag'][()]))
+        # conjugated because the controller computes X·conj(Y) and this
+        # package holds conj(X)·Y (`compute_cpsds`); left as read, every
+        # cross term sat beside the package's own with its phase reversed
+        matrix = np.conj(
+            np.asarray(group.variables[f'{prefix}_real'][()])
+            + 1j * np.asarray(group.variables[f'{prefix}_imag'][()]))
         # the whole matrix, not its diagonal. The cross terms are how two
         # channels move together, which is most of what a CPSD is for; a
         # grid makes the full n x n navigable in a way a flat list did not.
@@ -1544,9 +1548,11 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
             if 'specification_frequency_lines' not in group.variables:
                 continue
             freq = np.asarray(group.variables['specification_frequency_lines'][()])
-            cpsd = (np.asarray(group.variables['specification_cpsd_matrix_real'][()])
-                    + 1j * np.asarray(
-                        group.variables['specification_cpsd_matrix_imag'][()]))
+            # the controller's X·conj(Y), to this package's conj(X)·Y
+            cpsd = np.conj(
+                np.asarray(group.variables['specification_cpsd_matrix_real'][()])
+                + 1j * np.asarray(
+                    group.variables['specification_cpsd_matrix_imag'][()]))
             indices = np.asarray(group.variables['control_channel_indices'][()],
                                  dtype=int)
             channels = _control_channels(group, indices, dofs, scales_dims)

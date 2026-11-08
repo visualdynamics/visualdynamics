@@ -39,8 +39,8 @@ setup without a written departure from it.
 Every curve is read over each line's bin the way a comparison reads it
 (`compliance.coverage` and the curve's own area rule, `Psd.areas` and
 `Bounded.limit_areas`): its area over the part of the line's bin it is
-written over, divided by that width. For a curve written at
-breakpoints that is the cell `compliance.judge` judges the line by.
+written over, divided by that width, or by the whole bin for a curve
+written at breakpoints, the cell `compliance.judge` judges the line by.
 Outside the reference nothing is specified and nothing is predicted,
 and outside a limit profile nothing is limited.
 
@@ -151,8 +151,9 @@ def _density(curve: Psd, record: int, left: np.ndarray, right: np.ndarray,
              limit: str | None = None) -> np.ndarray:
     """One record of `curve` (or its limit curve `limit`) read over each
     bin from `left` to `right`: its area over the part of the bin it is
-    written over, divided by that width, NaN where it is written over
-    none of the bin or holds no number there."""
+    written over, divided by that width (by the whole bin at breakpoints,
+    as `compliance.cells` judges one), NaN where it is written over none
+    of the bin or holds no number there."""
     from .compliance import coverage
 
     area = np.zeros(left.shape)
@@ -167,6 +168,8 @@ def _density(curve: Psd, record: int, left: np.ndarray, right: np.ndarray,
                                       high[inside]))
         area[inside] += got
         width[inside] += high[inside] - low[inside]
+    if getattr(curve, 'interpolation', 'bin') == 'log_log':
+        width = np.where(width > 0.0, right - left, 0.0)
     with np.errstate(divide='ignore', invalid='ignore'):
         out = np.where(width > 0.0, area / width, np.nan)
     return np.where(np.isfinite(out) & (out > 0.0), out, np.nan)

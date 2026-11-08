@@ -140,8 +140,8 @@ def test_a_response_that_matches_is_nothing_over():
     frequencies = np.linspace(10.0, 1000.0, 200)
     target = spec()
     matched = psd(frequencies,
-                  compliance.log_interpolate(frequencies, target.abscissa,
-                                             target.ordinate[0]))
+                  compliance.area_on_lines(target.abscissa, target.ordinate[0],
+                                           frequencies))
     got = compliance.compare(target, matched)
     assert got['difference_percent'] == pytest.approx(0.0, abs=1e-6)
     assert got['specification_rms'] == pytest.approx(got['measured_rms'])
@@ -152,8 +152,8 @@ def test_twice_the_specification_is_forty_one_percent_over():
     quotes moves by root two and not by two."""
     frequencies = np.linspace(10.0, 1000.0, 200)
     target = spec()
-    doubled = psd(frequencies, 2.0 * compliance.log_interpolate(
-        frequencies, target.abscissa, target.ordinate[0]))
+    doubled = psd(frequencies, 2.0 * compliance.area_on_lines(
+        target.abscissa, target.ordinate[0], frequencies))
     # held unscaled: left to detect, the comparison reads a doubled
     # measurement as a run commanded 3 dB up and lays it back on the
     # specification — which is the feature, and the second half checks it
@@ -184,9 +184,10 @@ def test_the_two_need_not_share_a_frequency_axis():
     whatever resolution its frames gave."""
     target = spec(frequencies=[10.0, 100.0, 1000.0])
     frequencies = np.linspace(10.0, 1000.0, 991)
-    measured = psd(frequencies, np.full(991, 1e-3))
+    measured = psd(frequencies, compliance.area_on_lines(
+        target.abscissa, target.ordinate[0], frequencies))
     got = compliance.compare(target, measured)
-    assert got['lines'] >= 989, 'all but the bins straddling the two ends'
+    assert got['lines'] == 991, 'the end lines too, over their whole bins'
     assert got['difference_percent'] == pytest.approx(0.0, abs=1e-6)
 
 
@@ -355,13 +356,18 @@ def test_the_cut_bin_at_the_edge_is_counted_where_it_is_compared():
 
 def test_a_cut_bin_under_the_limit_is_not_flagged():
     """The rule has to be able to say no at an edge too, or it is just
-    marking the ends of every comparison."""
+    marking the ends of every comparison: an end line under the limit's
+    energy in its bin is inside, and one holding more is out."""
     target = spec(frequencies=[10.0, 20.0], level=1.0, abort_upper=2.0)
     lines = np.arange(9.1, 21.0, 1.0)
-    over = compliance.outside(lines, np.full(lines.size, 1.5),
-                              target.abscissa,
-                              target.limits['abort_upper'][0], over=True)
+    share = compliance.area_on_lines(target.abscissa, np.ones(2), lines)
+    limit = target.limits['abort_upper'][0]
+    over = compliance.outside(lines, 1.5 * np.nan_to_num(share),
+                              target.abscissa, limit, over=True)
     assert not over.any(), 'under the limit everywhere, edges included'
+    over = compliance.outside(lines, np.full(lines.size, 1.5),
+                              target.abscissa, limit, over=True)
+    assert over.tolist() == (share < 0.75).tolist(), 'the end lines hold too much'
 
 
 def test_a_specifications_level_does_not_move_with_the_analysis():
@@ -476,27 +482,15 @@ def test_a_band_edge_on_a_measured_line_takes_nothing_from_outside():
             rel=1e-12)
 
 
-def test_the_end_bins_of_the_measurement_count_for_half():
-    """Brandon's own reading of it, and the right one: the two sides
-    are areas under a curve over one shared band, so a bin sitting
-    astride the band edge brings the half of it that is inside.
-
-    With the first and last lines *on* the edges, that is exactly half
-    a bin each — and the two RMS levels then agree to the last digit
-    for a response that matches its specification.
+def test_the_end_bins_of_the_measurement_count_whole():
+    """A line holds its density over its whole bin (Brandon, 2026-11-07),
+    so a response on its target agrees to the last digit once its end
+    lines hold the half of their bins the curve covers.
     """
     target = spec(frequencies=[20.0, 2000.0])
     lines = np.arange(20.0, 2000.0 + 0.25, 0.5)     # ends on both edges
     values = np.full(lines.size, 1e-3)
-
-    low, high = compliance.band_of(target, 0)
-    widths = np.gradient(lines)
-    left, right = lines - widths / 2, lines + widths / 2
-    overlap = np.clip(np.minimum(right, high) - np.maximum(left, low), 0, None)
-    assert overlap[0] == pytest.approx(widths[0] / 2)
-    assert overlap[-1] == pytest.approx(widths[-1] / 2)
-    assert overlap[100] == pytest.approx(widths[100]), 'and the rest whole'
-    assert overlap.sum() == pytest.approx(high - low), 'exactly the band'
+    values[[0, -1]] /= 2.0
 
     got = compliance.compare(target, psd(lines, values))
     assert got['measured_rms'] == pytest.approx(got['specification_rms'],
@@ -504,16 +498,14 @@ def test_the_end_bins_of_the_measurement_count_for_half():
     assert got['difference_db'] == pytest.approx(0.0, abs=1e-12)
 
 
-def test_counting_the_end_bins_whole_would_read_high():
-    """Which is why they are not: two half-bins of extra width is a
-    small error, and it is one that never cancels — it is always over.
-    """
+def test_a_flat_response_through_the_end_bins_holds_them_whole():
+    """Two half bins past the curve: a small amount, and it is the energy
+    the response holds there."""
     target = spec(frequencies=[20.0, 2000.0])
     lines = np.arange(20.0, 2000.0 + 0.25, 0.5)
-    values = np.full(lines.size, 1e-3)
-    got = compliance.compare(target, psd(lines, values))
-    whole = np.sqrt(1e-3 * (np.gradient(lines).sum()))
-    assert whole > got['measured_rms'], 'the whole-bin reading is higher'
+    got = compliance.compare(target, psd(lines, np.full(lines.size, 1e-3)), scale_db=0)
+    assert got['measured_rms'] ** 2 == pytest.approx(1e-3 * (1980.0 + 0.5))
+    assert got['specification_rms'] ** 2 == pytest.approx(1e-3 * 1980.0)
 
 
 # --- how far the view may be pulled back -----------------------------
@@ -950,7 +942,8 @@ def test_a_scale_given_is_the_scale_used():
     f = np.linspace(20.0, 2000.0, 400)
     spec = Specification(f, np.ones((1, f.size)), response_dof=['1X+'],
                          ordinate_dim='acceleration**2/frequency')
-    low = Psd(f, np.full((1, f.size), 10.0 ** -0.6), response_dof=['1X+'],
+    low = Psd(f, 10.0 ** -0.6 * compliance.area_on_lines(f, np.ones(f.size), f)[None, :],
+              response_dof=['1X+'],
               ordinate_dim='acceleration**2/frequency')
     given = compliance.compare(spec, low, scale_db=0)
     assert given['scale_db'] == 0.0
@@ -999,7 +992,8 @@ def _psd_pair(spec_dim, measured_dim, measured_scale=1.0):
     spec = Specification(f, np.full((2, f.size), level),
                          response_dof=['1X+', '2X+'],
                          ordinate_dim=[spec_dim] * 2)
-    measured = Psd(f, np.full((2, f.size), level * measured_scale),
+    measured = Psd(f, np.tile(level * measured_scale
+                              * compliance.area_on_lines(f, np.ones(f.size), f), (2, 1)),
                    response_dof=['1X+', '2X+'],
                    ordinate_dim=[measured_dim] * 2)
     return spec, measured

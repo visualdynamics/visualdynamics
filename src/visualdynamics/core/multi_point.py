@@ -649,6 +649,9 @@ def _band(specification: Specification, j: int,
         bandwidth=specification.bandwidth,
         **{f'abort_{edge}': values[None] for edge, values in edges.items()})
     held.interpolation = specification.interpolation
+    cut = getattr(specification, 'cut_from_curve', None)
+    if cut is not None:
+        held.cut_from_curve = cut
     return held, text
 
 

@@ -108,7 +108,7 @@ from typing import Any
 import numpy as np
 
 from ..units import UNKNOWN
-from .compliance import record_at
+from .compliance import record_on_lines
 from .matrix_checks import (
     channel_labels,
     entry_channels,
@@ -347,7 +347,7 @@ def record_grid(data: Any, records: Sequence[int] | None = None
     return channels, grid
 
 
-# The specification is read at the measured lines by `compliance.record_at`,
+# The specification is read onto the measured lines by `compliance.record_on_lines`,
 # the one reader the drive prediction shares (its own reader read a
 # zero at a breakpoint as a gap, and the two disagreed, 2026-10-28).
 
@@ -1005,7 +1005,7 @@ def compare_matrix(specification: Any, measured: Any, *,
 
     # ---- the cross terms: coherence and phase, line by line
     autos_measured = {k: levels[k].measured_record for k in range(n)}
-    autos_specified = {k: record_at(specification, diagonal[k], lines)
+    autos_specified = {k: record_on_lines(specification, diagonal[k], lines)
                        for k in range(n)}
     # the measured cross terms found by the channels the autospectra
     # were paired with, either way round: a term held only the other way
@@ -1065,8 +1065,8 @@ def compare_matrix(specification: Any, measured: Any, *,
             mirrors = []
             both = grid[r][c] is not None and grid[c][r] is not None
             if both and mirrors_disagree(
-                    record_at(specification, grid[r][c], lines),
-                    record_at(specification, grid[c][r], lines)):
+                    record_on_lines(specification, grid[r][c], lines),
+                    record_on_lines(specification, grid[c][r], lines)):
                 mirrors.append('specification')
             a = where[entry_channels(measured, p)[0]]
             b = where[entry_channels(measured, q)[0]]
@@ -1108,7 +1108,7 @@ def compare_matrix(specification: Any, measured: Any, *,
                 notes.append(note)
             # the term of r against c: a record held the other way round
             # is the conjugate, its phase reversed
-            spec_term = record_at(specification, spec_index, lines)
+            spec_term = record_on_lines(specification, spec_index, lines)
             spec_term = spec_term if flip > 0 else np.conj(spec_term)
             held_term = (ordinate[theirs] if measured_flip > 0
                          else np.conj(ordinate[theirs]))

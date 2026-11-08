@@ -305,15 +305,15 @@ def test_one_drive_is_the_target_over_the_plant_squared(phase):
 
 
 def test_the_drive_rms_and_peak_are_worked_by_hand():
-    """397 lines of 5 Hz at 0.01 V^2/Hz: 4.455 V rms; at a stated peak
-    factor of three, 13.37 V against a 10 V limit, 134 %."""
+    """1980 Hz at 0.01 V^2/Hz: 4.450 V rms, the area the band holds; at a
+    stated peak factor of three, 13.35 V against a 10 V limit, 134 %."""
     prediction = predict_drives(siso_frf(), flat_spec(), drive_limit=10.0,
                                 peak_factor=3.0)
     drive = prediction.demands[0]
     assert drive.kind == 'drive' and drive.channel == '1Z+'
-    assert drive.rms == pytest.approx(math.sqrt(0.01 * 397 * 5.0))
+    assert drive.rms == pytest.approx(math.sqrt(0.01 * 1980.0))
     assert drive.peak == pytest.approx(3.0 * drive.rms)
-    assert drive.share == pytest.approx(3.0 * math.sqrt(19.85) / 10.0)
+    assert drive.share == pytest.approx(3.0 * math.sqrt(19.80) / 10.0)
     assert drive.exceeds
     assert prediction.first_out is drive
     assert prediction.fits is False
@@ -321,7 +321,7 @@ def test_the_drive_rms_and_peak_are_worked_by_hand():
         -20.0 * math.log10(drive.share))
     assert prediction.describe()[0] == (
         '1 drive for 1 control channel: the drive at 1Z+ runs out first, '
-        'at 134 % of its rating, most at 20 Hz')
+        'at 133 % of its rating, most at 25 Hz')
 
 
 def test_the_expected_peak_follows_the_crossing_rate_and_the_duration():
@@ -488,9 +488,9 @@ def test_a_line_where_the_frf_is_not_a_number_is_left_out_and_said():
     assert np.isnan(prediction.drive_asd(0)[k])
     assert '1 line where the FRF is not a number not predicted, first at 1Z+/1Z+' in \
         prediction.notes
-    # the line adds nothing to the rms: 396 lines of 5 Hz
+    # the line adds nothing to the rms: its 5 Hz out of the band's 1980
     assert prediction.demands[0].rms == pytest.approx(
-        math.sqrt(0.01 * 396 * 5.0))
+        math.sqrt(0.01 * 1975.0))
 
 
 def test_a_plant_not_a_number_at_zero_hertz_is_not_counted_as_a_line_left_out():
@@ -667,7 +667,8 @@ def test_the_shakers_force_velocity_and_travel_follow_the_closed_forms():
     # the travel lives at the bottom of the band: half of the integral
     # of f^-4 from 20 Hz up lies under 20 x 2^(1/3) = 25.2 Hz. The force
     # is flat, half of it under the middle of the band, 1010 Hz
-    assert travel.frequency == 20.0
+    # and the first line holds half a bin, so the top line is the next
+    assert travel.frequency == 20.25
     assert travel.band == pytest.approx((20.0, 20.0 * 2 ** (1 / 3)),
                                         abs=0.25)
     assert force.band == pytest.approx((20.0, 1010.0), abs=0.25)
@@ -688,7 +689,7 @@ def test_a_shaker_is_read_at_the_acceleration_at_its_drives_dof():
                                 shakers={'2Z+': rating})
     force = [d for d in prediction.demands if d.kind == 'force']
     assert [d.channel for d in force] == ['2Z+']
-    expected = 10.0 * math.sqrt(2.0 * 0.01 * G ** 2 * 397 * 5.0)
+    expected = 10.0 * math.sqrt(2.0 * 0.01 * G ** 2 * 1980.0)
     assert force[0].rms == pytest.approx(expected)
 
 
@@ -720,7 +721,7 @@ def test_another_channel_is_predicted_and_judged_against_its_limit():
     assert prediction.rows == ['1Z+ acceleration', '1Z+ force']
     gauge = prediction.demands[-1]
     assert gauge.kind == 'response' and gauge.dimension == 'force'
-    assert gauge.rms == pytest.approx(30.0 * math.sqrt(0.01 * 397 * 5.0))
+    assert gauge.rms == pytest.approx(30.0 * math.sqrt(0.01 * 1980.0))
     assert gauge.share == pytest.approx(3.0 * gauge.rms / 500.0)
     assert prediction.asd[at(prediction, 100.0), 1] == pytest.approx(9.0)
 
@@ -732,10 +733,10 @@ def test_the_describe_lines_name_each_demand_in_words():
                                 peak_factor=3.0)
     assert prediction.describe(SI)[0].startswith(
         '1 drive for 1 control channel: within every rating; the drive at '
-        '1Z+ is nearest, at 45 % (7.0 dB of headroom)')
+        '1Z+ is nearest, at 44 % (7.0 dB of headroom)')
     assert prediction.describe(SI)[1] == (
-        'drive at 1Z+: 4.46 V rms, 13.4 V expected peak against 30 V '
-        '(45 %); most at 20 Hz, half from 20 to 1010 Hz')
+        'drive at 1Z+: 4.45 V rms, 13.3 V expected peak against 30 V '
+        '(44 %); most at 25 Hz, half from 25 to 1015 Hz')
     bare = predict_drives(siso_frf(), flat_spec())
     assert bare.fits is None and bare.first_out is None
     assert bare.describe()[0] == '1 drive for 1 control channel: no ratings given'
@@ -1062,7 +1063,7 @@ def test_one_drive_away_from_its_control_point_reads_the_control_channel():
     force = prediction.demands[-1]
     assert force.kind == 'force'
     assert force.rms == pytest.approx(10.0 * math.sqrt(LEVEL * G ** 2
-                                                       * 397 * 5.0))
+                                                       * 1980.0))
     assert 'the shaker at 9Z+ is read at 1Z+' in prediction.notes
 
 
@@ -1203,8 +1204,10 @@ def test_a_measured_frf_under_hann_predicts_the_drive_to_the_edges():
     edges = [int(np.flatnonzero(band)[0]), int(np.flatnonzero(band)[-1])]
     assert f[edges[0]] == 20.0 and f[edges[1]] == 2000.0
     expected = LEVEL / 2.0 ** 2
-    np.testing.assert_allclose(drive_asd[band], expected, rtol=0.03)
-    np.testing.assert_allclose(drive_asd[edges], expected, rtol=0.03)
+    inner = np.flatnonzero(band)[1:-1]
+    np.testing.assert_allclose(drive_asd[inner], expected, rtol=0.03)
+    # the end lines hold half a bin of the target
+    np.testing.assert_allclose(drive_asd[edges], expected / 2.0, rtol=0.03)
     assert not prediction.unmet.any()
 
 
@@ -1279,7 +1282,8 @@ def test_the_last_bin_of_a_specification_on_lines_is_its_own():
 
 def test_a_line_s_share_of_the_mean_square_is_its_density_times_its_width():
     """On lines spaced evenly in log frequency a flat drive's widest
-    bin is the last, so the line contributing most is the top one."""
+    bin is the last, but the band covers half of it, so the line
+    contributing most is the one below it."""
     f = np.geomspace(20.0, 2000.0, 200)
     prediction = predict_drives(siso_frf(f=f), flat_spec())
-    assert prediction.demands[0].frequency == pytest.approx(2000.0)
+    assert prediction.demands[0].frequency == pytest.approx(f[-2])

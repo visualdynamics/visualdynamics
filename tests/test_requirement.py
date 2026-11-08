@@ -20,6 +20,7 @@ import pytest
 
 from visualdynamics.core import requirement as rq
 from visualdynamics.core.chance import chance_outside
+from visualdynamics.core.compliance import area_on_lines
 from visualdynamics.core.data import Psd, Specification
 
 #: the reference level, (m/s²)²/Hz, flat from 20 Hz to 2 kHz
@@ -38,10 +39,13 @@ def reference(channels=('1Z+',), upper=2000.0):
                          ordinate_dim=[PSD_DIM] * len(channels))
 
 
-def run(*factors, hot=(), nan_at=None, lines=LINES, dims=None):
-    """Channel k the reference times `factors[k]`; each (k, low, high,
-    factor) of `hot` multiplies channel k's lines from low to high."""
-    values = np.array([np.full(lines.size, LEVEL * f) for f in factors])
+def run(*factors, hot=(), nan_at=None, lines=LINES, dims=None, upper=2000.0):
+    """Channel k the reference times `factors[k]`, an end line holding
+    the share of its bin the reference covers; each (k, low, high, factor)
+    of `hot` multiplies channel k's lines from low to high."""
+    share = area_on_lines(np.array([20.0, upper]), np.ones(2), lines)
+    share = np.where(np.isfinite(share), share, 1.0)
+    values = np.array([LEVEL * f * share for f in factors])
     for k, low, high, factor in hot:
         values[k, (lines >= low) & (lines <= high)] *= factor
     if nan_at is not None:

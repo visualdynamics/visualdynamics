@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from visualdynamics.core.compliance import RAW_NOTE, compare
+from visualdynamics.core.compliance import RAW_NOTE, area_on_lines, compare
 from visualdynamics.core.data import Psd, Specification
 from visualdynamics.core.multi_point import (
     COMPOSITE_DB,
@@ -48,9 +48,12 @@ def reference(channels=('1Z+',), db=3.0, dim=PSD_DIM, levels=None):
 
 def run(*factors, dofs=None, dims=None, nan_at=None):
     """A PSD whose channel k is the reference times `factors[k]` at every
-    line, at DOFs 1Z+, 2Z+... unless named."""
+    line, an end line holding the share of its bin the reference covers,
+    at DOFs 1Z+, 2Z+... unless named."""
     dofs = dofs or [f'{k + 1}Z+' for k in range(len(factors))]
-    values = np.array([np.full(LINES.size, LEVEL * f) for f in factors])
+    share = area_on_lines(np.array([20.0, 2000.0]), np.ones(2), LINES)
+    share = np.where(np.isfinite(share), share, 1.0)
+    values = np.array([LEVEL * f * share for f in factors])
     if nan_at is not None:
         values[nan_at[0], nan_at[1]] = np.nan
     return Psd(LINES, values, response_dof=dofs,
@@ -120,7 +123,8 @@ def test_a_dead_channel_leaves_the_composite_inside_and_is_found():
     of them a line the composite is inside at."""
     reading = multi_point(reference(), run(1.5, 1.5, 0.0),
                           channels=['1Z+', '2Z+', '3Z+'], scale_db=0)
-    assert reading.composite.ordinate[0][LINES >= 20] == pytest.approx(LEVEL)
+    inside = (LINES > 20.0) & (LINES < 2000.0)
+    assert reading.composite.ordinate[0][inside] == pytest.approx(LEVEL)
     assert reading.outside_lines == 0
     assert reading.result['difference_db'] == pytest.approx(0.0, abs=1e-9)
     live, other, dead = reading.channels
@@ -684,7 +688,7 @@ def test_a_hot_line_at_either_edge_of_the_band_is_found(line):
     four is 1.875 times the reference (+2.7 dB), inside -3/+3."""
     measured = run(1.0, 1.0, 1.0, 1.0)
     at = int(np.flatnonzero(LINES == line)[0])
-    measured.ordinate[0, at] = 4.5 * LEVEL
+    measured.ordinate[0, at] *= 4.5
     reading = multi_point(reference(), measured, channels=[0, 1, 2, 3],
                           scale_db=0)
     hot = reading.channels[0]
@@ -711,7 +715,8 @@ def _white(seconds, seed):
     assert averaging.window == 'hann'
     level = g ** 2 * 2.0 / fs
     rows = np.array([[level, level]])
-    spec = Specification([20.0, 2000.0], rows, response_dof=['1Z+'],
+    # to the bins' edges: this noise runs flat past any end of the curve
+    spec = Specification([17.5, 2002.5], rows, response_dof=['1Z+'],
                          ordinate_dim=[PSD_DIM], warning_lower=rows / 10 ** 0.3,
                          warning_upper=rows * 10 ** 0.3)
     return spec, history.compute_psds(averaging)

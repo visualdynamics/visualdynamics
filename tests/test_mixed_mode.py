@@ -46,8 +46,9 @@ def _noise(low, high, grms, rng, n):
     return x * grms / np.sqrt(np.mean(x ** 2))
 
 
-def _floor(level=1.0 / 395.0, low=5.0, high=400.0, **extra):
-    """A flat floor written at two breakpoints, `level` in g²/Hz."""
+def _floor(level=1.0 / 395.0, low=4.5, high=400.5, **extra):
+    """A flat floor written at two breakpoints, `level` in g²/Hz, to the
+    edges of its 1 Hz lines' bins: the noise here runs past its ends."""
     return Specification(np.array([low, high]),
                          np.array([[level, level]]) * G ** 2,
                          response_dof=[CHANNEL],
@@ -1391,7 +1392,7 @@ def test_the_guide_s_figures_read_what_the_guide_says():
     """The two composites `tools/make_concept_figures.py` draws for the
     guide, built the same way, read the figures the guide quotes: the
     sine-on-random sheet's 1.003 grms residual, 2.477 g rms of tones,
-    0.986 against 0.986 for the floor with 2.8 percent of its lines left
+    0.987 against 0.986 for the floor with 2.8 percent of its lines left
     out, and 2.671 for the whole drive; the swept band of the second in
     37 slices of about 9 degrees of freedom, a floor line 112, its level
     0.2 dB over."""
@@ -1424,7 +1425,7 @@ def test_the_guide_s_figures_read_what_the_guide_says():
     sheet = judge_mixed(record(x), spec, onset=0.0)
     assert sheet.floor.residual / G == pytest.approx(1.003, abs=5e-4)
     assert sheet.tones_measured / G == pytest.approx(2.477, abs=5e-4)
-    assert sheet.floor.measured / G == pytest.approx(0.986, abs=5e-4)
+    assert sheet.floor.measured / G == pytest.approx(0.987, abs=5e-4)
     assert sheet.floor.reference / G == pytest.approx(0.986, abs=5e-4)
     assert 100 * sheet.floor.left_out == pytest.approx(2.8, abs=0.05)
     assert sheet.total.measured / G == pytest.approx(2.671, abs=5e-4)

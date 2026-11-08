@@ -728,11 +728,17 @@ A sheet has two forms, chosen by the pair of buttons at its top and
 applied to the whole specification whichever channels the sheet is
 open on. *Breakpoints* is the few points a requirement is written from.
 *Interpolated* is the same requirement read onto evenly spaced
-frequency lines, the way a controller writes its target. A controller's
-target opens as lines and folds to its breakpoints exactly, since its
-lines were computed from them, and editing is done on the few rows. A
-specification with no power-law structure keeps every line and says
-so. The line spacing is the specification's own, otherwise a time
+frequency lines, the way a controller writes its target. Each line holds
+the area of the curve inside its bin, over the bin's width, so the area
+is the same at any spacing, and an end line the curve only partly covers
+reads below the written level. Lines read this way fold back to the
+breakpoints they came from, off the grid included, provided each segment
+has at least three whole lines to read its power law from. A target that
+another controller read at the curve's points also folds exactly, and
+editing is done on the few rows. A specification with no power-law
+structure keeps every line and says so, and so does one whose lines were
+changed by hand. Target files already written keep their values until
+they are exported again. The line spacing is the specification's own, otherwise a time
 history's averaging (sample rate over frame length), otherwise the
 value typed into the box beside the buttons; nothing is guessed. A
 specification written at modal coordinates and expanded through the

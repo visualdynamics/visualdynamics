@@ -277,8 +277,8 @@ def test_the_reference_s_own_breakpoints_are_read_and_nothing_outside():
                        spec(0.18, band=(20.0, 1500.0)))
     assert np.isnan(p.reference[at(p, 10)]) and np.isnan(p.control[at(p, 10)])
     assert np.isnan(p.channels[0].response[at(p, 1600)])
-    # the 1500 Hz line's bin is half inside, and read over that half
-    assert p.reference[at(p, 1500)] == pytest.approx(LEVEL)
+    # the 1500 Hz line's bin is half inside, and holds that half
+    assert p.reference[at(p, 1500)] == pytest.approx(LEVEL / 2.0)
     assert np.isnan(p.reference[at(p, 1501)])
 
 

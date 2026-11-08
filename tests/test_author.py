@@ -628,11 +628,17 @@ def test_a_controllers_target_opens_as_lines_and_folds_to_its_breakpoints():
     assert few.notes[-1] == '3961 lines read as 4 breakpoints'
     assert few.bands[0]['abort'][0] == pytest.approx((-6.0, 6.0))
     assert opened.form == 'lines', 'a new draft; the sheet is unchanged'
-    # and back onto the same lines, exactly
+    # and back onto the same lines, each now holding its bin's area, so
+    # the end lines hold half a bin and the rest what they did
     back = few.to_lines()
     assert back.form == 'lines' and back.spacing == 0.5
     assert back.frequencies == opened.frequencies
-    assert np.allclose(back.levels, opened.levels)
+    assert np.allclose(np.array(back.levels)[:, 1:-1],
+                       np.array(opened.levels)[:, 1:-1], rtol=5e-3)
+    assert back.levels[0][0] == pytest.approx(0.01 / 2.0, rel=0.02)
+    assert back.levels[0][-1] == pytest.approx(0.005 / 2.0, rel=0.02)
+    assert back.to_breakpoints().frequencies == few.frequencies
+    assert np.allclose(back.to_breakpoints().levels, few.levels)
     assert SpecificationDraft.from_dict(back.as_dict()) == back
     # the whole sheet folded and written back: the object *is* the
     # breakpoints now (Brandon, 2026-09-06), and interpolated again it
@@ -651,8 +657,14 @@ def test_a_controllers_target_opens_as_lines_and_folds_to_its_breakpoints():
     lines = project['Target']
     kept = (target.abscissa >= 20.0) & (target.abscissa <= 2000.0)
     assert np.array_equal(lines.abscissa, target.abscissa[kept])
-    assert np.allclose(np.real(lines.ordinate[0]),
-                       np.real(target.ordinate[0])[kept] * 10 ** 0.3)
+    assert np.allclose(np.real(lines.ordinate[0])[1:-1],
+                       np.real(target.ordinate[0])[kept][1:-1] * 10 ** 0.3,
+                       rtol=5e-3)
+
+
+END_LINE_NOTE = ('an end line holds only the part of its bin the breakpoints '
+                 'cover, over the whole bin, so it reads below the written '
+                 'level and the area is unchanged')
 
 
 def test_lines_are_multiples_of_the_spacing_and_edges_off_the_grid_are_said():
@@ -662,12 +674,18 @@ def test_lines_are_multiples_of_the_spacing_and_edges_off_the_grid_are_said():
     assert lines.frequencies[:3] == [20.0, 24.0, 28.0]
     assert all(f % 4.0 == 0 for f in lines.frequencies), \
         'a controller lays its lines at multiples of the spacing'
-    assert np.allclose(lines.levels[0], 1.0)
-    assert lines.notes == []
+    assert np.allclose(lines.levels[0][1:-1], 1.0)
+    assert lines.levels[0][0] == pytest.approx(0.5)
+    assert lines.levels[0][-1] == pytest.approx(0.5)
+    assert lines.notes == [END_LINE_NOTE]
     off = draft.to_lines(3.0)
-    assert off.frequencies[0] == 21.0 and off.frequencies[-1] == 1998.0
-    assert off.notes == [('the band edges at 20 and 2000 Hz are not on the '
-                          '3 Hz grid; the lines run 21 to 1998 Hz')]
+    assert off.frequencies[0] == 21.0 and off.frequencies[-1] == 2001.0, \
+        'every line whose bin the curve reaches into'
+    assert off.levels[0][0] == pytest.approx(2.5 / 3.0)
+    assert off.levels[0][-1] == pytest.approx(0.5 / 3.0)
+    assert off.notes == [END_LINE_NOTE,
+                         ('the band edges at 20 and 2000 Hz are not on the '
+                          '3 Hz grid; the lines run 21 to 2001 Hz')]
     with pytest.raises(ValueError, match='no frequency spacing'):
         draft.to_lines()
     with pytest.raises(ValueError, match='fewer than two lines'):
@@ -901,9 +919,13 @@ def test_a_target_with_band_corners_still_opens_as_lines_with_few_runs():
     draft = _shaped().constrained(['1Z+'], uniform=False).with_band(
         'abort', -9.0, 9.0, ['1Z+'], segments=[1])
     made = draft.to_lines(0.5).make()
-    assert len(made.abscissa) == 3981 + 2, 'two helper lines at the corners'
-    assert uniform_spacing(made.abscissa) == 0.5, 'helpers are not lines of the grid'
-    back = SpecificationDraft.from_specification(made)
+    assert len(made.abscissa) == 3981, 'a limit on lines steps at a line'
+    assert made.interpolation == 'bin'
+    # an object written as a curve still holds a step with two helpers
+    helped = draft.to_lines(0.5)._copy(form='breakpoints').make()
+    assert len(helped.abscissa) == 3981 + 2, 'two helper lines at the corners'
+    assert uniform_spacing(helped.abscissa) == 0.5, 'helpers are not lines of the grid'
+    back = SpecificationDraft.from_specification(helped)
     assert back.form == 'lines' and back.spacing == 0.5
     assert len(back.sections(0)) == 3
     assert len(back.band_runs(0, 'abort')) == 3

@@ -19,13 +19,13 @@ are densities on bins. Only frequencies both objects are written over are
 judged. Outside the specification's band nothing is specified, and a
 response there neither passes nor fails.
 
-At the two ends of that band a line's bin is usually partly inside and
-partly outside. Counting the whole bin credits the response with power
-the specification did not ask for, and dropping it loses power that was
-asked for. So a line at an end is compared over the part of its bin that
-the specification covers, the same part the plot shades. Both sides of
-the comparison are then areas over the same range of frequency, which is
-what an RMS error needs.
+At the two ends of a curve written at breakpoints a line's bin is usually
+partly inside and partly outside. A line holds its density over its whole
+bin, so it is compared over the whole bin: the energy it holds there
+against the energy the curve holds there, which is nothing past the
+curve's end. The curve's energy then does not depend on the spacing, and
+a response holding more than the curve in an end bin reads high however
+it got there.
 """
 
 from __future__ import annotations
@@ -198,6 +198,119 @@ def record_at(data: Any, record: int, lines: ArrayLike) -> np.ndarray:
     return out
 
 
+def area_on_lines(frequencies: ArrayLike, values: ArrayLike,
+                  lines: ArrayLike) -> np.ndarray:
+    """A curve at breakpoints as a density per line, conserving its area.
+
+    Each line holds the exact area of the curve inside the line's bin,
+    over the bin's whole width, so the lines add up to the curve's area
+    at any spacing. A line whose bin the curve only partly covers holds
+    that part over the whole bin, so it reads below the curve: a curve
+    that ends on a line holds about half its level there. NaN where the
+    bin holds none of the curve. A single line has no bin to fill and
+    takes the curve's value at it.
+
+    Parameters
+    ----------
+    frequencies, values : array_like
+        The curve's breakpoints.
+    lines : array_like
+        The evenly spaced lines to read it onto, in Hz.
+
+    Returns
+    -------
+    numpy.ndarray
+        The density on each line.
+    """
+    # Brandon, 2026-11-07: every conversion conserves the area. This one
+    # read the curve at each line's center, which added half a bin at each
+    # end: flat 0.01 from 21.9 to 2000 Hz came out 0.045 % high on 1 Hz
+    # lines, with the first third-octave band +2.60 dB against the curve.
+    lines = np.asarray(lines, dtype=float)
+    if lines.size < 2:
+        return log_interpolate(lines, frequencies, values)
+    from .octave import bin_bounds
+
+    left, right = bin_bounds(lines)
+    held = log_log_areas(frequencies, values, left, right) / (right - left)
+    return np.where((lines > 0.0) & (held > 0.0), held, np.nan)
+
+
+def record_on_lines(data: Any, record: int, lines: ArrayLike) -> np.ndarray:
+    """One record of a specification as a density on `lines`, for what
+    is driven, predicted or compared line by line.
+
+    Lines or bands ('bin') read as `record_at` reads them. Between
+    breakpoints an autospectrum holds its area per bin (`area_on_lines`).
+    A cross term moves with its two autospectra, so the coherence and the
+    phase at each line are the ones written, and a line that holds part
+    of its bin keeps them. `record_at` still reads a curve at a point,
+    for a drawing or a fine integration grid.
+
+    Parameters
+    ----------
+    data : Psd or Specification
+        The specification.
+    record : int
+        Which record.
+    lines : array_like
+        The evenly spaced lines to read it onto, in Hz.
+
+    Returns
+    -------
+    numpy.ndarray
+        Real for an autospectrum, complex for a cross term, NaN where the
+        record is not written.
+    """
+    from .data import autospectrum
+    from .octave import bin_bounds
+
+    if getattr(data, 'interpolation', 'bin') != 'log_log':
+        return record_at(data, record, lines)
+    lines = np.asarray(lines, dtype=float)
+    frequencies = np.asarray(data.abscissa, dtype=float)
+    values = np.asarray(data.ordinate)[record]
+    if autospectrum(data, record):
+        return area_on_lines(frequencies, np.real(values), lines)
+    written = np.isfinite(frequencies) & np.isfinite(values)
+    f, v = frequencies[written], values[written]
+    if lines.size < 2 or f.size < 2:
+        return record_at(data, record, lines)
+    left, right = bin_bounds(lines)
+    # an end line's center can sit outside the curve its bin reaches
+    at = np.clip(lines, f[0], f[-1])
+    read = cross_term_at(f, v, at)
+    autos = {str(data.response_dof[i]): i for i in range(data.num_records)
+             if autospectrum(data, i)}
+    pair = [str(name) for name in data.record_pair(record)]
+    if all(name in autos for name in pair):
+        # the bin mean of the magnitude lowered the coherence at a coarse
+        # spacing; the ratio each autospectrum moved by keeps it exactly
+        scale = np.ones(lines.shape)
+        for name in pair:
+            row = np.real(np.asarray(data.ordinate)[autos[name]])
+            with np.errstate(divide='ignore', invalid='ignore'):
+                scale *= (area_on_lines(frequencies, row, lines)
+                          / log_interpolate(at, frequencies, row))
+        scale = np.sqrt(np.where(np.isfinite(scale), scale, 1.0))
+    else:
+        scale = (np.clip(np.minimum(right, f[-1]) - np.maximum(left, f[0]),
+                         0.0, None) / (right - left))
+    reached = (right > f[0]) & (left < f[-1])
+    return np.where(reached, read * scale, complex(np.nan, np.nan))
+
+
+def _power_rise(ratio: np.ndarray, exponent: np.ndarray) -> np.ndarray:
+    """ratio**exponent - 1, through expm1 where the exponent is small: a
+    slope a hair off -1 otherwise loses the digits a narrow bin's area is
+    the difference of. Elsewhere the plain power, so a flat curve's area
+    is exactly its level times its width."""
+    with np.errstate(divide='ignore', invalid='ignore'):
+        return np.where(np.abs(exponent) < 1e-3,
+                        np.expm1(exponent * np.log(ratio)),
+                        ratio ** exponent - 1.0)
+
+
 def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
                   lows: ArrayLike, highs: ArrayLike) -> np.ndarray:
     """The exact area under the log-log curve through these points, over
@@ -239,6 +352,15 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
     f, w = f[keep], w[keep]
     if f.size < 2:
         return np.full(lows.shape, np.nan)
+    # a point not written between two that are is a gap, as `coverage` and
+    # `log_interpolate` read it: a whole bin that reaches into one must
+    # not be credited with a curve bridged across it
+    dropped = np.sort(frequencies[np.isfinite(frequencies)
+                                  & (frequencies > 0.0) & ~usable])
+    holed = (np.searchsorted(dropped, f[1:], 'left')
+             > np.searchsorted(dropped, f[:-1], 'right'))
+    if holed.all():
+        return np.full(lows.shape, np.nan)
     with np.errstate(divide='ignore', invalid='ignore'):
         n = np.log(w[1:] / w[:-1]) / np.log(f[1:] / f[:-1])
     # the whole of each segment, then the running total at every point
@@ -250,9 +372,9 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
             # is bounded by the data where f1**n alone is not (a steep
             # segment of a dense specification overflowed the other
             # form)
-            w[:-1] * f[:-1] * ((f[1:] / f[:-1]) ** (n + 1.0) - 1.0)
+            w[:-1] * f[:-1] * _power_rise(f[1:] / f[:-1], n + 1.0)
             / (n + 1.0))
-    cumulative = np.concatenate([[0.0], np.cumsum(whole)])
+    cumulative = np.concatenate([[0.0], np.cumsum(np.where(holed, 0.0, whole))])
 
     def total(x: np.ndarray) -> np.ndarray:
         """The area from the first point to `x`, `x` cut to the curve."""
@@ -263,8 +385,8 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
             partial = np.where(
                 np.abs(nk + 1.0) < 1e-12,
                 w1 * f1 * np.log(x / f1),
-                w1 * f1 * ((x / f1) ** (nk + 1.0) - 1.0) / (nk + 1.0))
-        return cumulative[k] + np.where(x > f1, partial, 0.0)
+                w1 * f1 * _power_rise(x / f1, nk + 1.0) / (nk + 1.0))
+        return cumulative[k] + np.where((x > f1) & ~holed[k], partial, 0.0)
 
     out = total(highs) - total(lows)
     return np.where(highs > lows, np.maximum(out, 0.0), 0.0)
@@ -485,6 +607,14 @@ def cells(specification: Specification, measured: DataArray,
     that part, both sides integrated over the same range. The same rule
     applies at the ends of the band and in the middle.
 
+    Against a curve at breakpoints, a line the curve reaches is judged
+    over its whole bin, cut only to the measurement: the curve's energy
+    in the bin against the line's. The curve holds nothing past its end,
+    so that energy does not depend on the spacing, and a line judged over
+    part of its bin would pass whatever its other part held. A range cut
+    out of a longer curve (`requirement.within`) is not an end: the curve
+    goes on, and the line is judged in each range over its own part.
+
     Parameters
     ----------
     specification, measured : Specification, DataArray
@@ -495,19 +625,22 @@ def cells(specification: Specification, measured: DataArray,
     Returns
     -------
     list of dict
-        Each with 'low' and 'high' (the cell's outer reach), 'pieces'
-        (the stretches judged, inside it), 'width' (their sum) and
-        'span' (the whole bin it came from, judged or not).
+        Each with 'low' and 'high' (how far the cell reaches into what
+        is written), 'pieces' (the stretches judged), 'width' (their
+        sum) and 'span' (the whole bin it came from, judged or not).
     """
     # one rule at the ends and in the middle alike (Brandon,
-    # 2026-09-19; PLAN.md "A comparison is an area against an area")
+    # 2026-09-19; PLAN.md "A comparison is an area against an area"); a
+    # curve at breakpoints reads whole bins (Brandon, 2026-11-07; PLAN.md
+    # "Breakpoints on lines keep their area")
     if comparable(specification, measured) is not None:
         return []
     asked = coverage(specification, spec_record)
     held = coverage(measured, measured_record)
     if not asked or not held:
         return []
-    if getattr(specification, 'interpolation', 'bin') == 'log_log':
+    breakpoints = getattr(specification, 'interpolation', 'bin') == 'log_log'
+    if breakpoints:
         grid = measured.bin_bounds()
     else:
         sl, sr = specification.bin_bounds()
@@ -522,7 +655,11 @@ def cells(specification: Specification, measured: DataArray,
         pieces = [piece for a, b in _pieces(float(low), float(high), asked)
                   for piece in _pieces(a, b, held)]
         if pieces:
-            out.append({'low': pieces[0][0], 'high': pieces[-1][1],
+            reach = pieces[0][0], pieces[-1][1]
+            if breakpoints:
+                pieces = _pieces(*_read_edges(specification, float(low),
+                                              float(high)), held)
+            out.append({'low': reach[0], 'high': reach[1],
                         'pieces': pieces,
                         'width': float(sum(b - a for a, b in pieces)),
                         # the bin this cell came from, whole. `width`
@@ -531,6 +668,15 @@ def cells(specification: Specification, measured: DataArray,
                         # the comparison counts in.
                         'span': float(high) - float(low)})
     return out
+
+
+def _read_edges(specification: Specification, low: float,
+                high: float) -> tuple[float, float]:
+    """A bin from `low` to `high`, cut only where `specification` is a
+    range out of a longer curve (`requirement.within`)."""
+    a, b = getattr(specification, 'cut_from_curve', (None, None))
+    return (low if a is None else max(low, a),
+            high if b is None else min(high, b))
 
 
 def cell_lines(cell: dict[str, Any], left: np.ndarray,
@@ -1221,12 +1367,13 @@ def compare(specification: Specification, measured: DataArray,
     #
     # Narrowband numbers do not move, to every digit: those bins are
     # all one width, so weighting by the fraction judged and weighting
-    # by hertz are the same ratio. Cells *are* cut — at the ends of
-    # every written stretch the outermost line is judged over half its
-    # own bin — which is why this is a weighted count and not a plain
-    # one.
+    # by hertz are the same ratio. Cells *are* cut, where a range is cut
+    # out of a longer curve (`requirement.within`) and the line on its
+    # edge is judged over part of its own bin, and against lines with a
+    # gap, which is why this is a weighted count and not a plain one.
     share = np.array([cell['width'] / cell['span'] if cell['span'] else 0.0
                       for cell in found], dtype=float)
+    flagged = np.zeros(len(found), dtype=bool)
     for pair in ('warning', 'abort'):
         if not any(f'{pair}_{edge}' in specification.limits
                    for edge in ('lower', 'upper')):
@@ -1237,13 +1384,31 @@ def compare(specification: Specification, measured: DataArray,
                 beyond |= judge(specification, measured, spec_record,
                                 measured_record, edge, over, scale_db)['out']
         beyond &= counted
+        flagged |= beyond
         out[f'{pair}_lines'] = int(beyond.sum())
         out[f'{pair}_percent'] = (100.0 * float(share[beyond].sum())
                                   / float(share[counted].sum())
                                   if counted.any() else 0.0)
     if note is not None:
         out['note'] = note
+    partly = [(0.5 * (cell['pieces'][0][0] + cell['pieces'][-1][1]),
+               (cell['high'] - cell['low']) / cell['width'])
+              for k, cell in enumerate(found)
+              if flagged[k] and getattr(specification, 'interpolation',
+                                        'bin') == 'log_log'
+              and cell['high'] - cell['low'] < cell['width'] * (1.0 - 1e-9)]
+    if partly:
+        out['partly_written'] = partly
     return out
+
+
+def partly_written_text(partly: Sequence[tuple[float, float]]) -> str:
+    """Says which flagged lines a curve reaches only part of, as `compare`
+    lists them: (line in Hz, share of its bin written)."""
+    lines = ', '.join(f'{line:g} Hz ({100.0 * share:.3g} %)'
+                      for line, share in partly)
+    return ('Flagged lines the specification reaches only part of, judged '
+            f'over the whole bin: {lines}')
 
 
 #: how far the RMS may be out before a channel is called out, in dB.
@@ -1397,19 +1562,26 @@ def channel_refusals(rows: Sequence[tuple[str, dict[str, Any]]]
 
 
 def comparison_note(results: Sequence[Any]) -> str | None:
-    """`RAW_NOTE` when any of these comparisons was made with neither
-    side's units declared, else None. Takes the result dicts of
-    `compare`, `compare_all`'s (label, result) rows, or `SrsError`
-    rows."""
+    """What a set of comparisons has to say beside its numbers, else None:
+    `RAW_NOTE` when any was made with neither side's units declared, and
+    the flagged lines a curve reaches only part of
+    (`partly_written_text`). Takes the result dicts of `compare`,
+    `compare_all`'s (label, result) rows, or `SrsError` rows."""
+    raw = None
+    partly: dict[float, float] = {}
     for result in results:
         if isinstance(result, tuple) and len(result) == 2 \
                 and isinstance(result[1], dict):
             result = result[1]
         note = (result.get('note') if isinstance(result, dict)
                 else getattr(result, 'note', None))
-        if note:
-            return note
-    return None
+        raw = raw or note
+        if isinstance(result, dict):
+            partly.update(result.get('partly_written') or ())
+    said = [raw] if raw else []
+    if partly:
+        said.append(partly_written_text(sorted(partly.items())))
+    return '; '.join(said) or None
 
 
 def outside_fraction(values: Sequence[float], low: float,

@@ -47,9 +47,9 @@ A shock specification gives a shock synthesized to its spectrum, a sum
 of wavelets a shaker can play, checked against the shaker's shock
 ratings (`core.shock_synthesis`).
 
-A specification is read between its breakpoints as it is everywhere in
-the package (`author.read_at_lines`: the magnitude log-log, the phase
-linearly), or per bin when it holds a controller's lines, and is zero
+A specification between its breakpoints holds its area in each line's bin
+(`compliance.record_on_lines`, a cross term keeping the coherence and phase
+written), or is read per bin when it holds a controller's lines, and is zero
 outside the band it is written on.
 
 References
@@ -112,9 +112,14 @@ def _quantity(dimension: str) -> str:
 
 
 def _level_at(spectrum: Psd, record: int, lines: np.ndarray) -> np.ndarray:
-    """A record of `spectrum` at `lines`, zero outside its written band."""
-    from .author import read_at_lines
+    """A record of `spectrum` as a density on `lines`, zero outside its
+    written band."""
+    from .compliance import record_on_lines
 
+    if getattr(spectrum, 'interpolation', 'bin') == 'log_log':
+        out = record_on_lines(spectrum, record, lines)
+        out[np.isnan(out)] = 0.0
+        return out
     f = np.asarray(spectrum.abscissa, dtype=float)
     values = np.asarray(spectrum.ordinate[record])
     magnitude = np.abs(values)
@@ -123,11 +128,6 @@ def _level_at(spectrum: Psd, record: int, lines: np.ndarray) -> np.ndarray:
     if not written.any():
         return out
     f, values = f[written], values[written]
-    if getattr(spectrum, 'interpolation', 'bin') == 'log_log':
-        inside = (lines >= f[0]) & (lines <= f[-1])
-        if inside.any():
-            out[inside] = read_at_lines(f, values, lines[inside])
-        return out
     # per bin: each written line holds the density over its own width,
     # half way to its neighbors (and as far again past the end lines)
     step = np.diff(f)

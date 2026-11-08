@@ -343,15 +343,16 @@ def _read_target(specification: Psd, channels: list[tuple[str, str]],
                  lines: np.ndarray) -> np.ndarray:
     """The specification's matrix on the control channels, at `lines`.
 
-    Each record is read the way it is drawn, by `compliance.record_at`,
-    the reader the matrix comparison uses too: an autospectrum log-log
-    between breakpoints with its gaps, a cross term magnitude log-log
+    Each record is read as a density per line, by
+    `compliance.record_on_lines`, the reader the matrix comparison uses
+    too: an autospectrum's area in each bin of its log-log curve with gaps
+    between breakpoints, a cross term magnitude log-log
     and phase linear with a zero taken as a value, a density on lines
     per bin. A cross term held only by its mirror is its mirror's
     conjugate. Lines where any autospectrum is not written are
     not-a-number throughout."""
     from ..units import UNKNOWN
-    from .compliance import record_at
+    from .compliance import record_on_lines
 
     for i in range(specification.num_records):
         if str(specification.ordinate_dim[i]) == UNKNOWN:
@@ -392,7 +393,7 @@ def _read_target(specification: Psd, channels: list[tuple[str, str]],
                     f'{labels[a]} and {labels[b]} are not conjugates '
                     'of each other, so the target between them '
                     'cannot be read; keep one or make them agree')
-            read = record_at(specification, record, lines)
+            read = record_on_lines(specification, record, lines)
             if a == b:
                 read = np.real(read)
                 with np.errstate(invalid='ignore'):
@@ -483,8 +484,10 @@ def _dominant(frequency: np.ndarray, density: np.ndarray
         * _widths(frequency)
     if not contribution.max() > 0.0:
         return float('nan'), (float('nan'), float('nan'))
-    # largest first, and the lowest line first among equals
-    order = np.argsort(-contribution, kind='stable')
+    # largest first, and the lowest line first among equals, equal to
+    # within the round-off of an area read per line
+    order = np.argsort(-np.round(contribution / contribution.max(), 9),
+                       kind='stable')
     running = np.cumsum(contribution[order])
     count = int(np.searchsorted(running, DOMINANT_SHARE * running[-1])) + 1
     chosen = frequency[order[:count]]

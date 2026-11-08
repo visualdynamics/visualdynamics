@@ -29,8 +29,11 @@ integral come from one reading. A comparison is built on that:
    measurement holds. A controller stores its target on every FFT line
    up to Nyquist and writes zero or NaN where it did not control.
    Those lines are holes in the requirement; they do not ask for zero.
-   A cell with nothing written in it is not judged. A cell written over
-   part of its width is judged over that part only.
+   A cell with nothing written in it is not judged. Against lines or
+   bands, a cell written over part of its width is judged over that part
+   only. Against a curve between breakpoints, a line the curve reaches is
+   judged over its whole bin, because the line holds its density across
+   the whole bin and the curve holds nothing past its end.
 3. The judgment. Over each cell's stretch, the measurement's power
    (its area, read as it is drawn) is compared with the power the limit
    asks for over the same stretch. The limit is read the way its
@@ -87,9 +90,21 @@ The requirement is a curve, so the cells are the measurement's own
 area of the limit under that bin. On a slope, that area is a little
 more than the limit's value at the bin's center times its width, and a
 bin that contains a breakpoint is judged on both sides of the corner
-at once. The bins at the two ends are cut at the first and last
-breakpoint and judged over the part inside. A line's density is
-constant across its 1 Hz bin, so the cut is exact.
+at once. The bins at the two ends are judged whole: the power the line
+holds across its bin against the curve's area inside that bin. That area
+does not depend on the spacing, so the requirement asks for the same
+power on any lines.
+
+A response on the lines read from the curve therefore reads 0 dB on an
+end line, where that line holds only the part of its bin the curve
+covers. A response that runs flat through the end does hold more than
+the curve there: on a line that sits on the end breakpoint it holds twice
+the power, which reads +3.01 dB, just past a 3 dB warning limit. When a
+flagged line is one the curve only partly reaches, the note beside the
+numbers names the line and the share of its bin that is written. The end
+of a range cut from a longer curve, such as one step of a stepped
+tolerance, is not an end of the curve, and a line across it is judged in
+each range over its own part.
 
 ![A 1 Hz PSD against a four-breakpoint specification: the resonance
 boxed red over the upper abort limit, the notch boxed blue under the
@@ -191,9 +206,12 @@ a pane beside the plot with the **Spacing** of the lines. It opens at
 the spacing the specification's sheet remembers, and blank when there
 is none. The plot previews the result, the pane counts the breakpoints
 and the lines, and **Generate** converts it. The reading is the same as
-the sheet's *Interpolated* form: each channel on its power law between
-breakpoints, the lines at multiples of the spacing over the range the
-breakpoints cover. A cross term that changes with frequency is refused,
+the sheet's *Interpolated* form: each line holds the exact area of its
+channel's power law inside the line's bin, over the bin's width, so the
+area under the specification does not change. The lines are multiples of
+the spacing whose bins the breakpoints reach into. An end line whose bin
+is only partly covered reads below the written level, and a note says so.
+A cross term that changes with frequency is refused,
 because the reading keeps one coherence and phase per pair. From a
 script, `project.convert_to_psd(name, spacing=5.0)`; without
 `spacing`, the remembered one is used, and with none remembered the
@@ -258,7 +276,7 @@ and the channel is left out of the count and the pass/fail verdict.
 ```python
 from visualdynamics.core.compliance import cells, compare, judge
 
-found = cells(specification, measured)        # the cells, cut to what both hold
+found = cells(specification, measured)        # the cells and the stretches judged
 verdict = judge(specification, measured, limit='abort_upper', over=True)
 verdict['out']                                # a bool per cell
 verdict['lines']                              # the same, on the measurement's lines

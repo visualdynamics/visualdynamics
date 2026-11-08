@@ -24,6 +24,7 @@ from visualdynamics.core.chance import (
     describe_chance,
     expected_text,
 )
+from visualdynamics.core.compliance import area_on_lines
 from visualdynamics.core.data import Psd, Specification
 
 #: the spacing of the hand-built spectra's lines, Hz
@@ -49,10 +50,14 @@ def flat_spec(low=30.0, high=1970.0, warning=1.5, abort=3.0, channels=1):
 
 
 def lines(db=None, count=401, dof=DOF):
-    """A PSD on lines `DF` apart from zero, each `db` over unit density
-    (all on it by default), carrying `dof` degrees of freedom."""
+    """A PSD on lines `DF` apart from zero, each `db` over `flat_spec`'s
+    unit density (all on it by default), an end line holding the share of
+    its bin the curve covers, carrying `dof` degrees of freedom."""
     values = np.ones(count) if db is None else 10.0 ** (np.asarray(db) / 10.0)
-    psd = Psd(DF * np.arange(count), values[None, :], response_dof=['1Z+'],
+    f = DF * np.arange(count)
+    share = area_on_lines(np.array([30.0, 1970.0]), np.ones(2), f)
+    values = values * np.where(np.isfinite(share), share, 1.0)
+    psd = Psd(f, values[None, :], response_dof=['1Z+'],
               ordinate_dim='acceleration**2/frequency')
     if dof is not None:
         psd.statistical_dof = np.array([float(dof)])
@@ -61,7 +66,7 @@ def lines(db=None, count=401, dof=DOF):
 
 def at_cells(changes, count=401):
     """`db` for `lines` with the judged cells numbered from zero: the
-    30 Hz line (half judged) is cell 0, PSD line 6."""
+    30 Hz line is cell 0, PSD line 6."""
     db = np.zeros(count)
     for cell, value in changes.items():
         db[6 + cell] = value
@@ -214,7 +219,9 @@ def test_the_counts_are_the_comparisons_own_on_averaged_noise():
     history.averaging = averaging
     psd = history.compute_psds()
     # white noise of unit variance has the one-sided density 2/fs
-    spec = flat_spec(channels=channels)
+    # written to the bins' edges: this noise runs flat past any end, and
+    # a line part-covered by the curve would read high as well as scatter
+    spec = flat_spec(low=27.5, high=1972.5, channels=channels)
     spec.ordinate = spec.ordinate * 2.0 / rate
     for name in list(spec.limits):
         spec.limits[name] = spec.limits[name] * 2.0 / rate
@@ -335,8 +342,8 @@ def test_combining_eight_lines_takes_the_scatter_out():
     """Lines alternately 2 dB high and 2 dB low are every one outside
     plus or minus 1.5 dB; eight at a time their powers add to 0.2 dB
     over, and no group is out. Each full group is worth 960 degrees of
-    freedom, eight times a line's; the first holds the 30 Hz line judged
-    over half its bin, so it is worth (7.5)^2 / (7.25/120); the last
+    freedom, eight times a line's; the first holds the 30 Hz line, which
+    holds half its bin, so it is worth (7.5)^2 / (7.25/120); the last
     holds the five lines left."""
     db = np.where(np.arange(401) % 2, 2.0, -2.0)
     spec, psd = flat_spec(), lines(db)

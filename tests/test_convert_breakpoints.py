@@ -59,11 +59,11 @@ def test_a_breakpoint_specification_converts_onto_lines_at_the_spacing():
     assert type(psd) is Psd and psd.interpolation == 'bin'
     np.testing.assert_allclose(psd.abscissa, np.arange(20.0, 1000.1, 5.0))
     assert project.journal[-1] == "project.convert_to_psd('Spec', spacing=5.0)"
-    # the power law between 20 and 100 Hz, read at 50 Hz
+    # the power law between 20 and 100 Hz, its mean over the bin at 50 Hz
     at = int(np.flatnonzero(psd.abscissa == 50.0)[0])
     slope = np.log(4.0) / np.log(5.0)
     auto = np.real(psd.ordinate[_record(psd, '1X+', '1X+'), at])
-    assert auto == pytest.approx(1e-3 * (50.0 / 20.0) ** slope, rel=1e-9)
+    assert auto == pytest.approx(1e-3 * (50.0 / 20.0) ** slope, rel=1e-3)
     # the cross term carried as one coherence and phase at every line
     s11 = np.real(psd.ordinate[_record(psd, '1X+', '1X+')])
     s22 = np.real(psd.ordinate[_record(psd, '3X+', '3X+')])

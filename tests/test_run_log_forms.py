@@ -646,8 +646,8 @@ def test_the_level_row_shows_the_predicted_drive_beside_the_read(panel,
     assert row.prediction_label.text() == (
         f'Predicted drive (from F and S): {drive.describe()}\n'
         'Read drive: no drive fraction read')
-    assert drive.describe().startswith('drive at 1Z+: 4.46 V rms, 13.4 V '
-                                       'expected peak against 10 V (134 %')
+    assert drive.describe().startswith('drive at 1Z+: 4.45 V rms, 13.3 V '
+                                       'expected peak against 10 V (133 %')
     row.drive_box.setFocus()
     QTest.keyClicks(row.drive_box, '0.12')
     assert row.prediction_label.text().splitlines()[1] == (

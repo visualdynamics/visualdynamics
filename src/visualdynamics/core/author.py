@@ -48,6 +48,8 @@ statements, and so does a session's journal.
 
 from __future__ import annotations
 
+import itertools
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -555,9 +557,14 @@ class SpecificationDraft:
         # sheet remembers the spacing so the breakpoints it is edited
         # as can go back onto the same lines
         spacing = uniform_spacing(spec.abscissa)
+        # a few even breakpoints are breakpoints: `make` reads a sheet on
+        # lines as a density per line, and the curve would stop being one
+        on_lines = (spec.interpolation == 'bin'
+                    or len(frequencies) >= spec.LINES_AT_LEAST)
         draft = cls(channels, dims, frequencies, levels, pairs, bands, notes,
                     [source] * len(channels) if source else [],
-                    'lines' if spacing is not None and len(frequencies) > 2
+                    'lines' if (spacing is not None and on_lines
+                                and len(frequencies) > 2)
                     else 'breakpoints', spacing)
         # A helper line — a hair before a breakpoint, carrying the left
         # segment's band up to it (`with_band_corners`) — is how the
@@ -1101,7 +1108,8 @@ class SpecificationDraft:
 
         In the breakpoints form each segment is its own section. In the
         lines form a section is a run of segments on one power law,
-        between the bends that `to_breakpoints` finds; `tolerance` is
+        between the bends that `to_breakpoints` finds, or between the
+        breakpoints of lines `to_lines` read; `tolerance` is
         how much the log-log slope may change and still be one section.
         """
         n = len(self.frequencies)
@@ -1109,6 +1117,14 @@ class SpecificationDraft:
             return []
         if self.form != 'lines':
             return [[s] for s in range(n - 1)]
+        read = _laws_of_areas(np.asarray(self.frequencies, dtype=float),
+                              np.asarray(self.levels, dtype=float))
+        if read is not None:
+            laws = read['laws'][channel]
+            cuts = [cut for cut, a, b in zip(read['cuts'], laws, laws[1:])
+                    if abs(a[1] - b[1]) > tolerance]
+            edges = [0, *cuts, n - 1]
+            return [list(range(a, b)) for a, b in itertools.pairwise(edges)]
         log_f = np.log10(np.asarray(self.frequencies))
         slope = np.diff(np.log10(np.asarray(self.levels[channel]))) / np.diff(log_f)
         bend = ~np.isclose(slope[1:], slope[:-1], rtol=tolerance, atol=tolerance)
@@ -1412,11 +1428,13 @@ class SpecificationDraft:
     def to_breakpoints(self, tolerance: float = 1e-6) -> SpecificationDraft:
         """The same requirement as the few points it was written from.
 
-        The breakpoints kept are the first and last line, every line
-        where the log-log slope of any channel changes, and every line
-        where a band steps. This is exact for a specification that was
-        read onto lines from breakpoints (a controller's target). A
-        specification with no such structure keeps every line. Either
+        Lines that `to_lines` made, each holding its bin's area of a
+        power law, give back the breakpoints they were read from, off
+        the grid included. Otherwise the breakpoints kept are the first
+        and last line, every line where the log-log slope of any channel
+        changes, and every line where a band steps. This is exact for
+        lines read at the curve's points, as another controller's target
+        may be. A specification with no such structure keeps every line. Either
         way a note says how many lines became how many breakpoints, and
         another note is added if a band changed within a merged
         segment, which then takes the band at its start.
@@ -1435,6 +1453,14 @@ class SpecificationDraft:
         n = len(self.frequencies)
         if n <= 2:
             return self._copy(form='breakpoints')
+        read = _breakpoints_of_areas(self)
+        if read is not None:
+            frequencies, levels = read
+            notes = [*self.notes,
+                     f'{n} lines read as {len(frequencies)} breakpoints']
+            return self._copy(frequencies=frequencies, levels=levels,
+                              bands=self._bands_on(frequencies), notes=notes,
+                              form='breakpoints')
         log_f = np.log10(np.asarray(self.frequencies))
         keep = np.zeros(n, dtype=bool)
         keep[[0, -1]] = True
@@ -1474,13 +1500,18 @@ class SpecificationDraft:
         """The same requirement read onto evenly spaced frequency lines.
 
         The lines are multiples of `spacing` from 0 Hz, as a controller
-        lays out its lines, over the range the breakpoints cover, with
-        each channel on its own power law between breakpoints. Only the
-        lines inside that range are made: a sheet holds positive
-        levels, and the zeros a controller writes outside the band are
-        its own convention, filled in by its loader for any line the
-        file does not name. A note is added when an end breakpoint is
-        not on the grid.
+        lays out its lines, and each line holds the exact area of its
+        channel's power law inside the line's bin, over the bin's width
+        (`compliance.area_on_lines`), so the area does not change. Only
+        the lines whose bins the breakpoints reach into are made: a
+        sheet holds positive levels, and the zeros a controller writes
+        outside the band are its own convention, filled in by its loader
+        for any line the file does not name. An end line whose bin is
+        only partly covered holds that part over its whole bin, so it
+        reads below the written level, and a note says so. A note is
+        also added when an end breakpoint is not on the grid. A sheet
+        already on lines is read back to its breakpoints first
+        (`to_breakpoints`), and at its own spacing is returned as it is.
 
         Parameters
         ----------
@@ -1501,18 +1532,31 @@ class SpecificationDraft:
                              'onto — give the spacing the lines are at')
         if not spacing > 0:
             raise ValueError('a frequency spacing is positive')
+        if self.form == 'lines':
+            if self.spacing is not None and abs(spacing - self.spacing) <= (
+                    1e-12 * spacing):
+                return self
+            return self.to_breakpoints()._copy(
+                notes=list(self.notes)).to_lines(spacing)
+        from .compliance import log_log_areas
+
         low, high = self.frequencies[0], self.frequencies[-1]
-        first = int(np.ceil(low / spacing - 1e-9))
-        last = int(np.floor(high / spacing + 1e-9))
+        # the lines whose bins the curve reaches into; 0 Hz is not driven
+        first = max(int(np.floor(low / spacing + 0.5 + 1e-9)), 1)
+        last = int(np.ceil(high / spacing - 0.5 - 1e-9))
         if last - first < 1:
             raise ValueError(f'fewer than two lines at {spacing:g} Hz fall '
                              f'between {low:g} and {high:g} Hz')
         lines = np.arange(first, last + 1) * spacing
-        log_f = np.log(np.asarray(self.frequencies))
-        levels = [[float(v) for v in np.exp(np.interp(
-            np.log(lines), log_f, np.log(np.asarray(row))))]
+        left, right = lines - spacing / 2.0, lines + spacing / 2.0
+        levels = [[float(v) for v in log_log_areas(
+            self.frequencies, row, left, right) / spacing]
                   for row in self.levels]
         notes = list(self.notes)
+        if low > left[0] + 1e-9 * spacing or high < right[-1] - 1e-9 * spacing:
+            notes.append('an end line holds only the part of its bin the '
+                         'breakpoints cover, over the whole bin, so it reads '
+                         'below the written level and the area is unchanged')
         edges = [f'{f:g}' for f, k in ((low, first), (high, last))
                  if abs(k * spacing - f) > 1e-9 * max(1.0, f)]
         if edges:
@@ -1602,7 +1646,14 @@ class SpecificationDraft:
             raise ValueError('the sheet spans several specifications; write '
                              'it into them, or make one of them alone '
                              '(for_source)')
-        if self.bands_differ():
+        # a sheet on lines is a density per line, however few, and its
+        # limits step from line to line with no helper to hold the step.
+        # Marked a curve, its end lines (which hold part of a bin since
+        # 2026-11-07) were read as points and the area came out wrong
+        steps = np.diff(np.asarray(self.frequencies, dtype=float))
+        on_lines = (self.form == 'lines' and steps.size > 0
+                    and np.allclose(steps, steps[0], rtol=1e-9, atol=0.0))
+        if not on_lines and self.bands_differ():
             cornered = self.with_band_corners()
             if cornered is not self:
                 return cornered.make(comment)
@@ -1647,7 +1698,7 @@ class SpecificationDraft:
             response_dof=resp, reference_dof=refs, ordinate_dim=record_dims,
             comment=comment or 'written as a specification sheet',
             **{key: np.asarray(values) for key, values in limits.items()})
-        spec.interpolation = 'log_log'
+        spec.interpolation = 'bin' if on_lines else 'log_log'
         spec.band_constraints = self.constraints()
         return spec
 
@@ -1674,7 +1725,8 @@ class SpecificationDraft:
         autospectra. Channels the sheet does not hold are unchanged,
         read off their own curves at any new line. Raises `ValueError`
         when the sheet spans several specifications; write each one
-        with `for_source`.
+        with `for_source`, and when the sheet is on lines and the
+        specification is a curve at breakpoints, which would hold neither.
 
         Parameters
         ----------
@@ -1695,6 +1747,16 @@ class SpecificationDraft:
         if len(set(self.sources)) > 1:
             raise ValueError('the sheet spans several specifications; write '
                              'each in with for_source')
+        # lines merged into a curve's breakpoints made an object of both,
+        # read as a curve, with the area per line lost (19.776 for 19.781
+        # on a flat 21.9 to 2000 Hz). An object an earlier version wrote as
+        # a curve on these same lines merges as it did.
+        if (self.form == 'lines' and spec.interpolation == 'log_log'
+                and uniform_spacing(spec.abscissa) != self.spacing):
+            raise ValueError(
+                'the sheet is on lines and the specification is a curve at '
+                'breakpoints; open all of its channels to change its form, '
+                'or make a new specification from the sheet')
         old_f = np.asarray(spec.abscissa, dtype=float)
         lines = np.asarray(sorted(set(old_f.tolist()) | set(self.frequencies)))
         inside = (lines >= self.frequencies[0]) & (lines <= self.frequencies[-1])
@@ -1827,7 +1889,7 @@ class SpecificationDraft:
             reference_dof=[spec.reference_dof[i] for i in autos],
             ordinate_dim=[spec.ordinate_dim[i] for i in autos],
             **{key: values[autos] for key, values in spec.limits.items()})
-        preview.interpolation = 'log_log'
+        preview.interpolation = spec.interpolation
         return preview
 
     def as_dict(self) -> dict[str, Any]:
@@ -1916,6 +1978,154 @@ def _helper_lines(frequencies: Any) -> list[float]:
     return [float(v) for v in f[helper]]
 
 
+def _bin_mean(f: np.ndarray, n: np.ndarray, half: float) -> np.ndarray:
+    """The mean of the power law f**n over f +/- half, over its value at f."""
+    x, m = half / f, n + 1.0
+    above, below = np.log1p(x), np.log1p(-x)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        # expm1, because a slope near -1 is an ordinary skirt
+        out = np.exp(m * below) * np.expm1(m * (above - below)) / (2.0 * x * m)
+    return np.where(np.abs(m) < 1e-12, (above - below) / (2.0 * x), out)
+
+
+def _slopes_of_areas(f: np.ndarray, level: np.ndarray, half: float) -> np.ndarray:
+    """The power-law slope between neighboring lines that each hold a
+    bin's mean: constant along a power law, where the slope of the means
+    themselves is not."""
+    log_f, log_y = np.log(f), np.log(level)
+    n = np.diff(log_y) / np.diff(log_f)
+    for _ in range(6):
+        n = (np.diff(log_y) - np.log(_bin_mean(f[1:], n, half))
+             + np.log(_bin_mean(f[:-1], n, half))) / np.diff(log_f)
+    return n
+
+
+def _laws_of_areas(f: np.ndarray, rows: np.ndarray) -> dict[str, Any] | None:
+    """The power laws a sheet's lines were read from by `to_lines`, or
+    None when they were not.
+
+    Along a power law the lines give a constant slope (`_slopes_of_areas`).
+    Two neighboring laws meet at a breakpoint, inside the line whose bin
+    holds both, and an end line holding part of its bin says from its
+    area how much of the bin was written. Lines that fill their bins at
+    both ends are no sign of this reading (a controller's target read at
+    the curve's points looks the same), and are left to the slopes.
+
+    Returns 'first' and 'last' (the end breakpoints), 'knots' (those
+    between), 'cuts' (each knot's line) and 'laws' (for each row, the
+    (coefficient, slope) of each law, one more than the knots), or None.
+    """
+    if f.size < 5 or not np.all(rows > 0.0):
+        return None
+    step = np.diff(f)
+    if not np.allclose(step, step[0], rtol=1e-9, atol=0.0):
+        return None
+    half = float(step[0]) / 2.0
+    if not np.all(f > half):
+        return None
+    slopes = np.array([_slopes_of_areas(f, row, half) for row in rows])
+    same = np.isclose(slopes[:, 1:], slopes[:, :-1], rtol=1e-7, atol=1e-7).all(axis=0)
+    # runs of equal slopes, each at least three lines on one law, as
+    # (first line, last line)
+    runs, start = [], 0
+    for k in range(same.size + 1):
+        if k == same.size or not same[k]:
+            if k > start:
+                runs.append((start, k + 1))
+            start = k + 1
+    if not runs or runs[0][0] > 1 or runs[-1][1] < f.size - 2:
+        return None
+    if runs[0][0] == 0 and runs[-1][1] == f.size - 1:
+        return None
+    if any(b[0] - a[1] > 2 for a, b in itertools.pairwise(runs)):
+        return None
+
+    def law(row: int, run: tuple[int, int]) -> tuple[float, float]:
+        n = float(slopes[row, run[0]])
+        k = run[0]
+        mean = float(_bin_mean(f[[k]], np.array([n]), half)[0])
+        return float(rows[row, k] / (f[k] ** n * mean)), n
+
+    laws = [[law(r, run) for run in runs] for r in range(len(rows))]
+
+    def snapped(point: float) -> float:
+        # a breakpoint on a line stays on it, for a sheet that merges by line
+        nearest = float(f[int(np.argmin(np.abs(f - point)))])
+        return nearest if abs(nearest - point) < 1e-6 * half else round(point, 9)
+
+    knots, cuts = [], []
+    for j, (a, b) in enumerate(itertools.pairwise(runs)):
+        met = [math.exp(math.log(laws[r][j + 1][0] / laws[r][j][0])
+                        / (laws[r][j][1] - laws[r][j + 1][1]))
+               for r in range(len(rows))
+               if abs(laws[r][j][1] - laws[r][j + 1][1]) > 1e-6]
+        if not met or max(met) - min(met) > 1e-6 * half:
+            return None
+        knot = float(np.mean(met))
+        if not f[a[1]] <= knot <= f[b[0]]:
+            return None
+        knots.append(snapped(knot))
+        cuts.append(int(np.argmin(np.abs(f - knot))))
+
+    def end(line: int, which: int, low: bool) -> float | None:
+        found = []
+        for r in range(len(rows)):
+            c, n = laws[r][which]
+            area = rows[r, line] * 2.0 * half
+            edge = f[line] + half if low else f[line] - half
+            sign = -1.0 if low else 1.0
+            m = n + 1.0
+            if abs(m) < 1e-12:
+                found.append(edge * math.exp(sign * area / c))
+                continue
+            inside = sign * area * m / (c * edge ** m)
+            found.append(edge * math.exp(math.log1p(inside) / m)
+                         if inside > -1.0 else math.nan)
+        if not np.all(np.isfinite(found)) or max(found) - min(found) > 1e-6 * half:
+            return None
+        return float(np.mean(found))
+
+    first = float(f[0] - half) if runs[0][0] == 0 else end(0, 0, True)
+    last = (float(f[-1] + half) if runs[-1][1] == f.size - 1
+            else end(f.size - 1, -1, False))
+    if first is None or last is None:
+        return None
+    return {'first': snapped(first), 'last': snapped(last), 'knots': knots,
+            'cuts': cuts, 'laws': laws}
+
+
+def _breakpoints_of_areas(draft: SpecificationDraft
+                          ) -> tuple[list[float], list[list[float]]] | None:
+    """The breakpoints a sheet's lines were read from by `to_lines`, with
+    a point kept on a line where a band steps, or None when they were not
+    read that way or the answer does not read back onto every line."""
+    from .compliance import area_on_lines
+
+    f = np.asarray(draft.frequencies, dtype=float)
+    rows = np.asarray(draft.levels, dtype=float)
+    read = _laws_of_areas(f, rows)
+    if read is None:
+        return None
+    steps = {float(f[s + 1]) for entry in draft.bands
+             for kind in ('warning', 'abort')
+             for s in range(len(entry[kind]) - 1)
+             if entry[kind][s] != entry[kind][s + 1]}
+    half = (f[1] - f[0]) / 2.0
+    steps = {x for x in steps
+             if all(abs(x - k) > half for k in read['knots'])}
+    frequencies = sorted({read['first'], *read['knots'], read['last'], *steps})
+    which = np.searchsorted(read['knots'], frequencies, side='right')
+    which = np.minimum(which, len(read['knots']))
+    levels = [[laws[j][0] * point ** laws[j][1]
+               for point, j in zip(frequencies, which)]
+              for laws in read['laws']]
+    for row, written in zip(rows, levels):
+        if not np.allclose(area_on_lines(frequencies, written, f), row,
+                           rtol=1e-6, atol=0.0):
+            return None
+    return frequencies, levels
+
+
 def read_onto_lines(spec: Specification, spacing: float
                     ) -> tuple[Psd, list[str]]:
     """A specification written at breakpoints, read onto evenly spaced
@@ -1923,9 +2133,10 @@ def read_onto_lines(spec: Specification, spacing: float
 
     The reading is the specification sheet's own: the specification is
     opened as a sheet (`SpecificationDraft.from_specification`), read
-    onto lines at `spacing` (`SpecificationDraft.to_lines`, each
-    channel on its power law between breakpoints, the lines multiples
-    of the spacing over the range the breakpoints cover) and made. The
+    onto lines at `spacing` (`SpecificationDraft.to_lines`, each line
+    holding the area of its channel's power law in the line's bin, the
+    lines multiples of the spacing whose bins the breakpoints reach
+    into) and made. The
     warning and abort limits are left out, as a PSD cannot hold them.
 
     Parameters
@@ -1940,7 +2151,8 @@ def read_onto_lines(spec: Specification, spacing: float
     tuple of (Psd, list of str)
         The density on lines, read as a density per line
         (`interpolation` 'bin'), and the sheet's notes (lines left out at
-        0 Hz, an end breakpoint off the grid).
+        0 Hz, an end line holding part of its bin, an end breakpoint off
+        the grid).
 
     Raises
     ------
@@ -1968,10 +2180,6 @@ def read_onto_lines(spec: Specification, spacing: float
     lines = draft.to_lines(spacing)
     made = lines.make(f'read onto {float(spacing):g} Hz lines')
     psd = made.as_psd(drop_limits=True)
-    # a density per line, however few the lines: `make` leaves the
-    # reading to `Specification.reading_of`, which calls a short grid
-    # breakpoints, and a breakpoint reading is what this is to end
-    psd.interpolation = 'bin'
     return psd, list(lines.notes)
 
 

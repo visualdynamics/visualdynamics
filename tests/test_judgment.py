@@ -50,12 +50,14 @@ def lines(df=2.0, high=2000.0, hole=None):
     return out
 
 
-def response(shape=None, df=1.0, high=2560.0, seed=None):
+def response(shape=None, df=1.0, high=2560.0, seed=None, whole_bins=False):
     """A measurement on the target, `shape` times it where given, to
     Nyquist — past the requirement's end — and 2e-3 where the
-    requirement says nothing."""
+    requirement says nothing. `whole_bins` holds the target's energy in
+    each line's bin, as a line against a curve at breakpoints is judged."""
     f = np.arange(0.0, high + df / 2, df)
-    target = log_interpolate(f, BREAKS, TARGET[0])
+    target = (compliance.area_on_lines(BREAKS, TARGET[0], f) if whole_bins
+              else log_interpolate(f, BREAKS, TARGET[0]))
     values = np.where(np.isfinite(target), target, 2e-3)
     if seed is not None:
         # about three decibels line to line, what a real PSD does
@@ -77,7 +79,8 @@ def pairings(measured_shape=None, seed=None):
     written, controller = breakpoints(), lines()
     banded = controller.to_octave(3)
     return {
-        'lines-vs-breakpoints': (narrow, written),
+        'lines-vs-breakpoints': (response(measured_shape, seed=seed, whole_bins=True),
+                                 written),
         'lines-vs-lines': (narrow, controller),
         'octave-vs-octave': (octave, banded),
     }
@@ -317,27 +320,29 @@ def test_a_band_out_counts_the_same_wherever_it_sits():
 
 
 def test_a_line_judged_over_half_its_bin_counts_for_half():
-    """Why this is a weighted count and not a plain one. A written
-    stretch ends in the middle of a line's own bin, and that line is
-    judged over half of itself — so narrowband shares are exactly what
-    a share of hertz gave, to every digit, rather than nearly."""
-    df = 1.0
-    f = np.arange(0.0, 2048.0 + df / 2, df)
-    level = np.where((f >= 10.0) & (f <= 2000.0), 0.01, np.nan)
-    level[(f > 400.0) & (f < 450.0)] = np.nan      # a notch, two more ends
-    specification = Specification(
-        f, level[None, :], response_dof=['101Z+'],
-        ordinate_dim=['acceleration**2/frequency'],
-        abort_upper=(level * 4)[None, :], abort_lower=(level / 4)[None, :])
-    values = np.nan_to_num(level).copy()
+    """Why this is a weighted count and not a plain one. A range cut out
+    of a longer curve ends in the middle of a line's own bin, and that
+    line is judged in the range over half of itself, so narrowband shares
+    are exactly what a share of hertz gave, to every digit. Where the
+    curve itself ends the line is judged whole."""
+    from visualdynamics.core.multi_point import _band
+    from visualdynamics.core.requirement import within
+
+    f = np.arange(0.0, 2048.5, 1.0)
+    level = np.array([[0.01, 0.01]])
+    written = Specification(np.array([10.0, 2000.0]), level, response_dof=['101Z+'],
+                            ordinate_dim=['acceleration**2/frequency'])
+    specification, _text = _band(within(written, 0, None, 400.0), 0, (-6.0, 6.0), 'band')
+    values = 0.01 * compliance.area_on_lines(written.abscissa, np.ones(2), f)
+    values = np.nan_to_num(values)
     values[(f >= 100.0) & (f < 160.0)] *= 1000.0
     measured = Psd(f, values[None, :], response_dof=['101Z+'],
                    ordinate_dim=['acceleration**2/frequency'])
     found = compliance.cells(specification, measured)
     fractions = np.array([c['width'] / c['span'] for c in found])
-    assert set(np.round(np.unique(fractions), 6)) == {0.5, 1.0}, (
-        'whole lines, and the half ones at the ends of the stretch'
-    )
+    assert fractions[0] == 1.0, 'the end of the curve'
+    assert fractions[-1] == pytest.approx(0.5), 'the cut through the 400 Hz line'
+    assert set(np.round(np.unique(fractions), 6)) == {0.5, 1.0}
     hertz = np.array([c['width'] for c in found])
     out = compliance.judge(specification, measured, limit='abort_upper',
                            over=True, scale_db=0.0)['out']

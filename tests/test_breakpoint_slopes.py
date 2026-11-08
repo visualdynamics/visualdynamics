@@ -398,32 +398,35 @@ def test_a_density_per_bin_is_refused_rather_than_read_as_a_power_law(tmp_path, 
     """A controller's target on its lines is a density per line,
     integrated as bins (`interpolation` 'bin'). Read as a power law
     between those lines the areas add to an rms the object does not
-    have: the profile put on 20 Hz lines is 6.799 g as bins and would
-    read 6.784 g."""
+    have. As bins the profile on 20 Hz lines holds the curve's own
+    6.784 g; drawn as a power law through those lines it would read
+    6.775 g."""
     from visualdynamics.plot import plot_breakpoints
 
     lines = _sheet().to_lines(20.0)
     assert lines.form == 'lines'
     binned = lines.make("a controller's target")
-    binned.interpolation = 'bin'
-    assert specification_rms(binned) / G == pytest.approx(6.7991, abs=1e-4)
+    assert binned.interpolation == 'bin'
+    assert specification_rms(binned) / G == pytest.approx(6.7842, abs=1e-4)
     assert read_breakpoints(lines.frequencies, lines.levels[0]).rms / G == \
-        pytest.approx(6.7842, abs=1e-4), 'what the view would have drawn'
+        pytest.approx(6.7746, abs=1e-4), 'what the view would have drawn'
     with pytest.raises(ValueError, match='density per line'):
         plot_breakpoints(binned, show=False, path=tmp_path / 'binned.png')
     with pytest.raises(ValueError, match='breakpoint table'):
         lines.reading(0)
-    # its breakpoints read as the table they are
-    table = SpecificationDraft.from_specification(binned).to_breakpoints()
+    # its breakpoints read as the table they are, on lines fine enough
+    # that each segment has whole lines to read its power law from
+    table = SpecificationDraft.from_specification(
+        _sheet().to_lines(5.0).make('finer')).to_breakpoints()
     assert table.frequencies == F
     assert table.reading(0).rms / G == pytest.approx(6.7842, abs=1e-4)
     # an object written at breakpoints on an even grid is still a power
     # law between its points, and its areas add to its own rms
-    even = lines.make('breakpoints on an even grid')
+    even = lines._copy(form='breakpoints').make('breakpoints on an even grid')
     assert even.interpolation == 'log_log'
     plot_breakpoints(even, show=False, path=tmp_path / 'even.png')
     assert (tmp_path / 'even.png').stat().st_size > 2000
-    assert specification_rms(even) / G == pytest.approx(6.7842, abs=1e-4)
+    assert specification_rms(even) / G == pytest.approx(6.7746, abs=1e-4)
 
 
 # ---- the sheet in the window ----------------------------------------------------

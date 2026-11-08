@@ -1548,8 +1548,10 @@ def within(specification: Specification, record: int, low: float | None,
 
     A specification of breakpoints gains a breakpoint at each edge,
     interpolated log-log as it is read (`compliance.log_interpolate`),
-    so a line across an edge is judged in each range over its own part,
-    as `compliance.cells` cuts a cell to what is written. One on lines
+    and an edge inside the curve is kept as `cut_from_curve`, so a line
+    across it is judged in each range over its own part. Where the range
+    reaches the curve's end the line is judged whole, as `compliance.cells`
+    judges any line against a curve's end. One on lines
     or bands keeps the points from `low` to `high`. Raises `ValueError`
     when the range holds nothing the specification writes.
     """
@@ -1589,6 +1591,9 @@ def within(specification: Specification, record: int, low: float | None,
         dimension_hint=[specification.dimension_hint[record]],
         bandwidth=kept_bandwidth)
     out.interpolation = specification.interpolation
+    if out.interpolation == 'log_log':
+        out.cut_from_curve = (lo if lo > start else None,
+                              hi if hi < stop else None)
     return out
 
 

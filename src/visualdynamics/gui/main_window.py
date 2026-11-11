@@ -7789,13 +7789,13 @@ class MainWindow(QMainWindow):
             return
         self._show_gizmo_reading(None)
         name = self.editing[0]
-        row = self._sliding['row']
+        row, start = self._sliding['row'], self._sliding['start']
         self._sliding = None
-        self._place_frame(row, origin=True)
+        self._place_frame(row, origin=True, start=start)
         self.table.model().refresh_row(row)
         self._show_status(f'Moved coordinate system in {name}')
 
-    def _place_frame(self, row, origin=False, angles=False):
+    def _place_frame(self, row, origin=False, angles=False, start=None):
         """A gesture on a coordinate system is over: the frame it left
         goes through `Geometry.place_coordinate_system` and is journaled
         as that call, so a session's turns and slides replay. The drag
@@ -7804,16 +7804,22 @@ class MainWindow(QMainWindow):
         frame the same way again settles the last line rather than
         stacking one per nudge."""
         geometry = self.objects[self.editing[0]]
-        matrix = geometry.cs_matrix[row]
+        matrix = np.array(geometry.cs_matrix[row], dtype=np.float64)
         said = {}
         if angles:
             said['angles'] = angles_of(matrix)
         if origin:
             said['origin'] = tuple(float(v) for v in matrix[3])
         cs_id = int(geometry.cs_id[row])
+        if start is not None:
+            # the frame from before the drag: the call carries the nodes
+            # placed in the system from there (2026-11-11)
+            geometry.cs_matrix[row] = start
         geometry.place_coordinate_system(cs_id, **said)
         self.project.record_call(geometry, 'place_coordinate_system', cs_id,
                                  settle=True, **said)
+        # the nodes placed in it have moved with it
+        self._edited_geometry()
 
     def _cursor_on_ring(self, matrix, axis, position):
         """Where the cursor's ray meets the plane the ring lies in."""
@@ -7931,9 +7937,9 @@ class MainWindow(QMainWindow):
             return
         self._show_gizmo_reading(None)
         name = self.editing[0]
-        row = self._rotating['row']
+        row, start = self._rotating['row'], self._rotating['start']
         self._rotating = None
-        self._place_frame(row, angles=True)
+        self._place_frame(row, angles=True, start=start)
         # one row, not a whole model reset: a reset would drop the table
         # selection, and the selection is what the rings belong to
         self.table.model().refresh_row(row)
@@ -7950,9 +7956,10 @@ class MainWindow(QMainWindow):
         self._rotating = {'row': row, 'axis': self._last_axis,
                           'start': np.array(matrix, dtype=np.float64),
                           'from': 0.0}
+        start = self._rotating['start']
         self._apply_rotation(np.radians(float(degrees)))
         self._rotating = None
-        self._place_frame(row, angles=True)
+        self._place_frame(row, angles=True, start=start)
         self.table.model().refresh_row(row)
 
     def reset_rotation(self) -> None:
@@ -7962,8 +7969,9 @@ class MainWindow(QMainWindow):
         if matrix is None:
             return
         geometry = self.objects[self.editing[0]]
+        start = np.array(matrix, dtype=np.float64)
         geometry.cs_matrix[row] = identity_frame(matrix)
-        self._place_frame(row, angles=True)
+        self._place_frame(row, angles=True, start=start)
         self.angle_box.blockSignals(True)
         self.angle_box.setValue(0.0)
         self.angle_box.blockSignals(False)

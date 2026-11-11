@@ -324,14 +324,15 @@ def test_geometry_edits_journal_and_replay(window, pump):
     assert any(line.startswith(f"project['Geometry'].add_element({nodes!r}")
                for line in window.project.journal)
 
-    # a cell edit in the node table: post-state echo, in SI
+    # a cell edit in the node table: post-state echo, in SI and in the
+    # node's placement system (2026-11-11)
     from PySide6.QtCore import Qt
 
     model = node_table_model(geometry, DEFAULT_SYSTEM)
     window.editing = None
     window._set_table_model(model)
     model.setData(model.index(0, 1), '0.5', Qt.ItemDataRole.EditRole)
-    assert any(line.startswith("project['Geometry'].node_xyz[0, 0] = ")
+    assert any(line.startswith("project['Geometry'].set_node_local_xyz(0, ")
                for line in window.project.journal)
 
     room: dict = {}

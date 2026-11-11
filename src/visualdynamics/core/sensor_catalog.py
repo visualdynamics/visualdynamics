@@ -106,6 +106,13 @@ CATALOG: tuple[SensorModel, ...] = (
     # first cut took for the plan)
     _uniaxial('352A73', 'rounded', (6.75, 3.96, 2.8), 0.3, 'integral cable',
               plug=NOTHING, cable=(0.9, 10.0)),
+    # spec sheet 24786 (revision D): 3.6 mm high, 10.4 long and 6.4 wide,
+    # 0.64 g, solder pins with an attached 32 AWG twisted pair. PCB's
+    # photograph shows the 352A73's form at a larger size: a round nose,
+    # the pair out of the flat end (Brandon, 2026-11-11: two of them at
+    # one node in a test)
+    _uniaxial('352A71', 'rounded', (10.4, 6.4, 3.6), 0.64, 'integral cable',
+              plug=NOTHING, cable=(0.9, 10.0)),
     _force('208C01', '10 lb'),
     _force('208C02', '100 lb'),
     _force('208C03', '500 lb'),
@@ -133,9 +140,15 @@ def _key(model: str) -> str:
 _BY_MODEL = {_key(entry.model): entry for entry in CATALOG}
 
 
+#: the makes a Model cell may begin with ('PCB 352A71')
+_MAKES = sorted({_key(entry.make) for entry in CATALOG if entry.make},
+                key=len, reverse=True)
+
+
 def lookup(model: str) -> SensorModel | None:
-    """The catalog entry for a model, ignoring case and spaces; None when
-    the model is not in the catalog.
+    """The catalog entry for a model, ignoring case and spaces and a make
+    written in front of it ('PCB 352A71'); None when the model is not in
+    the catalog.
 
     Parameters
     ----------
@@ -146,7 +159,14 @@ def lookup(model: str) -> SensorModel | None:
     -------
     SensorModel or None
     """
-    return _BY_MODEL.get(_key(model))
+    key = _key(model)
+    found = _BY_MODEL.get(key)
+    if found is None:
+        # a table that writes the make in the Model cell (2026-11-11)
+        for make in _MAKES:
+            if key.startswith(make) and _BY_MODEL.get(key[len(make):]):
+                return _BY_MODEL[key[len(make):]]
+    return found
 
 
 def models_for(channel_type: str) -> list[SensorModel]:

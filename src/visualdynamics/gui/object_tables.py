@@ -869,20 +869,36 @@ def _elsewhere(_obj, _row, _text):
 _elsewhere.tag = JOURNALED_ELSEWHERE
 
 
+# Brandon, 2026-11-11: a node's X, Y and Z are relative to its Placement
+# CS, as the column beside them says. The table showed global positions
+# until then, so the column named a system the numbers were not in.
+
+
+def _is_angle(geometry, row, axis):
+    """Whether a node's coordinate is an angle in degrees: theta in a
+    cylindrical placement system, theta and phi in a spherical one."""
+    rows = np.flatnonzero(geometry.cs_id == int(geometry.node_def_cs[row]))
+    kind = int(geometry.cs_type[rows[0]]) if len(rows) else 0
+    return (kind == 1 and axis == 1) or (kind == 2 and axis in (1, 2))
+
+
 def _coordinate_setter(axis, unit_system):
-    """Write a node coordinate, converting from the displayed unit."""
+    """Write a node coordinate in its placement system, converting a
+    length from the displayed unit."""
     def setter(geometry: Any, row: int, text: str) -> None:
         value = float(text)
-        if geometry.units_defined:
+        if geometry.units_defined and not _is_angle(geometry, row, axis):
             value = unit_system.to_si(value, 'length')
-        geometry.node_xyz[row, axis] = value
+        local = geometry.node_local_xyz([row])[0]
+        local[axis] = value
+        geometry.set_node_local_xyz(row, local)
     return setter
 
 
 def _coordinate_getter(axis, unit_system):
     def getter(geometry: Geometry, row: int) -> Any:
-        value = float(geometry.node_xyz[row, axis])
-        if geometry.units_defined:
+        value = float(geometry.node_local_xyz([row])[0][axis])
+        if geometry.units_defined and not _is_angle(geometry, row, axis):
             value = unit_system.from_si(value, 'length')
         return value
     return getter
@@ -906,10 +922,10 @@ def _int_field_journal(array_name):
 
 def _coordinate_journal(axis):
     def journal(geometry, row, _text):
-        # post-state, in SI: the setter converted, and the echo reads
-        # what actually landed
-        return (f'.node_xyz[{row}, {axis}] = '
-                f'{float(geometry.node_xyz[row, axis])!r}')
+        # post-state, in SI and in the placement system: the setter
+        # converted, and the echo reads what actually landed
+        local = tuple(float(v) for v in geometry.node_local_xyz([row])[0])
+        return f'.set_node_local_xyz({row}, {local!r})'
     return journal
 
 
@@ -998,9 +1014,12 @@ def node_table_model(geometry: Geometry, unit_system: UnitSystem,
                  format=lambda v: f'{v:.6g}')
           for i, axis in enumerate('XYZ')],
         _color_column('Color', 'node_color'),
+        # the same numbers in another system: the node moves to them
         Column('Placement CS', lambda g, r: int(g.node_def_cs[r]),
-               set=_set_cs_reference('node_def_cs'),
-               journal=_int_field_journal('node_def_cs')),
+               set=lambda g, r, t: g.set_node_placement(r, int(float(t))),
+               journal=lambda g, r, _t:
+               f'.set_node_placement({r}, {int(g.node_def_cs[r])})',
+               affects_row=True),
         Column('Displacement CS', lambda g, r: int(g.node_disp_cs[r]),
                set=_set_cs_reference('node_disp_cs'),
                journal=_int_field_journal('node_disp_cs')),
@@ -1013,7 +1032,7 @@ def coordinate_system_table_model(geometry: Geometry,
                                   parent: QObject | None = None
                                   ) -> TableModel:
     from ..core.geometry import CS_TYPES
-    from ..rotate import angles_of, frame_from_angles
+    from ..rotate import angles_of
 
     unit = (unit_system.label_text('length') if geometry.units_defined
             else 'units undefined')
@@ -1026,12 +1045,17 @@ def coordinate_system_table_model(geometry: Geometry,
             return value
         return getter
 
+    # through `place_coordinate_system`, so the nodes placed in the
+    # system move with it (2026-11-11)
     def origin_setter(axis: int) -> Callable[[Geometry, int, str], None]:
         def setter(geometry: Any, row: int, text: str) -> None:
             value = float(text)
             if geometry.units_defined:
                 value = unit_system.to_si(value, 'length')
-            geometry.cs_matrix[row, 3, axis] = value
+            origin = np.array(geometry.cs_matrix[row, 3], dtype=float)
+            origin[axis] = value
+            geometry.place_coordinate_system(int(geometry.cs_id[row]),
+                                             origin=origin)
         return setter
 
     # the turn as three angles about the fixed X, then Y, then Z axes,
@@ -1047,7 +1071,8 @@ def coordinate_system_table_model(geometry: Geometry,
         def setter(geometry: Any, row: int, text: str) -> None:
             angles = list(angles_of(geometry.cs_matrix[row]))
             angles[axis] = float(text)
-            geometry.cs_matrix[row, :3] = frame_from_angles(angles)[:3]
+            geometry.place_coordinate_system(int(geometry.cs_id[row]),
+                                             angles=angles)
         return setter
 
     def rotation_journal(geometry: Any, row: int, _text: str) -> str:
@@ -1062,7 +1087,8 @@ def coordinate_system_table_model(geometry: Geometry,
         wanted = text.strip().lower()
         for code, name in CS_TYPES.items():
             if name == wanted:
-                geometry.cs_type[row] = code
+                geometry.set_coordinate_system_type(int(geometry.cs_id[row]),
+                                                    code)
                 return
         raise ValueError(f'expected one of {sorted(CS_TYPES.values())}')
 
@@ -1077,15 +1103,16 @@ def coordinate_system_table_model(geometry: Geometry,
                                                  'cartesian'),
                set=set_type,
                journal=lambda g, r, _t:
-               f'.cs_type[{r}] = {int(g.cs_type[r])}',
+               f'.set_coordinate_system_type({int(g.cs_id[r])}, '
+               f'{int(g.cs_type[r])})',
                alignment=LEFT,
                # the only three there are, in code order
                choices=[CS_TYPES[code] for code in sorted(CS_TYPES)]),
         *[Column(f'Origin {axis} [{unit}]', origin_getter(i),
                  set=origin_setter(i),
-                 journal=lambda g, r, _t, i=i:
-                 f'.cs_matrix[{r}, 3, {i}] = '
-                 f'{float(g.cs_matrix[r, 3, i])!r}',
+                 journal=lambda g, r, _t:
+                 f'.place_coordinate_system({int(g.cs_id[r])}, origin='
+                 f'{tuple(float(v) for v in g.cs_matrix[r, 3])!r})',
                  format=lambda v: f'{v:.6g}')
           for i, axis in enumerate('XYZ')],
         # one angle typed can restate the others: near a quarter turn

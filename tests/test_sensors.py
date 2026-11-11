@@ -231,6 +231,12 @@ def test_the_catalog():
     assert models_for('voltage') == []
     assert lookup('352A24').shape == 'teardrop'
     assert lookup('352A73').shape == 'rounded'
+    small = lookup('352a71')
+    assert small.kind == 'uniaxial' and small.size == (10.4, 6.4, 3.6)
+    assert small.shape == 'rounded', "the 352A73's form, larger"
+    assert small.mass == 0.64
+    assert lookup('PCB 352A71') is small, 'the make written in front'
+    assert lookup('PCB') is None and lookup('PCBX352A71') is None
     assert lookup('208C03').stud == (4.8, 3.5)
 
 
@@ -689,3 +695,26 @@ def test_the_table_view_shows_the_other_legs_filled(qt_app):
     assert seen == [(0, 2)], 'every row redrawn, so the legs show'
     assert [model.index(r, titles.index('Model')).data() for r in range(3)] \
         == ['356A02'] * 3
+
+
+def test_two_uniaxials_at_one_node_are_two_bodies_whatever_the_triax_column():
+    """Two 352A71s at node 206, X- and Y+, with Triax DOF filled in and
+    the make written in the Model cell (Brandon, 2026-11-11): the catalog
+    says uniaxial, so each row is its own body along its own direction."""
+    from visualdynamics import ChannelTable, Geometry
+    from visualdynamics.core.sensors import place
+
+    geometry = Geometry(node_id=[206, 207], node_xyz=[[0, 0, 0], [1, 0, 0]])
+    table = ChannelTable({
+        'channel': [1, 2, 3], 'node': ['206', '207', '206'],
+        'direction': ['Y+', 'X+', 'X-'], 'triax_dof': ['Z', '', 'X'],
+        'channel_type': ['acceleration'] * 3,
+        'model': ['PCB 352A71', 'PCB 352A71', 'PCB 352A71'],
+        'unit': ['g'] * 3, 'role': ['response'] * 3})
+    sensors, notes = place(table, geometry)
+    at_206 = [s for s in sensors if s.node == 206]
+    assert [s.rows for s in at_206] == [(0,), (2,)]
+    assert {s.entry.kind for s in at_206} == {'uniaxial'}
+    assert np.allclose(at_206[0].frame[:, 2], [0, 1, 0])
+    assert np.allclose(at_206[1].frame[:, 2], [-1, 0, 0])
+    assert notes == []

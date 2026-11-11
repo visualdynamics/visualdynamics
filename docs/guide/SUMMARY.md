@@ -17,6 +17,7 @@
     - [Reading Q from a peak's half-power width](half-power.md)
     - [Comparing signatures before and after a test](signature-comparison.md)
     - [Modal responses from forces](modal-responses.md)
+    - [Modal FRFs from a shape set](modal-frfs.md)
 - Reading a spectrum:
     - [How a PSD means its area](psd-reading.md)
     - [What an average is worth](averaging-confidence.md)

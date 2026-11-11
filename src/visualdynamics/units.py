@@ -209,7 +209,13 @@ _DIMENSIONALITY = {
     'modal_acceleration': '[length] * [mass] ** 0.5 / [time] ** 2',
     'modal_velocity': '[length] * [mass] ** 0.5 / [time]',
     'modal_length': '[length] * [mass] ** 0.5',
-    'modal_force': '[length] * [mass] ** 1.5 / [time] ** 2',
+    # p = Φᵀf with Φ in 1/√mass: a force over √mass, which is the
+    # modal acceleration's dimension too (q̈ = p for a mass-normalized
+    # mode). It was force times √mass until 2026-11-11, wrong by the mass
+    # unit squared wherever that is not kg: a modal accelerance of 1
+    # read 175 in in-slinch-lbf-s. `dimension_of` tells the two apart by
+    # whether the unit is spelled with a force.
+    'modal_force': '[length] * [mass] ** 0.5 / [time] ** 2',
 }
 
 #: the tags whose display unit follows from a system's base units,
@@ -238,7 +244,10 @@ def _derived_units(units: dict) -> dict:
         for quantity in MODAL_QUANTITIES:
             tag = f'modal_{quantity}'
             if tag not in units and quantity in units:
-                out[tag] = f"{units[quantity]}*{units['mass']}**0.5"
+                # a motion over 1/√mass, a force through it
+                out[tag] = (f"{units[quantity]}/{units['mass']}**0.5"
+                            if quantity == 'force' else
+                            f"{units[quantity]}*{units['mass']}**0.5")
     return out
 
 
@@ -614,6 +623,18 @@ def dimension_of(unit: str) -> str | None:
     return _dimension_of_spelled(normalize_unit(unit))
 
 
+def _spelled_with_a_force(ureg, unit: str) -> bool:
+    """Whether one of the unit's factors is a force (N, lbf): how a
+    modal force, N/kg**0.5, is told from a modal acceleration,
+    m/s**2*kg**0.5, which has the same dimension."""
+    force = ureg.get_dimensionality('[mass] * [length] / [time] ** 2')
+    try:
+        factors = ureg.parse_units(unit)._units
+    except Exception:  # noqa: BLE001 - read already; a failure is no force
+        return False
+    return any(ureg.get_dimensionality(name) == force for name in factors)
+
+
 def _dimension_of_spelled(unit: str) -> str | None:
     """`dimension_of` for a string that has already been through
     `normalize_unit` — the half that asks pint, kept apart so the case
@@ -632,6 +653,8 @@ def _dimension_of_spelled(unit: str) -> str | None:
         if (tag in ANGULAR_UNITS) != angular:
             continue
         if dimensionality == ureg.get_dimensionality(expr):
+            if tag == 'modal_acceleration' and _spelled_with_a_force(ureg, unit):
+                return 'modal_force'
             return tag
     if not dimensionality:
         return 'angle' if angular else 'dimensionless'

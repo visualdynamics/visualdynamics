@@ -42,6 +42,7 @@ from .amplitude_panel import AmplitudePanel
 from .author_panel import AuthorPanel
 from .averaging_panel import AveragingPanel
 from .chance_panel import ChancePanel
+from .channel_frf_panel import ChannelFrfPanel
 from .confidence_panel import ConfidencePanel
 from .drive_prediction_panel import DrivePredictionPanel
 from .editors import SpinBox
@@ -57,6 +58,7 @@ from .matrix_comparison_panel import MatrixComparisonPanel
 from .merge_panel import MergePanel
 from .mesh_panel import MeshPanel
 from .mesh_solids_panel import MeshSolidsPanel
+from .modal_frf_panel import ModalFrfPanel
 from .modal_response_panel import ModalResponsePanel
 from .modes_panel import ModesPanel
 from .multi_point_panel import MultiPointPanel
@@ -581,6 +583,14 @@ class DataPane(QWidget):
         # set, previewed beside the plot (Compute Modal Responses)
         self.modal_response_panel: ModalResponsePanel = ModalResponsePanel()
         self.modal_response_panel.hide()
+        # each mode's own FRF from a shape set, previewed beside the plot
+        # (Synthesize Modal FRFs)
+        self.modal_frf_panel: ModalFrfPanel = ModalFrfPanel()
+        self.modal_frf_panel.hide()
+        # modal FRFs at a channel table's channels, previewed beside the
+        # plot (Expand to Physical Responses)
+        self.channel_frf_panel: ChannelFrfPanel = ChannelFrfPanel()
+        self.channel_frf_panel.hide()
         # a specification at breakpoints read onto lines, previewed
         # beside the plot (Convert to PSD/CPSD)
         self.lines_panel: LinesPanel = LinesPanel()
@@ -609,6 +619,8 @@ class DataPane(QWidget):
         plot_row.addWidget(self.author_split, 1)
         plot_row.addWidget(self.signal_panel)
         plot_row.addWidget(self.modal_response_panel)
+        plot_row.addWidget(self.modal_frf_panel)
+        plot_row.addWidget(self.channel_frf_panel)
         plot_row.addWidget(self.lines_panel)
         plot_row.addWidget(self.state_space_panel)
         plot_row.addWidget(self.averaging_panel)

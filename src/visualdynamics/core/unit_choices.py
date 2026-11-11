@@ -58,12 +58,13 @@ ORDINATE_UNITS = {
     'angular_acceleration': ['rad/s**2', 'deg/s**2'],
     'moment': ['lbf*in', 'N*m', 'lbf*ft'],
     # modal responses through mass-normalized shapes: the response's
-    # unit times the square root of the mass unit the shapes carry
+    # unit times the square root of the mass unit the shapes carry, a
+    # force's divided by it
     'modal_acceleration': ['in/s**2*slinch**0.5', 'm/s**2*kg**0.5',
                            'g*slinch**0.5'],
     'modal_velocity': ['in/s*slinch**0.5', 'm/s*kg**0.5'],
     'modal_length': ['in*slinch**0.5', 'm*kg**0.5'],
-    'modal_force': ['lbf*slinch**0.5', 'N*kg**0.5'],
+    'modal_force': ['lbf/slinch**0.5', 'N/kg**0.5'],
     # spelled out, because '' means 'not declared' in every unit cell
     'dimensionless': ['dimensionless'],         # strain, ratio
 }

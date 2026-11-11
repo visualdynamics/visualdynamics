@@ -63,6 +63,14 @@ def test_a_pushed_tag_releases_that_tag_and_is_published_by_hand():
                     'tag': 'v0.1.0a67', 'sha': 'def456'}
 
 
+def test_a_pushed_tag_whose_release_is_published_builds_nothing():
+    """Publishing a draft by hand makes its tag; that push must not
+    rebuild and redraft the release over its published assets."""
+    said = decision.decide('push', ref_name='v0.1.0a91', sha='def456', published=True)
+    assert said['build'] == said['release'] == 'false'
+    assert said['tag'] == ''
+
+
 def test_a_manual_run_builds_as_a_test_unless_it_only_reserves_or_redeploys():
     assert decision.decide('workflow_dispatch', sha='s')['build'] == 'true'
     assert decision.decide('workflow_dispatch', sha='s')['release'] == 'false'
@@ -137,6 +145,20 @@ def test_a_sync_release_is_a_draft_until_its_feeds_are_on_it():
         assert "needs.publish_draft.result == 'success'" in jobs[after]['if']
         assert jobs[after]['if'].startswith('!cancelled()'), (
             'a skipped publish_draft (a pushed tag) must not skip the release event path')
+
+
+def test_a_failed_job_can_be_rerun_after_the_day_it_failed():
+    """The jobs after the builds download the builds' artifacts again on
+    a rerun, so the artifacts outlast a day; and the Sparkle download
+    refuses an error page and tries again."""
+    jobs = _workflow('release.yml')['jobs']
+    kept = [step['with']['retention-days'] for job in ('linux', 'windows', 'macos')
+            for step in jobs[job]['steps'] if step.get('uses', '').startswith('actions/upload-artifact')]
+    assert len(kept) == 4 and min(kept) >= 7
+    fetch = (ROOT / 'packaging' / 'fetch_sparkle.sh').read_text(encoding='utf-8')
+    [download] = [line.split() for line in fetch.splitlines()
+                  if line.strip().startswith('curl ')]
+    assert '--fail' in download and '--retry' in download
 
 
 def test_the_sync_tool_asks_for_the_release():

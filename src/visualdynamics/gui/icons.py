@@ -1386,6 +1386,17 @@ def _draw_modal_response(painter, color):
                                                            56 - height))
 
 
+def _draw_modal_frf(painter, color):
+    """A resonant peak above a bar of modes: each mode's own FRF."""
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPath(_curve([(8, 34), (18, 32), (25, 28), (30, 8), (35, 28),
+                             (44, 32), (56, 34)]))
+    for k, height in enumerate((14, 9, 6, 4)):
+        painter.drawLine(QPointF(14 + 10 * k, 56), QPointF(14 + 10 * k,
+                                                           56 - height))
+
+
 def _draw_generate_signal(painter, color):
     """A ragged random trace running out of a plus: a signal made, not
     measured."""
@@ -2659,6 +2670,7 @@ def control_icon(name: str) -> QIcon:
      'new_channel_table': _draw_new_channel_table,
      'generate_signal': _draw_generate_signal,
      'modal_response': _draw_modal_response,
+     'modal_frf': _draw_modal_frf,
      'mac': _draw_mac, 'shape_values': _draw_shape_values,
      'new_specification': _draw_new_specification,
      'add_channel': _draw_add_channel,

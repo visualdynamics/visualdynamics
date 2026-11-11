@@ -100,6 +100,13 @@ CATALOG: tuple[SensorModel, ...] = (
     # 4.8 mm high, the 3-56 connector out of the narrow end
     _uniaxial('352A24', 'teardrop', (9.9, 7.1, 4.8), 0.8,
               '3-56 coaxial connector', plug=(2.5, 2.3)),
+    # spec sheet 11544 (revision J): 3.6 mm high, 11.4 long and 6.4 wide,
+    # 0.6 g, a 3-56 coaxial jack on the side. PCB's photograph shows the
+    # 352A24's teardrop with the jack out of the narrow end; as there,
+    # the size is the body alone and the 3-56 plug stands beyond it
+    # (Brandon, 2026-11-11)
+    _uniaxial('352A21', 'teardrop', (11.4, 6.4, 3.6), 0.6,
+              '3-56 coaxial connector', plug=(2.5, 2.3)),
     # drawing 24787: 6.75 mm long with a round nose, 3.96 mm wide, 2.8 mm
     # high, a twisted pair out of the flat end (Brandon, 2026-10-27: the
     # drawing's side view rounds the potting at the cable end, which a

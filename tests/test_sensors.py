@@ -234,6 +234,9 @@ def test_the_catalog():
     small = lookup('352a71')
     assert small.kind == 'uniaxial' and small.size == (10.4, 6.4, 3.6)
     assert small.shape == 'rounded', "the 352A73's form, larger"
+    drop = lookup('PCB 352A21')
+    assert (drop.kind, drop.shape, drop.size, drop.mass, drop.plug) == (
+        'uniaxial', 'teardrop', (11.4, 6.4, 3.6), 0.6, (2.5, 2.3))
     assert small.mass == 0.64
     assert lookup('PCB 352A71') is small, 'the make written in front'
     assert lookup('PCB') is None and lookup('PCBX352A71') is None

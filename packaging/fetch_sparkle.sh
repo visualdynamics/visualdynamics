@@ -19,8 +19,17 @@ read -r name url digest < <(
          | "\(.name) \(.browser_download_url) \(.digest)"')
 [[ $digest == sha256:* ]] || { echo "no digest recorded for $name" >&2; exit 1; }
 mkdir -p "$dest"
-curl -sSL -o "$dest/$name" "$url"
-echo "${digest#sha256:}  $dest/$name" | shasum -a 256 -c -
+# --fail so an error page is not saved as the archive, and a fresh
+# download when the sum is wrong: 0.1.0a91's Intel updates job got a
+# bad copy twice (2026-11-08) of the archive that summed right on the
+# arm64 job beside it and on the desk
+for try in 1 2 3; do
+    curl -sSL --fail --retry 3 --retry-all-errors -o "$dest/$name" "$url" &&
+        echo "${digest#sha256:}  $dest/$name" | shasum -a 256 -c - && break
+    rm -f "$dest/$name"
+    (( try < 3 )) || { echo "$name did not download whole in three tries" >&2; exit 1; }
+    echo "$name: downloading again" >&2
+done
 tar -xJf "$dest/$name" -C "$dest"
 rm "$dest/$name"
 version=${name#Sparkle-}

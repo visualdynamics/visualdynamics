@@ -116,7 +116,7 @@ jobs:
           sudo mv appimagetool-x86_64.AppImage /usr/local/bin/appimagetool
           packaging/build_linux.sh
       - uses: actions/upload-artifact@v7
-        with: {name: linux, path: dist/*.AppImage, retention-days: 1}
+        with: {name: linux, path: dist/*.AppImage, retention-days: 7}
 
   windows:
     needs: which
@@ -146,7 +146,7 @@ jobs:
         if: always()
         with: {name: windows-smoke, path: dist/smoke/*, retention-days: 7}
       - uses: actions/upload-artifact@v7
-        with: {name: windows, path: dist/*setup.exe, retention-days: 1}
+        with: {name: windows, path: dist/*setup.exe, retention-days: 7}
 
   # One job per architecture, each on a runner of that architecture —
   # the desk cross-built Intel under Rosetta, a runner needs no such
@@ -202,13 +202,16 @@ jobs:
         run: packaging/build_macos.sh
       # the image people download, and the zip Sparkle downloads (made
       # only once the app is notarized and stapled)
+      # kept a week, as every build here is: a rerun of a failed later
+      # job downloads these again, and 0.1.0a91's rerun the next day
+      # found them gone after one (2026-11-09)
       - uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}
           path: |
             dist/*.dmg
             dist/*.zip
-          retention-days: 1
+          retention-days: 7
 
   publish:
     # macos included, and it was not: the job built a .dmg, uploaded

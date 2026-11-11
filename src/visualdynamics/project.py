@@ -3129,10 +3129,24 @@ class Project(dict):
 
     def expand(self, source: Any, shapes: Any, *,
                records: Sequence[int] | None = None,
+               tolerance: float = 0.02,
                name: str | None = None) -> str:
         """Expand modal responses through a shape set back to physical
         responses (Expand to Physical Responses): `u = Φq` at every DOF
         the shape set covers.
+
+        Modal FRFs with a channel table in place of the set give the
+        physical FRFs between the table's channels instead: each
+        response and monitor channel against each reference channel,
+        through the set the modal FRFs are of (`modal_basis`). Each row
+        answers in what its channel measures, turned from the modal FRFs'
+        quantity by (iω)^p. When the set and the table are each linked
+        to a geometry and the geometries differ, the shapes are taken at
+        the channels as Project onto Basis DOFs takes them, nearest node
+        within `tolerance`; otherwise the set's own DOFs are read. A
+        channel the shapes do not reach is dropped, and the result's
+        `transform_report` names it. The result is linked into the
+        table's group.
 
         The result is linked into the shape set's group, so it animates
         on that group's geometry. Expanding some of the modes gives
@@ -3148,10 +3162,15 @@ class Project(dict):
         records : sequence of int, optional
             Which modal records to expand, the modes picked in the
             tree. All of them when omitted.
+        tolerance : float, default 0.02
+            With a channel table on another geometry, how far the
+            nearest node may be, as a fraction of the table's geometry's
+            extent (as `project_onto_basis`).
         name : str, optional
             What to call the result. Defaults to the record's name with
             'Modal Coordinates' replaced by 'Physical Responses', and the
-            modes listed in parentheses when not all of them are used.
+            modes listed in parentheses when not all of them are used;
+            at a channel table, the record's name and '@' the table's.
 
         Returns
         -------
@@ -3162,6 +3181,9 @@ class Project(dict):
         from .core.transform import carried_modes, to_physical
 
         source, shapes = self.name_of(source), self.name_of(shapes)
+        if isinstance(self[shapes], ChannelTable):
+            return self._expand_at_table(source, shapes, records, tolerance,
+                                         name)
         data, shape_set = self._transform_pair(source, shapes)
         picked = None if records is None else [int(i) for i in records]
         result, report = to_physical(data, shape_set, picked)
@@ -3182,6 +3204,105 @@ class Project(dict):
         with contextlib.suppress(ValueError):
             self.link(shapes, added)
         return added
+
+    def channel_frfs(self, source: Any, table: Any, *,
+                     records: Sequence[int] | None = None,
+                     tolerance: float = 0.02) -> Frf:
+        """The physical FRFs `expand` makes from modal FRFs at a channel
+        table's channels, without adding them to the project: what
+        Expand to Physical Responses previews.
+
+        Parameters
+        ----------
+        source : str or object
+            The modal FRFs, by name or as the object itself.
+        table : str or object
+            The channel table.
+        records : sequence of int, optional
+            Which modal records; all of them when omitted.
+        tolerance : float, default 0.02
+            As `expand`.
+
+        Returns
+        -------
+        Frf
+            The FRFs, their `transform_report` saying what was used,
+            dropped and skipped, the set they came through and, when the
+            shapes were projected, the projection's report.
+
+        Raises
+        ------
+        TypeError, ValueError
+            As `expand` with a channel table.
+        """
+        params: dict[str, Any] = {'table': self.name_of(table)}
+        if records is not None:
+            params['records'] = [int(i) for i in records]
+        params['tolerance'] = float(tolerance)
+        return _at_channels(self, self.name_of(source), params)
+
+    def _expand_at_table(self, source, table, records, tolerance, name):
+        """`expand` with a channel table: modal FRFs to physical FRFs
+        between the table's channels."""
+        params: dict[str, Any] = {'table': table}
+        if records is not None:
+            params['records'] = [int(i) for i in records]
+        if tolerance != 0.02:
+            params['tolerance'] = float(tolerance)
+        result = _at_channels(self, source, params)
+        params['shapes'] = result.transform_report.basis
+        added = self._derive(source, result, name or f'{source} @ {table}',
+                             recipe=('expand', params), link=False)
+        with contextlib.suppress(ValueError):
+            self.link(table, added)
+        return added
+
+    def channel_shapes(self, shapes: Any, table: Any, *,
+                       tolerance: float = 0.02) -> tuple[ShapeSet, dict]:
+        """A shape set at a channel table's DOFs, for the FRFs between
+        its channels (`expand` with a table).
+
+        When the set and the table are each linked to a geometry and the
+        two differ, the shapes are projected onto the channels' DOFs,
+        nearest node within `tolerance` (`core.correlate.project_shapes`,
+        as `project_onto_basis`). Otherwise the set is returned as it is,
+        to be read at its own DOFs.
+
+        Parameters
+        ----------
+        shapes : str or object
+            The shape set.
+        table : str or object
+            The channel table.
+        tolerance : float, default 0.02
+            How far the nearest node may be, as a fraction of the table's
+            geometry's extent.
+
+        Returns
+        -------
+        tuple of (ShapeSet, dict)
+            The set to read, and the projection's report ('matched',
+            'total', 'worst', 'limit', 'dropped'), empty when the set's
+            own DOFs are read.
+        """
+        from .core.correlate import project_shapes
+
+        shapes, table = self.name_of(shapes), self.name_of(table)
+        set_obj, table_obj = self[shapes], self[table]
+
+        def linked_geometry(name):
+            for member in self.object_group_of(name) or ():
+                if isinstance(self.get(member), Geometry):
+                    return member
+            return None
+
+        theirs, home = linked_geometry(shapes), linked_geometry(table)
+        if theirs is None or home is None or theirs == home:
+            return set_obj, {}
+        dofs = list(dict.fromkeys(d for d in table_obj.dof_strings() if d))
+        target = ShapeSet([], [], dofs, np.zeros((0, len(dofs))))
+        return project_shapes(set_obj, self[theirs], target, self[home],
+                              tolerance=tolerance)
 
     def _transform_pair(self, source, shapes):
         from .core.sine import SineLevelSet
@@ -3479,6 +3600,65 @@ class Project(dict):
         return self._derive(source, _answered(self, source, params),
                             name or f'{source} Modal Responses',
                             recipe=('compute_modal_responses', params))
+
+    def synthesize_modal_frfs(self, shapes: Any, *, sample_rate: float,
+                              frame_length: int,
+                              quantity: str = 'acceleration',
+                              modes: Sequence[int] | None = None,
+                              name: str | None = None) -> str:
+        """Synthesize each mode's own FRF from a shape set (Synthesize
+        Modal FRFs), as a new object beside the set.
+
+        Each record is one mode's modal coordinate per unit modal force,
+        at `M1` ... `Mn` against itself, from the mode's frequency,
+        damping and modal mass (`core.modal_frf`). The lines are those of
+        a test's frame: every `sample_rate / frame_length` Hz from 0 Hz
+        to the Nyquist frequency. Modes above the Nyquist frequency are
+        kept. Expand to Physical Responses takes the result back to
+        physical FRFs through the set, or at a channel table's channels.
+
+        Parameters
+        ----------
+        shapes : str or object
+            The shape set, by name or as the object itself.
+        sample_rate : float
+            The sample rate the lines follow from, in Hz.
+        frame_length : int
+            Samples in a frame.
+        quantity : str, default 'acceleration'
+            The response per modal force: 'displacement', 'velocity' or
+            'acceleration'.
+        modes : sequence of int, optional
+            Which modes, by index in the set from zero; all of them when
+            omitted.
+        name : str, optional
+            What to call the result. Defaults to the set's name followed
+            by 'Modal FRFs'.
+
+        Returns
+        -------
+        str
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
+
+        Raises
+        ------
+        TypeError
+            If `shapes` is not a shape set.
+        ValueError
+            As `core.modal_frf.synthesize_modal_frfs`: a complex set, a
+            mode not in the set, a quantity it does not know, or a sample
+            rate or frame length that gives no lines.
+        """
+        source = self.name_of(shapes)
+        params: dict[str, Any] = {'sample_rate': float(sample_rate),
+                                  'frame_length': int(frame_length),
+                                  'quantity': quantity}
+        if modes is not None:
+            params['modes'] = sorted({int(k) for k in modes})
+        return self._derive(source, _synthesized(self, source, params),
+                            name or f'{source} Modal FRFs',
+                            recipe=('synthesize_modal_frfs', params))
 
     def merge_coincident_nodes(self, source: Any,
                                tolerance: float | None = None,
@@ -8409,7 +8589,10 @@ class Project(dict):
         'transform': 'pair', 'expand': 'pair',
         # the pair and the set's damping and modal masses, which a
         # transform never reads and a response does
-        'compute_modal_responses': 'pair+model'}
+        'compute_modal_responses': 'pair+model',
+        # a mode's own FRF reads its frequency, damping and modal mass,
+        # never its shape (2026-11-11)
+        'synthesize_modal_frfs': 'model'}
 
     def _analysis_state(self, source: str, verb: str,
                         params: Mapping[str, Any] | None = None) -> Any:
@@ -8441,7 +8624,21 @@ class Project(dict):
                 digest.update(np.ascontiguousarray(array).tobytes())
             digest.update(','.join(obj.response_dof).encode())
             digest.update(','.join(other.coordinate).encode())
+            table = self.get((params or {}).get('table'))
+            if isinstance(table, ChannelTable):
+                # the channels the FRFs are between (2026-11-11)
+                for column in (table.dof_strings(), table.roles(),
+                               table.types()):
+                    digest.update('|'.join(column).encode())
             return ('content', digest.hexdigest())
+        if reads == 'model':
+            import hashlib
+
+            digest = hashlib.blake2b(digest_size=16)
+            for array in (obj.frequency, obj.damping, obj.modal_mass):
+                digest.update(np.ascontiguousarray(array).tobytes())
+            digest.update(str(obj.mass_unit).encode())
+            return ('model', digest.hexdigest())
         if reads in ('averaging', 'averaging+roles'):
             averaging = getattr(obj, 'averaging', None)
             state = None if averaging is None else asdict(averaging)
@@ -9051,6 +9248,9 @@ _VERB_APPLIES: tuple = (
     ('expand', lambda p, o: _reads_as(p, o, 'modal')),
     ('generate_rigid_body_modes', lambda p, o: isinstance(o, Geometry)),
     ('generate_signal', lambda p, o: _makes_signals(o)),
+    ('synthesize_modal_frfs', lambda p, o: (isinstance(o, ShapeSet)
+                                            and o.num_shapes > 0
+                                            and not o.is_complex)),
     # a geometry is a model once its element groups say what they are made of
     ('solve_modes', lambda p, o: (isinstance(o, Geometry)
                                   and bool(o.group_properties))),
@@ -9206,6 +9406,29 @@ def _forces_and_modes(objects: Sequence[Any]) -> bool:
     return holds_forces(sources[0])
 
 
+def _modal_frfs_and_table(project: Any, objects: Sequence[Any]) -> bool:
+    """Modal FRFs whose shape set is known beside a channel table with
+    a force reference and a motion response: what Expand to Physical
+    Responses takes to the FRFs between the table's channels."""
+    from .core.validate import modal_coordinate
+
+    frfs = [o for o in objects if isinstance(o, Frf)]
+    tables = [o for o in objects if isinstance(o, ChannelTable)]
+    if len(objects) != 2 or len(frfs) != 1 or len(tables) != 1:
+        return False
+    frf, table = frfs[0], tables[0]
+    if not all(modal_coordinate(dof) is not None
+               for dof in (*frf.response_dof, *frf.reference_dof)):
+        return False
+    if project.modal_basis(frf) is None:
+        return False
+    pairs = list(zip(table.roles(), table.types()))
+    return (('reference', 'force') in pairs
+            and any(role in ('response', 'monitor')
+                    and kind in ('acceleration', 'velocity', 'length')
+                    for role, kind in pairs))
+
+
 def holds_forces(data: Any) -> bool:
     """Whether a time history holds a force or modal force channel, or a
     CPSD a force or modal force density: what Compute Modal Responses
@@ -9224,7 +9447,8 @@ def holds_forces(data: Any) -> bool:
 _SELECTION_APPLIES: tuple = (
     ('compute_modal_responses', lambda p, o: _forces_and_modes(o)),
     ('transform', lambda p, o: _pair_reads(p, o, 'physical')),
-    ('expand', lambda p, o: _pair_reads(p, o, 'modal')),
+    ('expand', lambda p, o: (_pair_reads(p, o, 'modal')
+                             or _modal_frfs_and_table(p, o))),
     ('project_onto_basis', lambda p, o: (_two_sets_on_two_geometries(p, o)
                                          or _set_and_table_apart(p, o))),
     ('match_modes', lambda p, o: (len(o) == 2 and all(
@@ -9283,7 +9507,7 @@ _JOURNALED_VERBS = (
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'detect_shocks', 'filter_data', 'truncate_data', 'resample', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
-    'generate_signal', 'compute_modal_responses',
+    'generate_signal', 'compute_modal_responses', 'synthesize_modal_frfs',
     'plan_instrumentation',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry',
     'new_channel_table', 'add_channels',
@@ -9364,8 +9588,10 @@ _RECOMPUTE = {
     'generate_rigid_body_modes': lambda p, s, k: _rigid_shapes(p[s]),
     'generate_signal': lambda p, s, k: _generated_again(p[s], k),
     'transform': lambda p, s, k: _through(p, s, k, 'to_modal'),
-    'expand': lambda p, s, k: _through(p, s, k, 'to_physical'),
+    'expand': lambda p, s, k: (_at_channels(p, s, k) if 'table' in k
+                               else _through(p, s, k, 'to_physical')),
     'compute_modal_responses': lambda p, s, k: _answered(p, s, k),
+    'synthesize_modal_frfs': lambda p, s, k: _synthesized(p, s, k),
     'author_specification': lambda p, s, k: _authored(p, s, k),
     'derive_specification': lambda p, s, k: _derived_again(p, k),
 }
@@ -9429,6 +9655,71 @@ def _through(project, source, params, which):
                                                project[shapes], records)
     result.transform_report = report
     return result
+
+
+def _at_channels(project, source, params):
+    """The physical FRFs `expand` makes from modal FRFs at a channel
+    table's channels, from its recipe: first and when refreshed."""
+    from .core.modal_frf import frfs_at_channels
+
+    table = params['table']
+    if table not in project:
+        raise ValueError(f'{source!r} was expanded at {table!r}, which is gone')
+    channels = project[table]
+    if not isinstance(channels, ChannelTable):
+        raise TypeError(f'{table!r} is not a channel table')
+    modal = project[source]
+    if not isinstance(modal, Frf):
+        raise TypeError(f'{source!r} is not an FRF: a channel table expands '
+                        'modal FRFs')
+    basis = project.modal_basis(source, records=params.get('records'))
+    if basis is None:
+        raise ValueError(f'nothing says which shape set {source!r} is of')
+    shapes, projection = project.channel_shapes(
+        basis, table, tolerance=params.get('tolerance', 0.02))
+    roles, kinds = channels.roles(), channels.types()
+    dofs = channels.dof_strings()
+    references, responses, skipped = [], [], {}
+    for dof, role, kind in zip(dofs, roles, kinds):
+        if not dof or role not in ('reference', 'response', 'monitor'):
+            continue
+        wanted = ('force',) if role == 'reference' else (
+            'acceleration', 'velocity', 'length')
+        if kind not in wanted:
+            label = kind or 'no type'
+            skipped[label] = skipped.get(label, 0) + 1
+        elif role == 'reference':
+            references.append(dof)
+        else:
+            responses.append((dof, kind))
+    if not references:
+        raise ValueError(f'{table!r} has no reference channel measuring force')
+    if not responses:
+        raise ValueError(f'{table!r} has no response or monitor channel '
+                         'measuring a motion')
+    result, report = frfs_at_channels(modal, shapes, references, responses,
+                                      records=params.get('records'))
+    # a channel the projection could not reach is not in the projected
+    # set, so the expansion has already named it among the dropped
+    report.skipped.update(skipped)
+    report.basis = basis
+    report.projection = projection
+    result.transform_report = report
+    return result
+
+
+def _synthesized(project, source, params):
+    """The modal FRFs `synthesize_modal_frfs` makes, from its recipe:
+    synthesized first and when refreshed."""
+    from .core.modal_frf import synthesize_modal_frfs
+
+    shapes = project[source]
+    if not isinstance(shapes, ShapeSet):
+        raise TypeError(f'{source!r} is not a shape set')
+    return synthesize_modal_frfs(
+        shapes, params['sample_rate'], params['frame_length'],
+        quantity=params.get('quantity', 'acceleration'),
+        modes=params.get('modes'), label=source)
 
 
 def _answered(project, source, params):

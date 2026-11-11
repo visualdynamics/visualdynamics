@@ -3,8 +3,10 @@ not, and which tag and commit.
 
     python packaging/release_decision.py >> "$GITHUB_OUTPUT"
 
-The workflow starts four ways. A pushed `v…` tag releases that tag, as
-it always has. A manual run builds all four packages as a test and
+The workflow starts four ways. A pushed `v…` tag releases that tag,
+unless that tag's release is already published: publishing a draft by
+hand is what makes its tag, and that push must not build the release
+again over the assets it was published with. A manual run builds all four packages as a test and
 releases nothing, unless it was asked only to reserve the PyPI name or
 redeploy the site. A published release builds nothing; its PyPI and
 site jobs run from the release itself. And when the tests pass on a
@@ -46,16 +48,23 @@ def version_in(text: str) -> str:
 def decide(event: str, *, ref_name: str = '', sha: str = '', reserve: bool = False,
            site: bool = False, run_conclusion: str = '', run_event: str = '',
            run_branch: str = '', run_sha: str = '', version: str = '',
-           released: bool = False) -> dict[str, str]:
+           released: bool = False, published: bool = False) -> dict[str, str]:
     """What this run does, as the workflow's outputs: `build`,
     `release` and `auto` ('true' or 'false'), and the `tag` and `sha`
     to release and build.
 
     `released` says whether a release (draft or published) or a tag
-    already has the name `v<version>`.
+    already has the name `v<version>`, and `published` whether a pushed
+    tag's release is out of draft.
     """
     nothing = {'build': 'false', 'release': 'false', 'auto': 'false', 'tag': '', 'sha': sha}
     if event == 'push' and ref_name.startswith('v'):
+        # 0.1.0a91 (2026-11-09): its Intel feed was signed from the desk
+        # and the draft published by hand, which made the tag; the push
+        # started a full rebuild whose draft step would have written new,
+        # unsigned zips over the published ones. Cancelled by hand then.
+        if published:
+            return nothing
         return {**nothing, 'build': 'true', 'release': 'true', 'tag': ref_name}
     if event == 'workflow_dispatch':
         return {**nothing, 'build': 'false' if reserve or site else 'true'}
@@ -79,23 +88,36 @@ def released(tag: str, repository: str) -> bool:
     return False
 
 
+def published(tag: str, repository: str) -> bool:
+    """Whether `tag` has a release that is out of draft."""
+    found = subprocess.run(['gh', 'release', 'view', tag, '--repo', repository,
+                            '--json', 'isDraft', '-q', '.isDraft'],
+                           check=False, capture_output=True, text=True)
+    return found.returncode == 0 and found.stdout.strip() == 'false'
+
+
 def main() -> int:
     env = os.environ
     event = env.get('EVENT', '')
     version = ''
-    already = False
+    already = out = False
+    ref = env.get('GITHUB_REF_NAME', '')
+    if event == 'push' and ref.startswith('v'):
+        out = published(ref, env['GITHUB_REPOSITORY'])
     if event == 'workflow_run':
         version = version_in(VERSION_FILE.read_text(encoding='utf-8'))
         already = released(f'v{version}', env['GITHUB_REPOSITORY'])
-    outputs = decide(event, ref_name=env.get('GITHUB_REF_NAME', ''),
+    outputs = decide(event, ref_name=ref,
                      sha=env.get('GITHUB_SHA', ''),
                      reserve=env.get('RESERVE') == 'true', site=env.get('SITE') == 'true',
                      run_conclusion=env.get('RUN_CONCLUSION', ''),
                      run_event=env.get('RUN_EVENT', ''),
                      run_branch=env.get('RUN_BRANCH', ''), run_sha=env.get('RUN_SHA', ''),
-                     version=version, released=already)
+                     version=version, released=already, published=out)
     for key, value in outputs.items():
         print(f'{key}={value}')
+    if out:
+        print(f'{ref} is published already: nothing to build', file=sys.stderr)
     if event == 'workflow_run':
         said = (f'releasing v{version}' if outputs['release'] == 'true'
                 else f'v{version} has a release already, or the tests did not pass on a '

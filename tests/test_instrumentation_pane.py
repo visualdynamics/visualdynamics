@@ -136,7 +136,11 @@ def test_the_modes_picked_are_the_modes_planned_for_and_may_change(bar, window, 
     pump()
     _pick_modes(window, pump, bar, [6, 7, 8])
     acts = window.acts_for()
-    assert [act[0] for act in acts] == ['plan_instrumentation'], 'only the plan on mode picks'
+    # and each picked mode's own FRF (2026-11-11): the two acts that
+    # read a mode pick
+    assert [act[0] for act in acts] == ['synthesize_modal_frfs',
+                                        'plan_instrumentation'], \
+        'only the acts that read mode picks'
     panel = _open(window, pump)
     _to_the_edges(window, panel)
     assert window._planning_modes() == [6, 7, 8]

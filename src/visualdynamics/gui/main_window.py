@@ -177,6 +177,7 @@ from ..viz.geometry import (
     labels_fit,
     transformation_arrows,
 )
+from .channel_frf_panel import TOLERANCE as CHANNEL_TOLERANCE
 from .editors import DoubleSpinBox, SpinBox, commit_on_enter, commit_typed
 from .icons import (
     child_icon,
@@ -186,6 +187,8 @@ from .icons import (
     type_icon,
 )
 from .message_bar import MessageBar
+from .modal_frf_panel import FRAME_LENGTH as MODAL_FRF_FRAME
+from .modal_frf_panel import SAMPLE_RATE as MODAL_FRF_RATE
 
 #: how much imaginary part, against the real, counts as a complex
 #: measurement rather than the residue of computing one
@@ -1585,6 +1588,23 @@ class MainWindow(QMainWindow):
             self._modal_quantity_chosen)
         self.data_pane.modal_response_panel.apply_asked.connect(
             self._modal_apply)
+        #: the Synthesize Modal FRFs pane while it is open: the (set,
+        #: modes) it is open on. The settings are kept from one opening
+        #: to the next, the way a test's frame is kept
+        self._modal_frfing: dict | None = None
+        self._modal_frf_settings: tuple[float, int, str] = (
+            MODAL_FRF_RATE, MODAL_FRF_FRAME, 'acceleration')
+        self.data_pane.modal_frf_panel.changed.connect(self._modal_frf_edited)
+        self.data_pane.modal_frf_panel.apply_asked.connect(
+            self._modal_frf_apply)
+        #: the Expand to Physical Responses pane for modal FRFs and a
+        #: channel table while it is open: (FRFs, table, records) and the
+        #: tolerance set
+        self._channel_expanding: dict | None = None
+        self.data_pane.channel_frf_panel.changed.connect(
+            self._channel_frf_edited)
+        self.data_pane.channel_frf_panel.apply_asked.connect(
+            self._channel_frf_apply)
         #: the Convert to PSD/CPSD pane while it is open on a
         #: specification at breakpoints: its name and the spacing set
         self._lining: dict | None = None
@@ -5077,6 +5097,8 @@ class MainWindow(QMainWindow):
          'generate_signal_act'),
         ('compute_modal_responses', 'Compute Modal Responses',
          'modal_response', 'modal_response_act'),
+        ('synthesize_modal_frfs', 'Synthesize Modal FRFs', 'modal_frf',
+         'synthesize_modal_frfs_act'),
         ('transform', 'Transform to Modal Coordinates', 'transform',
          'transform_act'),
         ('expand', 'Expand to Physical Responses', 'expand',
@@ -5212,15 +5234,16 @@ class MainWindow(QMainWindow):
                 name for kind, name, _obj, _detail in references
                 if kind in ('object', 'record')))
             # modes picked in one shape set's grid: the modes a test is
-            # planned for (Brandon, 2026-10-21), and nothing else is
-            # offered on a mode pick
+            # planned for (Brandon, 2026-10-21), or whose own FRFs are
+            # synthesized (2026-11-11); nothing else reads a mode pick
             modes_of = {name for kind, name, _obj, _detail in references if kind == 'mode'}
             if not names and len(modes_of) == 1:
                 name = next(iter(modes_of))
                 applicable = dict(self.project.selection_verbs(name))
                 return [(verb, label, icon, getattr(self, handler), applicable[verb])
                         for verb, label, icon, handler in self.ACTS
-                        if verb == 'plan_instrumentation' and verb in applicable]
+                        if verb in ('plan_instrumentation', 'synthesize_modal_frfs')
+                        and verb in applicable]
             # rows picked in one channel table's grid beside one whole
             # shape set: the set projected at those channels alone
             # (Brandon, 2026-10-31); the set's own acts would ignore the
@@ -10586,8 +10609,11 @@ class MainWindow(QMainWindow):
         modaling = self._modal_door()
         lining = self._lines_door()
         staging = self._state_space_door()
+        frfing = self._modal_frf_door()
+        expanding = self._channel_frf_door()
         authoring = (None if signaling is not None or modaling is not None
                      or lining is not None or staging is not None
+                     or frfing is not None or expanding is not None
                      else self._authoring(shapes, geometries, series, channels))
         # no 3-D view in edit mode (Brandon, 2026-09-06): every editing
         # gesture is on the flat plot, so the stage stands down while
@@ -10596,7 +10622,9 @@ class MainWindow(QMainWindow):
                                     or signaling is not None
                                     or modaling is not None
                                     or lining is not None
-                                    or staging is not None)
+                                    or staging is not None
+                                    or frfing is not None
+                                    or expanding is not None)
         # a lone set's transformation is drawn on its geometry, which
         # comes up above the tables (Brandon, 2026-10-23)
         self._values_on = (self._values_geometry(shapes[0][0], shapes[0][1])
@@ -10605,7 +10633,8 @@ class MainWindow(QMainWindow):
                          plots=bool(series) or bool(picture_sets)
                          or bool(sine_specs) or bool(sine_levels)
                          or authoring is not None or signaling is not None
-                         or modaling is not None or staging is not None,
+                         or modaling is not None or staging is not None
+                         or frfing is not None or expanding is not None,
                          table=bool(channels) or shape_table or comparing
                          or bool(reports) or bool(matches)
                          or levels is not None
@@ -10700,6 +10729,10 @@ class MainWindow(QMainWindow):
             parts.append(self._render_lines())
         if staging is not None:
             parts.append(self._render_state_space())
+        if frfing is not None:
+            parts.append(self._render_modal_frfs())
+        if expanding is not None:
+            parts.append(self._render_channel_frfs())
         if authoring is not None:
             parts.append(self._render_author(authoring))
             if authoring[0] == 'table':
@@ -12129,6 +12162,153 @@ class MainWindow(QMainWindow):
         self._show_status(f'{added}: modal {quantity} of {count} '
                           f'mode{"s" * (count != 1)} through '
                           f'{state["shapes"]}, from {name}')
+
+    # ---- each mode's own FRF, from a shape set ---------------------------
+
+    def _modal_frf_candidates(self):
+        """(set name, modes) when the selection is one real shape set,
+        whole (modes None) or some of its modes picked in its grid, a
+        geometry allowed beside it; None otherwise."""
+        sets, modes = [], {}
+        for kind, name, obj, detail in self.selected_references():
+            if isinstance(obj, ShapeSet) and kind in ('object', 'mode'):
+                if name not in sets:
+                    sets.append(name)
+                if kind == 'mode':
+                    if modes.get(name, ()) is not None:
+                        modes.setdefault(name, []).append(detail)
+                else:
+                    modes[name] = None
+            elif isinstance(obj, Geometry) and kind == 'object':
+                continue
+            else:
+                return None
+        if len(sets) != 1 or 'synthesize_modal_frfs' not in dict(
+                self.project.selection_verbs(sets[0])):
+            return None
+        picked = modes.get(sets[0])
+        return (sets[0], None if picked is None else tuple(sorted(set(picked))))
+
+    def synthesize_modal_frfs_act(self) -> None:
+        """Open Synthesize Modal FRFs on the selected shape set (its
+        picked modes, or all), or put it away when it is open on them.
+        The pane previews each mode's FRF; Generate makes them an object
+        of their own (`Project.synthesize_modal_frfs`)."""
+        key = self._modal_frf_candidates()
+        if key is None:
+            self._show_status('Select a real shape set, or some of its modes')
+            return
+        if self._modal_frfing is not None and self._modal_frfing['key'] == key:
+            self.close_modal_frf_pane()
+            return
+        # one pane beside the plot at a time
+        self._author_wanted = False
+        self._signaling = self._modaling = self._lining = self._staging = None
+        self._channel_expanding = None
+        for panel in (self.data_pane.signal_panel,
+                      self.data_pane.modal_response_panel,
+                      self.data_pane.lines_panel,
+                      self.data_pane.state_space_panel,
+                      self.data_pane.channel_frf_panel):
+            panel.hide()
+        self._modal_frfing = {'key': key}
+        self.render_current()
+
+    def close_modal_frf_pane(self) -> None:
+        """Put the Synthesize Modal FRFs pane away."""
+        self._modal_frfing = None
+        self.data_pane.modal_frf_panel.hide()
+        self.render_current()
+
+    def _modal_frf_door(self):
+        """The pane's state while it is open, the selection is still what
+        it was opened on and no other pane has opened; otherwise None,
+        and the pane put away."""
+        if self._modal_frfing is None:
+            return None
+        if (self._modal_frf_candidates() != self._modal_frfing['key']
+                or self._signaling is not None or self._modaling is not None
+                or self._lining is not None or self._staging is not None
+                or self._channel_expanding is not None):
+            self._modal_frfing = None
+            self.data_pane.modal_frf_panel.hide()
+            return None
+        return self._modal_frfing
+
+    def _render_modal_frfs(self) -> str:
+        """The pane beside a preview: each picked mode's FRF on the
+        lines the settings give."""
+        from ..core.modal_frf import above_nyquist, synthesize_modal_frfs
+
+        set_name, modes = self._modal_frfing['key']
+        shapes = self.objects[set_name]
+        rate, frame, quantity = self._modal_frf_settings
+        panel = self.data_pane.modal_frf_panel
+        panel.show_settings(rate, frame, quantity)
+        panel.show()
+        picked = list(range(shapes.num_shapes)) if modes is None else list(modes)
+        try:
+            frfs = synthesize_modal_frfs(shapes, rate, frame, quantity,
+                                         modes=picked, label=set_name)
+        except ValueError as why:
+            panel.show_reading(note=f'Cannot synthesize: {why}', ready=False)
+            self.data_pane.clear()
+            return f'{set_name}: {why}'
+        lines = frfs.abscissa
+        above = above_nyquist(shapes, picked, rate)
+        rigid = int(np.sum(shapes.frequency[picked] == 0.0))
+        notes = []
+        if above:
+            notes.append(f'{above} mode{"s" * (above != 1)} above the Nyquist '
+                         'frequency, kept: each still adds its stiffness '
+                         'below it')
+        if rigid and quantity != 'acceleration':
+            notes.append(f'{rigid} rigid-body mode{"s" * (rigid != 1)}: no '
+                         f'{quantity} at 0 Hz')
+        if not shapes.units_defined:
+            notes.append('The set has no mass unit, so the FRFs have none')
+        panel.show_reading(
+            modes=f'{len(picked)} of {shapes.num_shapes}',
+            spacing=f'{lines[1]:.4g} Hz', lines=f'{lines.size:,}',
+            nyquist=f'{rate / 2:g} Hz',
+            highest=f'{float(np.max(shapes.frequency[picked])):.4g} Hz',
+            note='; '.join(notes))
+        status = self._render_series([(f'{set_name} modal FRFs', frfs, None)])
+        said = (f'{set_name}: modal {quantity} FRFs of {len(picked)} '
+                f'mode{"s" * (len(picked) != 1)}, {lines.size:,} lines to '
+                f'{rate / 2:g} Hz')
+        return said + (f' | {status}' if status else '')
+
+    def _modal_frf_edited(self, rate: float, frame: int, quantity: str) -> None:
+        self._modal_frf_settings = (rate, frame, quantity)
+        if self._modal_frfing is not None:
+            self.render_current()
+
+    def _modal_frf_apply(self, rate: float, frame: int, quantity: str) -> None:
+        """Generate: the project's verb on what the pane is open on, the
+        response and the modes passed only when they differ from the
+        defaults, so the journal's line is what a script would write."""
+        if self._modal_frfing is None:
+            return
+        set_name, modes = self._modal_frfing['key']
+        self._modal_frf_settings = (rate, frame, quantity)
+        extra = {}
+        if quantity != 'acceleration':
+            extra['quantity'] = quantity
+        if modes is not None:
+            extra['modes'] = list(modes)
+        try:
+            added = self.project.synthesize_modal_frfs(
+                set_name, sample_rate=rate, frame_length=frame, **extra)
+        except (ValueError, TypeError) as why:
+            self._show_status(f'{set_name}: {why}')
+            return
+        count = len(self.objects[added].response_dof)
+        self._modal_frfing = None
+        self.data_pane.modal_frf_panel.hide()
+        self.show_object(added)
+        self._show_status(f'{added}: modal {quantity} FRFs of {count} '
+                          f'mode{"s" * (count != 1)} from {set_name}')
 
     # ---- writing a specification at a set's modal coordinates ------------
 
@@ -17081,8 +17261,182 @@ class MainWindow(QMainWindow):
         self.transform_selection('physical')
 
     def expand_act(self) -> None:
-        """The bar's Expand to Physical Responses."""
-        self.transform_selection('modal')
+        """The bar's Expand to Physical Responses: modal FRFs and a
+        channel table open its pane, anything else expands as it is."""
+        key = self._channel_frf_candidates()
+        if key is None:
+            self.transform_selection('modal')
+            return
+        if (self._channel_expanding is not None
+                and self._channel_expanding['key'] == key):
+            self.close_channel_frf_pane()
+            return
+        # one pane beside the plot at a time
+        self._author_wanted = False
+        self._signaling = self._modaling = self._lining = None
+        self._staging = self._modal_frfing = None
+        for panel in (self.data_pane.signal_panel,
+                      self.data_pane.modal_response_panel,
+                      self.data_pane.lines_panel,
+                      self.data_pane.state_space_panel,
+                      self.data_pane.modal_frf_panel):
+            panel.hide()
+        self._channel_expanding = {'key': key, 'tolerance': CHANNEL_TOLERANCE}
+        self.render_current()
+
+    # ---- modal FRFs at a channel table's channels -------------------------
+
+    def _channel_frf_candidates(self):
+        """(FRF name, table name, records) when the selection is one FRF of
+        modal FRFs, whole (records None) or some records picked, and one
+        whole channel table, a geometry allowed beside them, and the
+        project offers Expand on the two; None otherwise."""
+        frfs, tables, picks = [], [], {}
+        for kind, name, obj, detail in self.selected_references():
+            if isinstance(obj, Frf) and kind in ('object', 'record'):
+                if name not in frfs:
+                    frfs.append(name)
+                if kind == 'record':
+                    if picks.get(name, ()) is not None:
+                        picks.setdefault(name, []).append(detail)
+                else:
+                    picks[name] = None
+            elif isinstance(obj, ChannelTable) and kind == 'object':
+                if name not in tables:
+                    tables.append(name)
+            elif isinstance(obj, Geometry) and kind == 'object':
+                continue
+            else:
+                return None
+        if len(frfs) != 1 or len(tables) != 1 or 'expand' not in dict(
+                self.project.selection_verbs(frfs[0], tables[0])):
+            return None
+        records = picks.get(frfs[0])
+        return (frfs[0], tables[0],
+                None if records is None else tuple(sorted(set(records))))
+
+    def close_channel_frf_pane(self) -> None:
+        """Put the pane away."""
+        self._channel_expanding = None
+        self.data_pane.channel_frf_panel.hide()
+        self.render_current()
+
+    def _channel_frf_door(self):
+        """The pane's state while it is open, the selection is still what
+        it was opened on and no other pane has opened; otherwise None,
+        and the pane put away."""
+        if self._channel_expanding is None:
+            return None
+        if (self._channel_frf_candidates() != self._channel_expanding['key']
+                or self._signaling is not None or self._modaling is not None
+                or self._lining is not None or self._staging is not None
+                or self._modal_frfing is not None):
+            self._channel_expanding = None
+            self.data_pane.channel_frf_panel.hide()
+            return None
+        return self._channel_expanding
+
+    def _render_channel_frfs(self) -> str:
+        """The pane beside a preview: the FRFs at each drive point, a
+        response on a reference's DOF, or the first response against each
+        reference when none shares one."""
+        state = self._channel_expanding
+        name, table, records = state['key']
+        panel = self.data_pane.channel_frf_panel
+        panel.show()
+        try:
+            frfs = self.project.channel_frfs(
+                name, table, records=None if records is None else list(records),
+                tolerance=state['tolerance'])
+        except (ValueError, TypeError) as why:
+            panel.show_settings(state['tolerance'], True)
+            panel.show_reading(note=f'Cannot expand: {why}', ready=False)
+            self.data_pane.clear()
+            return f'{name} at {table}: {why}'
+        report = frfs.transform_report
+        panel.show_settings(state['tolerance'], bool(report.projection))
+        modes = len({m for ms in report.shared.values() for m in ms})
+        if report.projection:
+            projection = report.projection
+            geometry = self.project.geometry_for(table)
+            if geometry is not None and geometry[1].units_defined:
+                worst = (f'{self.unit_system.from_si(projection["worst"], "length"):.4g} '
+                         f'{self.unit_system.label_text("length")}')
+            else:
+                worst = f'{projection["worst"]:.4g} model units'
+            shapes = (f'{report.basis}, projected: {projection["matched"]} of '
+                      f'{projection["total"]} nodes, worst {worst}')
+        else:
+            shapes = f"{report.basis}, at its own DOFs"
+        notes = []
+        if report.skipped:
+            notes.append('Not expanded: ' + ', '.join(
+                f'{count} {kind} channel{"s" * (count != 1)}'
+                for kind, count in report.skipped.items()))
+        lower = sorted({frfs.known_dim(i).split('/')[0]
+                        for i in range(frfs.num_records)
+                        if np.isnan(frfs.ordinate[i, 0])})
+        if lower:
+            said = ' and '.join('displacement' if q == 'length' else q
+                                for q in lower)
+            synthesized = next(iter(report.shared))
+            synthesized = ('displacement' if synthesized == 'length'
+                           else synthesized)
+            notes.append(f'The {said} FRFs have no value at 0 Hz: from '
+                         f'modal {synthesized} FRFs that divides by zero '
+                         'frequency')
+        panel.show_reading(
+            modes=str(modes),
+            references=str(len(set(frfs.reference_dof))),
+            responses=str(len(set(frfs.response_dof))),
+            pairs=str(frfs.num_records), shapes=shapes,
+            dropped=', '.join(report.dropped) or 'none',
+            note='; '.join(notes))
+        pairs = [i for i, (row, column) in enumerate(
+            zip(frfs.response_dof, frfs.reference_dof))
+            if row.rstrip('+-') == column.rstrip('+-')]
+        if not pairs:
+            first = frfs.response_dof[0]
+            pairs = [i for i, row in enumerate(frfs.response_dof) if row == first]
+        shown = Frf(frfs.abscissa, frfs.ordinate[pairs],
+                    response_dof=[frfs.response_dof[i] for i in pairs],
+                    reference_dof=[frfs.reference_dof[i] for i in pairs],
+                    ordinate_dim=[frfs.ordinate_dim[i] for i in pairs],
+                    dimension_hint=[frfs.dimension_hint[i] for i in pairs])
+        status = self._render_series([(f'{name} at {table}', shown, None)])
+        said = (f'{name} at {table}: {frfs.num_records} '
+                f'FRF{"s" * (frfs.num_records != 1)} from {modes} '
+                f'mode{"s" * (modes != 1)}')
+        return said + (f' | {status}' if status else '')
+
+    def _channel_frf_edited(self, tolerance: float) -> None:
+        if self._channel_expanding is not None:
+            self._channel_expanding['tolerance'] = tolerance
+            self.render_current()
+
+    def _channel_frf_apply(self, tolerance: float) -> None:
+        """Expand: the project's verb on what the pane is open on, the
+        picks and the tolerance passed only when they differ from the
+        defaults, so the journal's line is what a script would write."""
+        if self._channel_expanding is None:
+            return
+        name, table, records = self._channel_expanding['key']
+        extra = {}
+        if records is not None:
+            extra['records'] = list(records)
+        if abs(tolerance - CHANNEL_TOLERANCE) > 1e-12:
+            extra['tolerance'] = tolerance
+        try:
+            added = self.project.expand(name, table, **extra)
+        except (ValueError, TypeError) as why:
+            self._show_status(f'{name}: {why}')
+            return
+        report = self.objects[added].transform_report
+        self._channel_expanding = None
+        self.data_pane.channel_frf_panel.hide()
+        self.show_object(added)
+        self._show_status(f'{added}: {report.describe()}, through '
+                          f'{report.basis}')
 
     def transform_selection(self, direction: str | None = None) -> None:
         """Transform the selected data through the selected shape set,

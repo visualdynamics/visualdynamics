@@ -69,7 +69,7 @@ HAND_CHECKED = [
     ('g*slinch**0.5', G * math.sqrt(LBF / IN), 0.0),
     ('m/s*kg**0.5', 1.0, 0.0), ('in/s*slinch**0.5', IN * math.sqrt(LBF / IN), 0.0),
     ('m*kg**0.5', 1.0, 0.0), ('in*slinch**0.5', IN * math.sqrt(LBF / IN), 0.0),
-    ('N*kg**0.5', 1.0, 0.0), ('lbf*slinch**0.5', LBF * math.sqrt(LBF / IN), 0.0),
+    ('N/kg**0.5', 1.0, 0.0), ('lbf/slinch**0.5', LBF / math.sqrt(LBF / IN), 0.0),
 ]
 
 

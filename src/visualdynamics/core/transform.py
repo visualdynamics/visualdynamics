@@ -290,6 +290,13 @@ class TransformReport:
     notes : list of str
         Anything else worth a sentence, such as references kept physical
         or cross-quantity terms left out.
+    basis : str or None
+        For modal FRFs expanded at a channel table, the shape set they
+        are of.
+    projection : dict
+        For modal FRFs expanded at a channel table on another geometry,
+        the projection's report (`core.correlate.project_shapes`); empty
+        when the set's own DOFs were read.
     """
 
     shared: dict[str, list[str]] = field(default_factory=dict)
@@ -298,6 +305,8 @@ class TransformReport:
     rank: dict[str, tuple[int, int]] = field(default_factory=dict)
     residual: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    basis: str | None = None
+    projection: dict = field(default_factory=dict)
 
     @property
     def worst_residual(self) -> float:
@@ -892,12 +901,19 @@ def _frf_to_physical(data, shapes, records, report):
         modal_refs = all(_is_modal(f, shapes) for f in references)
         missing = [(names[k], f) for k in modes for f in references
                    if (names[k], f) not in entries]
-        if missing:
+        # each mode against itself alone, as Synthesize Modal FRFs writes
+        # them, is a diagonal matrix: a mode's coordinate does not answer
+        # another mode's force, so the terms not written are zero
+        # (2026-11-11)
+        diagonal = modal_refs and all(u == f for u, f in entries)
+        if missing and not diagonal:
             raise ValueError(
                 f'no FRF between {missing[0][0]} and {missing[0][1]}: the '
                 'modes expand together, so every one needs the same '
                 'references')
+        zero = np.zeros(data.abscissa.size, dtype=complex)
         matrix = np.stack([[data.ordinate[entries[(names[k], f)]]
+                            if (names[k], f) in entries else zero
                             for f in references] for k in modes], axis=0)
         matrix = np.moveaxis(matrix, 2, 0)                  # lines × m × nf
         report.shared[pu] = [names[k] for k in modes]

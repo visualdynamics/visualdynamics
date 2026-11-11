@@ -351,6 +351,11 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_modal': ('core.modal_response.preview_responses, then '
                           'plot_series; Project.compute_modal_responses '
                           'makes them a time history of their own'),
+        '_render_modal_frfs': ('core.modal_frf.synthesize_modal_frfs, then '
+                               'plot_series; Project.synthesize_modal_frfs '
+                               'makes them an FRF of their own'),
+        '_render_channel_frfs': ('Project.channel_frfs, then plot_series; '
+                                 'Project.expand(frfs, table) makes them'),
         '_render_lines': ('core.author.read_onto_lines, then plot_series; '
                           'Project.convert_to_psd(spacing=) converts it'),
         '_render_state_space': ('core.state_space.state_space_model, its '

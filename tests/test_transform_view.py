@@ -65,7 +65,8 @@ def test_the_bar_offers_the_transform_to_the_pair(window, pump, qt_app):
     _select(window, pump, 'Run')
     assert not any('Transform' in a for a in _bar_acts(window))
     _select(window, pump, 'Modes')
-    assert _bar_acts(window) == []
+    assert _bar_acts(window) == ['Synthesize Modal FRFs'], \
+        'a set alone is offered its own FRFs, and no transform'
 
 
 def test_the_entry_makes_the_object_and_shows_it(window, pump):

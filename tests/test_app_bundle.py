@@ -387,11 +387,16 @@ def test_the_packages_carry_numpys_old_module_names():
     in the pickles that hold its elements and tracelines. numpy 2 keeps
     numpy.core as an alias, but nothing imports it, so the packaged app
     had only the three submodules numpy imports itself and could not
-    read the file (2026-11-11)."""
-    from PyInstaller.utils.hooks import collect_submodules
+    read the file (2026-11-11). PyInstaller is the release builds' tool
+    and not in the test environment, so the submodules it would collect
+    are read where it reads them, the package's own path."""
+    import pkgutil
+
+    import numpy.core
 
     root = pathlib.Path(__file__).resolve().parent.parent
     spec = (root / 'packaging' / 'visualdynamics.spec'
             ).read_text(encoding='utf-8')
     assert "*collect_submodules('numpy.core')," in spec
-    assert 'numpy.core.multiarray' in collect_submodules('numpy.core')
+    assert 'multiarray' in {module.name for module
+                            in pkgutil.iter_modules(numpy.core.__path__)}

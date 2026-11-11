@@ -49,6 +49,14 @@ HIDDEN = [
     'PySide6.QtWebEngineWidgets', 'PySide6.QtWebChannel',
     'PySide6.QtOpenGL', 'PySide6.QtSvg',
     'netCDF4', 'h5py', 'openpyxl', 'pandas', 'pint',
+    # numpy 2 keeps numpy.core as an alias of numpy._core for old
+    # pickles, and an sdynpy geometry saved under numpy 1 stores its
+    # elements and tracelines as pickles that name
+    # numpy.core.multiarray. Nothing here imports the alias, so the
+    # analysis took only the three submodules numpy imports itself, and
+    # every such geometry failed in the packaged app with "No module
+    # named 'numpy.core.multiarray'" while reading from source (2026-11-11)
+    *collect_submodules('numpy.core'),
 ]
 
 # Weight that earns nothing in a shipped application: development

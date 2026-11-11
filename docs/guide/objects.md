@@ -32,10 +32,20 @@ element group each element belongs to (`elem_group`) with the group
 names (`group_name`). `nodes`, `coordinate_systems`, `elements` and
 `groups` are row views onto those arrays and are what a script usually
 uses; writing through a row writes the array.
+A node's coordinates are relative to the system it is placed in: the
+node table's X, Y and Z are in each node's Placement CS (r, θ and z in
+a cylindrical system, r, θ and φ in a spherical one, angles in
+degrees), and `node_local_xyz` and `set_node_local_xyz` read and write
+them from a script. Positions are stored in global (`node_xyz`), and
+`add_node` takes global coordinates.
 `geometry.place_coordinate_system(cs_id, angles=(x, y, z), origin=...)`
 turns or moves a coordinate system, with the angles in degrees about
-the fixed X, then Y, then Z axes. It is the same call the 3-D view's
-rings and arrows make when a turn or a slide ends. The coordinate
+the fixed X, then Y, then Z axes, and the nodes placed in it move with
+it. It is the same call the 3-D view's rings and arrows make when a
+turn or a slide ends. A node given another placement system
+(`set_node_placement`), a system given another type
+(`set_coordinate_system_type`) and a deleted system's nodes all keep
+their numbers, so those nodes move to where the numbers now put them. The coordinate
 systems table shows those angles as Rotation X, Y and Z, beside the
 origin, and an angle typed there turns the system. X and Z read from
 -180° to 180° and Y from -90° to 90°. At a quarter turn about Y, the X

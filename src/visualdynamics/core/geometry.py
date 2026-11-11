@@ -1258,7 +1258,8 @@ class Geometry:
                                 angles: ArrayLike | None = None,
                                 rotation: ArrayLike | None = None) -> None:
         """Rotate a coordinate system, move it, or both, as the 3-D
-        view's rings and arrows do.
+        view's rings and arrows do. The nodes placed in it move with it,
+        keeping their coordinates in it.
 
         Raises KeyError for an unknown `cs_id`, and ValueError when both
         `angles` and `rotation` are given.
@@ -1292,12 +1293,129 @@ class Geometry:
             raise ValueError('give the turn as angles or as a rotation, '
                              'not both')
         row = int(rows[0])
+        before = self.cs_matrix[row].copy()
         if angles is not None:
             self.cs_matrix[row, :3] = frame_from_angles(angles)[:3]
         elif rotation is not None:
             self.cs_matrix[row, :3] = np.asarray(rotation, dtype=np.float64)
         if origin is not None:
             self.cs_matrix[row, 3] = np.asarray(origin, dtype=np.float64)
+        self._carry_nodes(row, before)
+
+    def _carry_nodes(self, row: int, before: np.ndarray) -> None:
+        """Move the nodes placed in the system at `row` with it, from
+        where it was (`before`, its (4, 3) frame) to where it is, so their
+        coordinates in it stay as they were."""
+        # Brandon, 2026-11-11: a node's coordinates are relative to its
+        # placement system, as a universal file, Nastran and sdynpy hold
+        # them, so a system moved or turned takes its nodes along. The
+        # nodes stayed put in global until then, and only their local
+        # coordinates changed.
+        placed_here = self.node_def_cs == int(self.cs_id[row])
+        if not placed_here.any():
+            return
+        local = (self.node_xyz[placed_here] - before[3]) @ before[:3].T
+        self.node_xyz[placed_here] = (self.cs_matrix[row, 3]
+                                      + local @ self.cs_matrix[row, :3])
+
+    def set_coordinate_system_type(self, cs_id: int, cs_type: int) -> None:
+        """Make a coordinate system cartesian (0), cylindrical (1) or
+        spherical (2). The nodes placed in it keep their coordinates,
+        which now mean (r, theta, z) or (r, theta, phi), so they move.
+
+        Raises KeyError for an unknown `cs_id`, and ValueError for a type
+        that is none of the three.
+
+        Parameters
+        ----------
+        cs_id : int
+            Which coordinate system.
+        cs_type : int
+            0 cartesian, 1 cylindrical, 2 spherical.
+
+        Returns
+        -------
+        None
+        """
+        if int(cs_type) not in CS_TYPES:
+            raise ValueError(f'a coordinate system type is one of '
+                             f'{sorted(CS_TYPES)}, not {cs_type}')
+        rows = np.flatnonzero(self.cs_id == int(cs_id))
+        if not len(rows):
+            raise KeyError(f'no coordinate system {int(cs_id)}')
+        local = self.node_local_xyz()
+        self.cs_type[int(rows[0])] = int(cs_type)
+        placed_here = self.node_def_cs == int(cs_id)
+        self.node_xyz[placed_here] = to_global(
+            local[placed_here], self.node_def_cs[placed_here], self.cs_id,
+            self.cs_type, self.cs_matrix)
+
+    def node_local_xyz(self, rows: Ids | None = None) -> np.ndarray:
+        """Each node's coordinates in the coordinate system it is placed
+        in, as the node table shows them: (x, y, z) in a cartesian system,
+        (r, theta, z) in a cylindrical one and (r, theta, phi) in a
+        spherical one, angles in degrees.
+
+        Parameters
+        ----------
+        rows : sequence of int, optional
+            Which nodes, by row; all of them when omitted.
+
+        Returns
+        -------
+        numpy.ndarray
+            (nodes, 3).
+        """
+        picked = (slice(None) if rows is None
+                  else np.atleast_1d(np.asarray(rows, dtype=int)))
+        return to_local(self.node_xyz[picked], self.node_def_cs[picked],
+                        self.cs_id, self.cs_type, self.cs_matrix)
+
+    def set_node_local_xyz(self, row: int, xyz: ArrayLike) -> None:
+        """Place the node at `row` at `xyz`, given in the coordinate
+        system it is placed in (`node_local_xyz`).
+
+        Parameters
+        ----------
+        row : int
+            The node's row.
+        xyz : array_like
+            Its three coordinates in its placement system.
+
+        Returns
+        -------
+        None
+        """
+        self.node_xyz[int(row)] = to_global(
+            [xyz], [self.node_def_cs[int(row)]], self.cs_id, self.cs_type,
+            self.cs_matrix)[0]
+
+    def set_node_placement(self, rows: Ids, cs_id: int) -> None:
+        """Place nodes in another coordinate system, keeping their
+        coordinates: the same numbers, now in `cs_id`, so the nodes move
+        to where those numbers put them.
+
+        Raises ValueError for a system the geometry does not have.
+
+        Parameters
+        ----------
+        rows : int or sequence of int
+            The nodes, by row.
+        cs_id : int
+            The coordinate system to place them in.
+
+        Returns
+        -------
+        None
+        """
+        if int(cs_id) not in self.cs_id:
+            raise ValueError(f'no coordinate system {int(cs_id)}')
+        rows = np.atleast_1d(np.asarray(rows, dtype=int))
+        local = self.node_local_xyz(rows)
+        self.node_def_cs[rows] = int(cs_id)
+        self.node_xyz[rows] = to_global(local, self.node_def_cs[rows],
+                                        self.cs_id, self.cs_type,
+                                        self.cs_matrix)
 
     def add_beams(self, node_ids: Ids, group: int | None = None,
                   color: int = 1, elem_type: int = 21) -> int:
@@ -2533,8 +2651,9 @@ class Geometry:
         return {'moved': len(moves), 'farthest': farthest}
 
     def delete_coordinate_systems(self, cs_ids: Ids) -> dict[str, int]:
-        """Remove coordinate systems, and move the nodes that used them to
-        the first remaining system.
+        """Remove coordinate systems, and give the nodes that used them to
+        the first remaining system. A node placed in a removed system keeps
+        its coordinates, now in the remaining one, so it moves.
 
         Ids that are not present are ignored. Removing every coordinate
         system is refused with ValueError, since every node needs one.
@@ -2560,6 +2679,11 @@ class Geometry:
             return {'coordinate_systems': 0, 'nodes_reassigned': 0}
 
         fallback = int(self.cs_id[keep][0])
+        # the numbers kept, as everywhere a node's placement changes
+        # (Brandon, 2026-11-11: "Keep the numbers on delete too, nodes
+        # should move")
+        orphaned = np.flatnonzero(np.isin(self.node_def_cs, list(wanted)))
+        local = self.node_local_xyz(orphaned)
         reassigned = 0
         for name in ('node_def_cs', 'node_disp_cs'):
             array = getattr(self, name)
@@ -2570,6 +2694,9 @@ class Geometry:
         self.cs_type = self.cs_type[keep]
         self.cs_matrix = self.cs_matrix[keep]
         self.cs_name = [name for name, k in zip(self.cs_name, keep) if k]
+        self.node_xyz[orphaned] = to_global(
+            local, self.node_def_cs[orphaned], self.cs_id, self.cs_type,
+            self.cs_matrix)
         return {'coordinate_systems': removed, 'nodes_reassigned': reassigned}
 
     def _rows_for(self, ids, id_array):

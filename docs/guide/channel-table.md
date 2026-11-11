@@ -110,6 +110,7 @@ mesh.
 | PCB 356A43 | triaxial accelerometer | 10.2 cube, 19.1 over the connector |
 | PCB 352A24 | uniaxial accelerometer | teardrop, 9.9 long, 7.1 round end, 4.8 high |
 | PCB 352A73 | uniaxial accelerometer | 6.75 × 3.96 × 2.8, round nose, cable out of the flat end |
+| PCB 352A71 | uniaxial accelerometer | 10.4 × 6.4 × 3.6, round nose, cable out of the flat end |
 | PCB 208C01 to 208C05 | force transducer | 15.88 hex, 15.88 tall, a stud each end |
 
 A model that is not in this list is still drawn, as a plain cube for an

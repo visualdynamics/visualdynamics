@@ -107,6 +107,50 @@ def test_a_geometry_archive_needs_only_its_nodes_and_frames(tmp_path):
     assert len(visualdynamics.import_file(whole).elem_conn) == 1
 
 
+def _as_numpy_one_wrote_it(path):
+    """Rewrite each pickled member of an archive as numpy 1 did: protocol
+    2, whose module names are plain text, naming numpy.core where numpy
+    2 names numpy._core."""
+    import io
+    import pickle
+    import zipfile
+
+    import numpy as np
+
+    members = {}
+    with zipfile.ZipFile(path) as archive:
+        for name in archive.namelist():
+            members[name] = archive.read(name)
+    for name, data in members.items():
+        array = np.load(io.BytesIO(data), allow_pickle=True)
+        if not array.dtype.hasobject:
+            continue
+        out = io.BytesIO()
+        np.lib.format.write_array_header_1_0(
+            out, np.lib.format.header_data_from_array_1_0(array))
+        out.write(pickle.dumps(array, protocol=2).replace(
+            b'numpy._core', b'numpy.core'))
+        members[name] = out.getvalue()
+    with zipfile.ZipFile(path, 'w') as archive:
+        for name, data in members.items():
+            archive.writestr(name, data)
+    return members
+
+
+def test_a_geometry_numpy_one_wrote_is_read(tmp_path):
+    """An sdynpy geometry saved under numpy 1 names numpy.core.multiarray
+    in the pickles holding its elements and tracelines; numpy 2 reads it
+    through its alias, which the packaged app has to carry
+    (test_app_bundle)."""
+    whole = _geometry_archive(tmp_path / 'old.npz')
+    members = _as_numpy_one_wrote_it(whole)
+    assert b'numpy.core.multiarray' in members['element.npy']
+    assert b'numpy._core' not in members['element.npy']
+    geometry = visualdynamics.import_file(whole)
+    assert isinstance(geometry, Geometry)
+    assert len(geometry.elem_conn) == 1
+
+
 def test_the_other_sdynpy_archives_are_left_alone(tmp_path):
     """Two names a geometry cannot be without, and no other sdynpy
     save carries both."""

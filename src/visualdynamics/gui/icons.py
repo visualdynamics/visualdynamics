@@ -963,6 +963,22 @@ def _draw_resample(painter, color):
         painter.drawEllipse(QPointF(x, y), 4.0, 4.0)
 
 
+def _draw_rescale(painter, color):
+    """A wave, faint, and the same wave twice as tall, bold: the
+    rescale reading's button, a record's channels times a factor."""
+    faint = QColor(color)
+    faint.setAlpha(110)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(faint, 3))
+    painter.drawPath(_curve([(6 + i, 32 - 10 * math.sin(2 * math.pi * 1.5
+                                                         * i / 52))
+                             for i in range(53)]))
+    painter.setPen(_pen(color, 5))
+    painter.drawPath(_curve([(6 + i, 32 - 22 * math.sin(2 * math.pi * 1.5
+                                                         * i / 52))
+                             for i in range(53)]))
+
+
 def _draw_statistics(painter, color):
     """A histogram under its bell, with a bar standing at each edge.
 
@@ -2685,7 +2701,8 @@ def control_icon(name: str) -> QIcon:
      'segments': _draw_segments,
      'pulse': _draw_pulse,
      'stroke': _draw_stroke,
-     'resample': _draw_resample, 'overload': _draw_overload,
+     'resample': _draw_resample, 'rescale': _draw_rescale,
+     'overload': _draw_overload,
      'residual': _draw_residual,
      'report': _draw_report,
      'bars': _draw_bars, 'percent_bars': _draw_percent_bars,

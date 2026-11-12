@@ -65,7 +65,8 @@ def readings(pane):
             'pulse': pane.pulse_action,
             'fit': pane.fit_action,
             'stroke': pane.stroke_action,
-            'resample': pane.resample_action}
+            'resample': pane.resample_action,
+            'rescale': pane.rescale_action}
 
 
 def test_the_readings_are_one_exclusive_group(pane):
@@ -103,12 +104,12 @@ def test_nothing_else_sits_inside_the_fence(pane):
                                       'kurtosis', 'statistics', 'amplitude',
                                       'overload', 'shocks',
                                       'wavelet', 'pulse', 'fit', 'stroke',
-                                      'resample'])
+                                      'resample', 'rescale'])
 @pytest.mark.parametrize('chosen', ['averaging', 'filter', 'truncate',
                                     'kurtosis', 'statistics', 'amplitude',
                                     'overload', 'shocks',
                                     'wavelet', 'pulse', 'fit', 'stroke',
-                                    'resample'])
+                                    'resample', 'rescale'])
 def test_choosing_one_puts_the_others_down(pane, pump, standing, chosen):
     """The exclusion itself, from every direction to every other.
 
@@ -138,7 +139,7 @@ def test_choosing_one_puts_the_others_down(pane, pump, standing, chosen):
                                     'kurtosis', 'statistics', 'amplitude', 'overload',
                                     'shocks',
                                     'wavelet', 'pulse', 'fit', 'stroke',
-                                    'resample'])
+                                    'resample', 'rescale'])
 def test_the_flags_follow_the_buttons(pane, pump, chosen):
     """The flags the drawing code reads, which the old version updated
     by hand in each handler."""
@@ -158,7 +159,8 @@ def test_the_flags_follow_the_buttons(pane, pump, chosen):
              'pulse': pane.pulse_wanted,
              'fit': pane.fit_wanted,
              'stroke': pane.stroke_wanted,
-             'resample': pane.resample_wanted}
+             'resample': pane.resample_wanted,
+             'rescale': pane.rescale_wanted}
     assert flags == {name: name == chosen for name in flags}
 
 

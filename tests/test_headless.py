@@ -302,6 +302,7 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_replication_fit': 'plot_replication_fit',
         '_render_stroke': 'plot_stroke',
         '_render_resample': 'plot_resample',
+        '_render_rescale': 'plot_series([history, history.rescale(f)])',
         '_render_prediction': 'plot_drive_prediction',
         '_render_notch': 'plot_limit_prediction',
         '_render_partial_coherence': 'plot_partial_coherence',

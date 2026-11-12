@@ -1211,6 +1211,7 @@ class MainWindow(QMainWindow):
         self.data_pane.truncate_panel.apply_asked.connect(
             self.truncate_data)
         self.data_pane.resample_panel.apply_asked.connect(self.resample_data)
+        self.data_pane.rescale_panel.apply_asked.connect(self.rescale_data)
         # the specification draft: every edit re-previews, the button
         # makes the object. A specification opened to edit is drawn on
         # the plot, so its toggle sits on the plot's own bar
@@ -16121,7 +16122,8 @@ class MainWindow(QMainWindow):
                                 ('overload', self._render_overload),
                                 ('pulse', self._render_pulse),
                                 ('stroke', self._render_stroke),
-                                ('resample', self._render_resample)):
+                                ('resample', self._render_resample),
+                                ('rescale', self._render_rescale)):
                 if self.data_pane.showing(key):
                     return render(history, series[0][0], series[0][2])
         for check in ('conditioning', 'realizability'):
@@ -23101,6 +23103,89 @@ class MainWindow(QMainWindow):
                 f'{prefix}, {reading.rate!r}, {channel}{given}, '
                 "path='resample.png', show=False)")
         return summary(reading)
+
+    def _rescale_factor(self) -> float:
+        """The factor the rescale panel gives: typed, or the recorded
+        sensitivity over the correct one."""
+        from ..core.rescale import sensitivity_factor
+
+        settings = self.data_pane.rescale_panel.settings()
+        if settings['way'] == 'factor':
+            return settings['factor']
+        return sensitivity_factor(settings['recorded'], settings['correct'])
+
+    def _render_rescale(self, history, name=None, records=None):
+        """The picked records (every record when none are) as recorded
+        and as the rescale panel would make them, on the same axes, the
+        rescaled ones named so in the legend. The records are drawn the
+        way `build_plots` draws any two objects; the readout gives the
+        factor, the records it reaches and the largest value of each."""
+        from ..core.rescale import chosen_records
+        from ..plot import build_plots
+
+        panel = self.data_pane.rescale_panel
+        panel.set_settings(self.data_pane.rescale_settings)
+        panel.show()
+        self.data_pane.offer_waterfall(False)
+        self.data_pane.show_waterfall(False)
+        try:
+            factor = self._rescale_factor()
+            made = history.rescale(factor, records)
+        except ValueError as error:
+            panel.show_reading(None)
+            self.data_pane.graphics.clear()
+            return str(error)
+        chosen = chosen_records(history, records)
+        build_plots(self.data_pane.graphics,
+                    [('Recorded', history, chosen), ('Rescaled', made, chosen)],
+                    unit_system=self.unit_system, theme=self.theme_name)
+        reading = {'factor': f'{factor:g}',
+                   'records': f'{len(chosen)} of {history.num_records}'}
+        # in the display unit where the records share one declared
+        # quantity; the stored numbers otherwise
+        dims = {history.ordinate_dim[i] for i in chosen}
+        dim = dims.pop() if len(dims) == 1 else None
+        if dim == 'unknown':
+            dim = None
+        for key, data in (('before', history), ('after', made)):
+            largest = float(np.max(np.abs(data.ordinate[chosen])))
+            if dim is not None:
+                reading[key] = (f'{float(self.unit_system.from_si(largest, dim)):.4g} '
+                                f'{self.unit_system.unit(dim)}')
+            else:
+                reading[key] = f'{largest:.4g}'
+        panel.show_reading(reading)
+        return (f'{len(chosen)} of {history.num_records} records '
+                f'\N{MULTIPLICATION SIGN} {factor:g}')
+
+    def rescale_data(self) -> None:
+        """Make the selected time history with its picked records (all
+        of them when none are) rescaled as the rescale panel says, and
+        add it beside the source (`Project.rescale`)."""
+        obj = self.current_object()
+        if not isinstance(obj, TimeHistory):
+            self._show_status('Select a time history to rescale')
+            return
+        name = self.object_item().text(0)
+        picked = sorted({detail for kind, which, _obj, detail
+                         in self.selected_references()
+                         if which == name and kind != 'object'})
+        settings = self.data_pane.rescale_panel.settings()
+        given = ({'factor': settings['factor']} if settings['way'] == 'factor'
+                 else {'recorded_sensitivity': settings['recorded'],
+                       'correct_sensitivity': settings['correct']})
+        verb = self.project.rescale
+        acted = self._act_on(
+            TimeHistory, 'Select a time history to rescale',
+            lambda source: verb(source, records=picked or None, **given))
+        if acted is None:
+            return
+        _name, _obj, added = acted
+        self.show_object(added)
+        count = len(picked) or obj.num_records
+        self._show_status(f'{added}: {count} of {obj.num_records} records '
+                          f'\N{MULTIPLICATION SIGN} '
+                          f'{self.project.provenance[added]["params"]["factor"]:g}')
 
     def _settle_on_record(self, name, history, records, channel):
         """Settle the tree onto the one record a reading is drawn for,

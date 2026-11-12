@@ -71,6 +71,7 @@ from .profile_panel import ProfilePanel
 from .pulse_panel import PulsePanel
 from .replication_fit_panel import ReplicationFitPanel
 from .resample_panel import ResamplePanel
+from .rescale_panel import RescalePanel
 from .rms_check_panel import RmsCheckPanel
 from .segments_panel import SegmentsPanel
 from .settings_panel import PANEL_WIDTH
@@ -388,6 +389,12 @@ class DataPane(QWidget):
         #: the factor, filter order, frame and folded frequencies, kept
         #: across redraws so they survive clicking away and back
         self.resample_settings: dict[str, Any] | None = None
+        #: and the rescale, the same way: some or all of the channels
+        #: times a factor, the recorded and rescaled traces one over the
+        #: other
+        self.rescale_wanted: bool = False
+        #: how the factor is given and its values, kept across redraws
+        self.rescale_settings: dict[str, Any] | None = None
         #: where its band has been dragged to, if it has
         self.kurtosis_bounds: tuple[float, float] | None = None
         #: 'curves', 'error', 'lines', 'chance' or 'composite' — kept
@@ -566,6 +573,9 @@ class DataPane(QWidget):
         # that shows what they do; read only, nothing to apply
         self.resample_panel: ResamplePanel = ResamplePanel()
         self.resample_panel.hide()
+        # the factor beside the traces it rescales
+        self.rescale_panel: RescalePanel = RescalePanel()
+        self.rescale_panel.hide()
         for reading in self._READINGS:
             if reading.sticky:
                 getattr(self, reading.panel).changed.connect(
@@ -657,6 +667,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.replication_fit_panel)
         plot_row.addWidget(self.stroke_panel)
         plot_row.addWidget(self.resample_panel)
+        plot_row.addWidget(self.rescale_panel)
         #: every pane that sits beside the plot, the sheet's included
         self._side_panels: list[QWidget] = [
             self.author_panel,
@@ -1191,6 +1202,17 @@ class DataPane(QWidget):
             'content above the new Nyquist frequency folds')
         self.resample_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.resample_action)
+        # some or all of the channels times a factor: the correction for
+        # data recorded with the wrong sensitivity (2026-11-12)
+        self.rescale_action: QAction = QAction(control_icon('rescale'),
+                                               'Rescale', self)
+        self.rescale_action.setCheckable(True)
+        self.rescale_action.setToolTip(
+            'Multiply the picked channels by a factor, typed or worked '
+            'out from the sensitivity they were recorded with and the '
+            'correct one')
+        self.rescale_action.triggered.connect(self._choose_reading)
+        toolbar.addAction(self.rescale_action)
         for reading in self._READINGS:
             self.reading_group.addAction(
                 getattr(self, f'{reading.key}_action'))
@@ -1584,6 +1606,9 @@ class DataPane(QWidget):
         # offered where the averaging is: a record with a sample rate
         # to lower, read on its spectrum, which has no 3-D form here
         Reading('resample', 'resample_panel', 'averaging', flat=True,
+                sticky=True),
+        # any time history: a factor needs no sample rate
+        Reading('rescale', 'rescale_panel', 'record', flat=True,
                 sticky=True),
     )
 

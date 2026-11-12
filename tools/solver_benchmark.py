@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import platform
+import signal
 import subprocess
 import sys
 import time
@@ -69,6 +70,33 @@ print(json.dumps({'dof': int(model.num_dof), 'backend': used[0] if used else '?'
 '''
 
 
+def failure(returncode: int, stdout: str, stderr: str) -> str:
+    """What a case that did not exit cleanly died of: the signal or exit
+    code, whether it had printed its result (a crash on the way out
+    rather than in the solve), and the last line it wrote to stderr,
+    or to stdout when stderr has nothing."""
+    # a case died on a Linux runner with nothing on stderr, and the
+    # exit code was all there was to tell a crash from an exception
+    # (2026-11-12). oneMKL writes its fatal errors to stdout and exits
+    # 2 ("Cannot load libmkl_core.so.3", seen on the media server with
+    # the address space held to 600 MB), which reads the same way
+    if returncode < 0:
+        try:
+            how = signal.Signals(-returncode).name
+        except ValueError:
+            how = f'signal {-returncode}'
+    elif returncode > 0xFFFF:
+        how = f'exit 0x{returncode:08X}'
+    else:
+        how = f'exit {returncode}'
+    lines = stdout.strip().splitlines()
+    printed = bool(lines) and lines[-1].startswith('{')
+    if printed:
+        how += ' after printing its result'
+    tail = stderr.strip().splitlines() or ([] if printed else lines)
+    return f'failed: {how}' + (f', {tail[-1][:120]}' if tail else ', nothing on stderr')
+
+
 def run_case(dims: tuple[int, int, int], modes: int, superlu: bool,
              timeout: float) -> dict:
     environment = dict(os.environ)
@@ -76,14 +104,17 @@ def run_case(dims: tuple[int, int, int], modes: int, superlu: bool,
         environment['VISUALDYNAMICS_SPARSE_SOLVER'] = 'superlu'
     started = time.perf_counter()
     try:
-        done = subprocess.run([sys.executable, '-c', CASE, *map(str, dims), str(modes)],
+        # faulthandler, so a crash in the native solver says where it was
+        done = subprocess.run([sys.executable, '-X', 'faulthandler', '-c', CASE,
+                               *map(str, dims), str(modes)],
                               capture_output=True, text=True, timeout=timeout,
                               env=environment, check=False)
     except subprocess.TimeoutExpired:
         return {'outcome': f'stopped after {timeout / 60:.0f} min'}
     if done.returncode != 0:
-        tail = (done.stderr.strip().splitlines() or ['no output'])[-1]
-        return {'outcome': f'failed: {tail[:120]}',
+        # the whole of it, which a test's failure report shows
+        sys.stderr.write(done.stdout + done.stderr)
+        return {'outcome': failure(done.returncode, done.stdout, done.stderr),
                 'wall_s': time.perf_counter() - started}
     result = json.loads(done.stdout.strip().splitlines()[-1])
     result['outcome'] = 'solved'

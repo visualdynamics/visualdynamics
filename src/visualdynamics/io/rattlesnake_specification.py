@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from ..core.data import Specification, direction_code, dof_string, parse_dof
+from .plain_numpy import PlainNpz
 from .sniffing import npz_has
 
 if TYPE_CHECKING:                                    # pragma: no cover
@@ -64,7 +65,7 @@ _COORDINATE = np.dtype([('node', '<u8'), ('direction', 'i1')])
 
 
 def sniff(path: str | os.PathLike) -> bool:
-    return npz_has(path, {'f', 'cpsd'}, allow_pickle=False)
+    return npz_has(path, {'f', 'cpsd'})
 
 
 def handles(obj: Any) -> bool:
@@ -176,7 +177,7 @@ def load(path: str | os.PathLike,
     Raises ValueError when `cpsd` is not `(lines, n, n)` over the
     frequency lines, or the channel names do not match its size.
     """
-    with np.load(path, allow_pickle=False) as d:
+    with PlainNpz(path) as d:
         frequencies = np.asarray(d['f'], dtype=np.float64).reshape(-1)
         cpsd = np.conj(np.asarray(d['cpsd']))    # to conj(X)·Y, as `save`
         if cpsd.ndim != 3 or cpsd.shape[1] != cpsd.shape[2] \

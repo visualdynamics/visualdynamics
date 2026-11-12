@@ -49,6 +49,7 @@ from ..core.data import (
     dof_string,
     parse_dof,
 )
+from .plain_numpy import PlainNpz
 from .sniffing import npz_has
 
 
@@ -59,7 +60,7 @@ def sniff(path: str | os.PathLike) -> bool:
 def load(path: str | os.PathLike, ordinate_unit: str | None = None,
          response_unit: str | None = None,
          reference_unit: str | None = None) -> DataArray:
-    with np.load(path, allow_pickle=True) as d:
+    with PlainNpz(path) as d:
         function_type = int(d['function_type'])
         data = d['data']
 

@@ -1,7 +1,7 @@
 """Read and write sdynpy geometry files (.npz).
 
 The format is a NumPy .npz archive of structured arrays (self-describing;
-read with np.load):
+read with `plain_numpy`, because the connectivity columns are pickled):
 
 - node: id, coordinate (3,), color, def_cs, disp_cs;
 - coordinate_system: id, name, color, cs_type, matrix (4, 3), where
@@ -31,6 +31,7 @@ import numpy as np
 
 from ..core.geometry import Geometry, to_global, to_local
 from ..units import si_factor
+from .plain_numpy import PlainNpz
 from .sniffing import npz_has
 
 
@@ -53,11 +54,13 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
     """
     scale = 1.0 if length_unit is None else si_factor(length_unit, 'length')
 
-    with np.load(path, allow_pickle=True) as d:
+    with PlainNpz(path) as d:
         node = d['node']
         cs = d['coordinate_system']
-        tl = d['traceline'] if 'traceline' in d else np.empty(0, TRACELINE_DTYPE)
-        el = d['element'] if 'element' in d else np.empty(0, ELEMENT_DTYPE)
+        tl = (d.with_objects('traceline') if 'traceline' in d
+              else np.empty(0, TRACELINE_DTYPE))
+        el = (d.with_objects('element') if 'element' in d
+              else np.empty(0, ELEMENT_DTYPE))
 
     raw = cs['matrix'].astype(np.float64)
     matrix = raw.copy()

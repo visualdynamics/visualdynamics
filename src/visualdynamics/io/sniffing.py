@@ -30,20 +30,19 @@ def text_head(path: str | os.PathLike, size: int = 65536) -> str | None:
         return None
 
 
-def npz_has(path: str | os.PathLike, keys: Iterable[str], *,
-            allow_pickle: bool = True) -> bool:
+def npz_has(path: str | os.PathLike, keys: Iterable[str]) -> bool:
     """True when `path` is an `.npz` holding every one of `keys`; False
     for any other file, or one that cannot be read.
 
-    `allow_pickle` is the caller's choice: the Rattlesnake specification
-    is plain arrays and refuses pickles, while the sdynpy formats hold
-    object arrays.
+    Only the archive's list of names is read. A sniff never unpickles: it
+    runs on any file that is dropped or listed, before anyone has asked
+    for it to be read.
     """
     if not str(path).endswith('.npz'):
         return False
     try:
         import numpy as np
-        with np.load(path, allow_pickle=allow_pickle) as d:
+        with np.load(path, allow_pickle=False) as d:
             return set(keys) <= set(d.files)
     except Exception:  # noqa: BLE001 - sniffers must not raise on foreign files
         return False
@@ -60,7 +59,7 @@ def npz_summary(path: str | os.PathLike) -> str | None:
     try:
         import numpy as np
 
-        with np.load(path, allow_pickle=True) as d:
+        with np.load(path, allow_pickle=False) as d:
             names = sorted(d.files)
         said = f'an npz archive holding {len(names)} array'
         said += 's' if len(names) != 1 else ''
@@ -72,12 +71,32 @@ def npz_summary(path: str | os.PathLike) -> str | None:
         return 'an npz archive that could not be read'
 
 
+def npy_summary(path: str | os.PathLike) -> str | None:
+    """Why a `.npy` is not read, when that is something other than being
+    the wrong array: it holds objects, or is not a NumPy file at all. None
+    for anything else."""
+    if not str(path).lower().endswith('.npy'):
+        return None
+    from .plain_numpy import npy_dtype
+
+    try:
+        holds_objects = npy_dtype(path).hasobject
+    except OSError:
+        return None
+    except ValueError:
+        return 'a .npy that is not a NumPy file'
+    if holds_objects:
+        return ('a NumPy file of Python objects, which could run code from '
+                'the file if read, so it was not')
+    return None
+
+
 def describe(path: str | os.PathLike) -> str | None:
     """What a file is, for an error message: `npz_summary` for an `.npz`,
-    None for anything else.
+    `npy_summary` for a `.npy`, None for anything else.
 
     An `.npz` is a container whose contents decide which reader takes it,
     and an error that names only the path cannot tell the wrong file
     from an unsupported one.
     """
-    return npz_summary(path)
+    return npz_summary(path) or npy_summary(path)

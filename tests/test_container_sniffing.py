@@ -109,8 +109,9 @@ def test_a_geometry_archive_needs_only_its_nodes_and_frames(tmp_path):
 
 def _as_numpy_one_wrote_it(path):
     """Rewrite each pickled member of an archive as numpy 1 did: protocol
-    2, whose module names are plain text, naming numpy.core where numpy
-    2 names numpy._core."""
+    3, whose module names are plain text, naming numpy.core where numpy
+    2 names numpy._core. (Protocol 2 would pickle the bytes through
+    _codecs, which numpy never wrote and the restricted reader refuses.)"""
     import io
     import pickle
     import zipfile
@@ -128,7 +129,7 @@ def _as_numpy_one_wrote_it(path):
         out = io.BytesIO()
         np.lib.format.write_array_header_1_0(
             out, np.lib.format.header_data_from_array_1_0(array))
-        out.write(pickle.dumps(array, protocol=2).replace(
+        out.write(pickle.dumps(array, protocol=3).replace(
             b'numpy._core', b'numpy.core'))
         members[name] = out.getvalue()
     with zipfile.ZipFile(path, 'w') as archive:

@@ -36,11 +36,15 @@ from PySide6.QtGui import (
     QFont,
     QPainter,
     QPaintEvent,
+    QPalette,
     QPen,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QProxyStyle,
+    QStyle,
+    QStyleOptionViewItem,
     QTreeWidget,
     QTreeWidgetItem,
     QWidget,
@@ -318,6 +322,49 @@ def _drag_folder() -> str:
 GUTTER_TEXT_X = 22
 
 
+class NoRowMarkerStyle(QProxyStyle):
+    """The platform's style, without the Windows 11 style's selection
+    marker on a tree row.
+
+    That style marks each selected row with a short bar in the accent
+    color, 3.5 px in from the left edge: the gutter the link brackets
+    are drawn in, where it reads as a piece of a blue bracket. The
+    marker is the only thing the row panel draws in the accent color
+    while the rows do not alternate, so the row is drawn with the
+    accent made transparent. The selection highlight is drawn as
+    before.
+    """
+    # Seen on a friend's Windows machine, 2026-11-12: two groups, orange
+    # and green, and short blue bars on the selected rows. Qt's
+    # qwindows11style.cpp, PE_PanelItemViewRow, in 6.10, 6.12 and dev.
+
+    def drawPrimitive(self, element: Any, option: Any, painter: Any,
+                      widget: Any = None) -> None:
+        if element == QStyle.PrimitiveElement.PE_PanelItemViewRow:
+            option = QStyleOptionViewItem(option)
+            palette = option.palette
+            for group in (QPalette.ColorGroup.Active,
+                          QPalette.ColorGroup.Inactive,
+                          QPalette.ColorGroup.Disabled):
+                palette.setColor(group, QPalette.ColorRole.Accent,
+                                 QColor(0, 0, 0, 0))
+            option.palette = palette
+        super().drawPrimitive(element, option, painter, widget)
+
+
+def drop_row_marker(tree: QWidget) -> bool:
+    """Put `NoRowMarkerStyle` on `tree` when it is drawn by the Windows
+    11 style, and say whether it did; any other style draws no marker
+    and is left alone."""
+    style = tree.style()
+    if isinstance(style, NoRowMarkerStyle) or style.name().lower() != 'windows11':
+        return False
+    marker_free = NoRowMarkerStyle(style.name())
+    marker_free.setParent(tree)
+    tree.setStyle(marker_free)
+    return True
+
+
 class ProjectTree(QTreeWidget):
     """The tree of the project's objects.
 
@@ -357,6 +404,7 @@ class ProjectTree(QTreeWidget):
         # decide what a drop *means*.
         self.setDragEnabled(True)
         self.link_spans: list[Any] = []
+        drop_row_marker(self)
         #: the window's answer to "where would this move land?", asked
         #: while the drag is still in the air: the items the dragged
         #: objects would sit above (None meaning the end), or None when

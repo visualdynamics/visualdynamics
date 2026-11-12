@@ -169,3 +169,35 @@ def test_the_button_works_from_a_subset_too(window, pump):
     assert all(data.response_dof[i] == data.reference_dof[i]
                for i in grid.selected_records())
     assert len(grid.selected_records()) == 2
+
+
+def test_a_drive_point_with_the_other_sign_is_on_the_diagonal(window, pump):
+    """An accelerometer mounted the other way round from the force gives
+    206X- against 206X+: still one node along one axis, so a drive point."""
+    data = Frf(abscissa=np.linspace(0, 128, 64),
+               ordinate=np.ones((4, 64), dtype=complex),
+               response_dof=['206X-', '206X-', '207Y+', '207Y+'],
+               reference_dof=['206X+', '207Y-'] * 2,
+               ordinate_dim='acceleration/force',
+               ordinate_unit='m/s**2', reference_unit='N')
+    name = shown(window, data)
+    pump()
+    assert window.data_pane.drive_point_action.isVisible()
+    window.data_pane.drive_point_action.trigger()
+    pump()
+    picked = [(data.response_dof[i], data.reference_dof[i])
+              for i in window.record_grids[name].selected_records()]
+    assert picked == [('206X-', '206X+'), ('207Y+', '207Y-')]
+    assert window.data_pane.drive_point_action.isChecked()
+
+
+def test_same_axis_reads_node_and_axis_not_sign():
+    from visualdynamics.core.data import same_axis
+
+    assert same_axis('206X+', '206X-')
+    assert same_axis('206RZ-', '206RZ+')
+    assert same_axis('206X', '206X-'), 'unsigned is the positive direction'
+    assert not same_axis('206X+', '206Y+')
+    assert not same_axis('206X+', '207X+')
+    assert not same_axis('206X+', '206RX+'), 'a rotation is another axis'
+    assert same_axis('ref', 'ref') and not same_axis('ref', 'other')

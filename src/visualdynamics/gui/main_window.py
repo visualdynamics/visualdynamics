@@ -81,6 +81,7 @@ from ..core.data import (
     TimeHistory,
     TransientSpecification,
     has_phase,
+    same_axis,
 )
 from ..core.entities import LABELS as ENTITY_LABELS
 from ..core.fem import with_article
@@ -2294,8 +2295,12 @@ class MainWindow(QMainWindow):
         apply are absent.
 
         Computed over the whole object, not the current selection, so the
-        button works from any starting subset.
+        button works from any starting subset. A record is on the
+        diagonal when its response and reference are one node along one
+        axis, whatever the signs (`same_axis`).
         """
+        # Brandon, 2026-11-12: a drive point written 206X- against 206X+
+        # was left out of the filter, which compared the strings.
         if not series or not (
                 all(isinstance(data, Frf) for _n, data, _r in series)
                 or all(isinstance(data, Psd) for _n, data, _r in series)):
@@ -2310,7 +2315,7 @@ class MainWindow(QMainWindow):
             else:
                 diagonals[name] = [
                     i for i in range(data.num_records)
-                    if data.response_dof[i] == data.reference_dof[i]]
+                    if same_axis(data.response_dof[i], data.reference_dof[i])]
             off_diagonal |= len(diagonals[name]) < data.num_records
         if not diagonals or not any(diagonals.values()) or not off_diagonal:
             return None
@@ -16023,8 +16028,8 @@ class MainWindow(QMainWindow):
                 'Autospectra' if asd else 'Drive points',
                 'Only the autospectra (ASDs): response and reference at '
                 'the same DOF' if asd else
-                'Only the drive-point FRFs: response and reference at the '
-                'same DOF',
+                'Only the drive-point FRFs: response and reference at one '
+                'node and axis, either sign',
                 filtered)
         history = self._sole_history(series)
         field = self._field_limit_source(series)

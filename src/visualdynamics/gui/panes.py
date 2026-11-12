@@ -994,8 +994,8 @@ class DataPane(QWidget):
                                           'Drive points', self)
         self.drive_point_action.setCheckable(True)
         self.drive_point_action.setToolTip(
-            'Only the drive-point FRFs: response and reference at the '
-            'same DOF')
+            'Only the drive-point FRFs: response and reference at one '
+            'node and axis, either sign')
         self.drive_point_action.triggered.connect(
             lambda checked: self.drive_points_toggled.emit(checked))
         toolbar.addAction(self.drive_point_action)

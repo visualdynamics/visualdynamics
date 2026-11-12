@@ -201,3 +201,26 @@ def test_same_axis_reads_node_and_axis_not_sign():
     assert not same_axis('206X+', '207X+')
     assert not same_axis('206X+', '206RX+'), 'a rotation is another axis'
     assert same_axis('ref', 'ref') and not same_axis('ref', 'other')
+
+
+def test_a_sign_flipped_cross_term_is_not_an_autospectrum(window, pump):
+    """In a CPSD, 206X+ against 206X- is the cross term of two channels
+    (two accelerometers mounted opposite ways), not an autospectrum: the
+    sign-free match is for drive-point FRFs only."""
+    from visualdynamics.core.data import Psd
+
+    dofs = ['206X+', '206X-']
+    data = Psd(abscissa=np.linspace(0, 128, 64),
+               ordinate=np.ones((4, 64), dtype=complex),
+               response_dof=[r for r in dofs for _ in dofs],
+               reference_dof=dofs * 2,
+               ordinate_dim='acceleration**2/frequency',
+               ordinate_unit='m**2/s**4/Hz')
+    name = shown(window, data, name='CPSD')
+    pump()
+    assert window.data_pane.drive_point_action.text() == 'Autospectra'
+    window.data_pane.drive_point_action.trigger()
+    pump()
+    picked = [(data.response_dof[i], data.reference_dof[i])
+              for i in window.record_grids[name].selected_records()]
+    assert picked == [('206X+', '206X+'), ('206X-', '206X-')]

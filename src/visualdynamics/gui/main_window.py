@@ -2295,9 +2295,10 @@ class MainWindow(QMainWindow):
         apply are absent.
 
         Computed over the whole object, not the current selection, so the
-        button works from any starting subset. A record is on the
-        diagonal when its response and reference are one node along one
-        axis, whatever the signs (`same_axis`).
+        button works from any starting subset. An FRF record is a drive
+        point when its response and reference are one node along one
+        axis, whatever the signs (`same_axis`); a CPSD record is an
+        autospectrum only when the two DOFs are written the same.
         """
         # Brandon, 2026-11-12: a drive point written 206X- against 206X+
         # was left out of the filter, which compared the strings.
@@ -2313,9 +2314,13 @@ class MainWindow(QMainWindow):
             if data.reference_dof is None:      # a plain PSD is all ASDs
                 diagonals[name] = list(range(data.num_records))
             else:
+                # a sign-flipped pair is one drive point in an FRF and
+                # two channels in a CPSD, its cross term
+                on_diagonal = (same_axis if isinstance(data, Frf)
+                               else lambda a, b: a == b)
                 diagonals[name] = [
                     i for i in range(data.num_records)
-                    if same_axis(data.response_dof[i], data.reference_dof[i])]
+                    if on_diagonal(data.response_dof[i], data.reference_dof[i])]
             off_diagonal |= len(diagonals[name]) < data.num_records
         if not diagonals or not any(diagonals.values()) or not off_diagonal:
             return None

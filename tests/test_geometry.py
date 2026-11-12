@@ -83,6 +83,72 @@ def test_survey_display_import():
                if int(group) in drawn), 'two-node beams'
 
 
+def _broken_traceline_archive(path):
+    """An sdynpy geometry, built from arrays, whose tracelines use 0 as
+    the pen-up: a leading, a repeated and a trailing 0, a run of one
+    node, and a second traceline that is nothing but zeros and one node."""
+    from visualdynamics.io import sdynpy_npz
+
+    node = np.zeros(6, dtype=sdynpy_npz.NODE_DTYPE)
+    node['id'] = np.arange(1, 7)
+    node['coordinate'] = np.arange(18.0).reshape(6, 3)
+    node['def_cs'] = node['disp_cs'] = 1
+    cs = np.zeros(1, dtype=sdynpy_npz.CS_DTYPE)
+    cs['id'] = 1
+    cs['matrix'] = np.vstack([np.eye(3), np.zeros(3)])
+    line = np.zeros(2, dtype=sdynpy_npz.TRACELINE_DTYPE)
+    line['id'] = [7, 8]
+    line['color'] = [3, 5]
+    line['description'] = ['wing', 'stray']
+    line['connectivity'] = sdynpy_npz._connectivity(
+        [[0, 1, 2, 3, 0, 0, 4, 5, 0, 6, 0], [0, 6, 0]])
+    np.savez(path, node=node, coordinate_system=cs, traceline=line)
+
+
+def test_a_zero_in_an_sdynpy_traceline_lifts_the_pen(tmp_path):
+    """sdynpy's traceline connectivity uses 0 as a break, and a real
+    geometry failed to import with "unknown nodes [0]" (Brandon,
+    2026-11-12). Each run between zeros is a run of the one drawn line;
+    a run of one node, and a line left with no run, draw nothing."""
+    path = tmp_path / 'broken.npz'
+    _broken_traceline_archive(path)
+    geo = visualdynamics.import_file(str(path))
+    lines = geo.drawn_lines()
+    assert [(line['name'], line['color'], line['chains']) for line in lines] \
+        == [('wing', 3, [[1, 2, 3], [4, 5]])]
+    assert len(geo.group_id) == 1, 'no empty element group for the stray line'
+
+
+def test_a_broken_traceline_round_trips_with_its_zeros(tmp_path):
+    """The writer joins a line's runs with the 0 pen-up, one row per line,
+    as sdynpy stores them, and the reader splits them again."""
+    from visualdynamics.io import sdynpy_npz
+
+    src = tmp_path / 'broken.npz'
+    _broken_traceline_archive(src)
+    geo = visualdynamics.import_file(str(src))
+    out = tmp_path / 'out.npz'
+    sdynpy_npz.save(geo, out)
+    with np.load(out, allow_pickle=True) as raw:
+        rows = [[int(n) for n in c] for c in raw['traceline']['connectivity']]
+        names = raw['traceline']['description'].tolist()
+    assert rows == [[1, 2, 3, 0, 4, 5]]
+    assert names == ['wing']
+    back = visualdynamics.import_file(str(out)).drawn_lines()
+    assert [(line['name'], line['color'], line['chains']) for line in back] \
+        == [('wing', 3, [[1, 2, 3], [4, 5]])]
+
+
+def test_a_drawn_line_through_node_zero_is_not_written_to_sdynpy(tmp_path):
+    """The layout reads a 0 as a break, so the line would come back cut."""
+    from visualdynamics.io import sdynpy_npz
+
+    geo = Geometry(np.array([0, 1, 2]), np.eye(3))
+    geo.attach_drawn_lines([('line', 1, [[0, 1, 2]])])
+    with pytest.raises(ValueError, match='node 0'):
+        sdynpy_npz.save(geo, tmp_path / 'zero.npz')
+
+
 def test_save_load_round_trip(tmp_path):
     geo = visualdynamics.import_file(PLATE_EXO, length_unit='m')
     path = str(tmp_path / 'plate.vdyn')

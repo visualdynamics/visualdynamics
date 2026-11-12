@@ -7,7 +7,8 @@ read with `plain_numpy`, because the connectivity columns are pickled):
 - coordinate_system: id, name, color, cs_type, matrix (4, 3), where
   rows 0-2 are the rotation and row 3 is the origin (a length);
 - traceline: id, color, description, connectivity (an object array of
-  node id arrays);
+  node id arrays, where a 0 lifts the pen, so one row can hold several
+  separate lines);
 - element: id, type (the universal file dataset 2412 descriptor code),
   color, connectivity (an object array).
 
@@ -96,9 +97,26 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
     for tl_id, color, desc, conn in zip(tl['id'], tl['color'],
                                         tl['description'], tl['connectivity']):
         _n, _c, runs = by_id.setdefault(int(tl_id), (str(desc), int(color), []))
-        runs.append([int(n) for n in conn])
-    geometry.attach_drawn_lines(list(by_id.values()))
+        runs.extend(_runs([int(n) for n in conn]))
+    geometry.attach_drawn_lines([line for line in by_id.values() if line[2]])
     return geometry
+
+
+def _runs(conn: list[int]) -> list[list[int]]:
+    """A traceline's connectivity split at its zeros, the layout's pen-up.
+
+    One connectivity can hold several separate lines. Leading, trailing
+    and repeated zeros make no run, and a run of one node draws nothing.
+    """
+    # read as a node id, the 0 failed the import of a real sdynpy
+    # geometry with "unknown nodes [0]" (Brandon, 2026-11-12)
+    runs: list[list[int]] = [[]]
+    for n in conn:
+        if n == 0:
+            runs.append([])
+        else:
+            runs[-1].append(n)
+    return [run for run in runs if len(run) > 1]
 
 
 def handles(obj: Any) -> bool:
@@ -131,7 +149,9 @@ def save(geometry: Geometry, path: str | os.PathLike, unit_system: UnitSystem | 
     records no units either way, so the reader has to be told what they
     are. Each node's coordinates are written in the coordinate system it
     is defined in, its `def_cs`, as `load` reads them. Drawn lines
-    are written as tracelines, one row per run, and not as elements.
+    are written as tracelines, one row per line with a 0 between its
+    runs, and not as elements. A drawn line through a node numbered 0
+    cannot be written, because the layout reads that 0 as a break.
     """
     from .exporters import geometry_values
 
@@ -154,16 +174,21 @@ def save(geometry: Geometry, path: str | os.PathLike, unit_system: UnitSystem | 
     cs['cs_type'] = geometry.cs_type
     cs['matrix'] = matrices
 
-    # a drawn line goes out as the layout's traceline, one row per run
-    # under its block's id, and not as elements as well
+    # a drawn line goes out as the layout's traceline under its block's
+    # id, its runs joined by the layout's 0 pen-up into one row, and not
+    # as elements as well. One row per run (until 2026-11-12) gave
+    # sdynpy several tracelines sharing one id.
     drawn = geometry.drawn_lines()
-    runs = [(line, chain) for line in drawn for chain in line['chains']]
-    traceline = np.zeros(len(runs), dtype=TRACELINE_DTYPE)
-    traceline['id'] = [line['group'] for line, _c in runs]
-    traceline['color'] = [line['color'] for line, _c in runs]
-    traceline['description'] = [str(line['name'])[:40] for line, _c in runs]
+    if any(0 in chain for line in drawn for chain in line['chains']):
+        raise ValueError('a drawn line runs through node 0, which the sdynpy '
+                         'layout reads as a break in the line')
+    traceline = np.zeros(len(drawn), dtype=TRACELINE_DTYPE)
+    traceline['id'] = [line['group'] for line in drawn]
+    traceline['color'] = [line['color'] for line in drawn]
+    traceline['description'] = [str(line['name'])[:40] for line in drawn]
     traceline['connectivity'] = _connectivity(
-        [np.asarray(chain, dtype=np.int64) for _l, chain in runs])
+        [[n for i, chain in enumerate(line['chains'])
+          for n in ([0] if i else []) + chain] for line in drawn])
     drawn_blocks = {line['group'] for line in drawn}
     kept = [i for i, b in enumerate(geometry.elem_group)
             if int(b) not in drawn_blocks]

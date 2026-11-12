@@ -380,10 +380,7 @@ def test_pardiso_is_threaded_through_tbb():
     assert code == 0 and 'threaded by tbb' in message, message
 
 
-def test_the_solver_benchmark_times_both_factorizations(capsys):
-    """`tools/solver_benchmark.py`, what the Windows runner is timed
-    with: a block solved through the machine's own factorization and,
-    under its SuperLU limit, through SuperLU, to the same frequencies."""
+def _benchmark():
     import importlib.util
     import pathlib
 
@@ -391,6 +388,14 @@ def test_the_solver_benchmark_times_both_factorizations(capsys):
     spec = importlib.util.spec_from_file_location('solver_benchmark', path)
     benchmark = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(benchmark)
+    return benchmark
+
+
+def test_the_solver_benchmark_times_both_factorizations(capsys):
+    """`tools/solver_benchmark.py`, what the Windows runner is timed
+    with: a block solved through the machine's own factorization and,
+    under its SuperLU limit, through SuperLU, to the same frequencies."""
+    benchmark = _benchmark()
     assert benchmark.main(['--modes', '10', '--superlu-up-to', '24', '4x3x2']) == 0
     rows = [line for line in capsys.readouterr().out.splitlines()
             if line.startswith('| 24 |')]
@@ -401,3 +406,31 @@ def test_the_solver_benchmark_times_both_factorizations(capsys):
     assert own.split('|')[-2].strip().endswith(' Hz'), 'ten modes reach the elastic ones'
     benchmark.main(['--modes', '4', '--superlu-up-to', '0', '4x3x2'])
     assert 'every mode asked for is rigid' in capsys.readouterr().out
+
+
+def test_a_benchmark_case_that_crashes_says_how(capsys, monkeypatch):
+    """A case once died on a Linux runner with nothing on stderr and was
+    reported as "failed: no output". The signal, and the crash's place
+    from faulthandler, are what tell a native crash from an exception."""
+    benchmark = _benchmark()
+    monkeypatch.setattr(benchmark, 'CASE', 'import faulthandler; faulthandler._sigsegv()')
+    outcome = benchmark.run_case((1, 1, 1), 1, False, 60.0)['outcome']
+    if sys.platform == 'win32':
+        assert outcome.startswith('failed: exit 0xC0000005'), outcome
+    else:
+        assert outcome.startswith('failed: SIGSEGV'), outcome
+    assert 'Fatal Python error: Segmentation fault' in capsys.readouterr().err
+
+
+def test_a_benchmark_failure_names_the_way_out():
+    failure = _benchmark().failure
+    assert failure(-9, '', '') == 'failed: SIGKILL, nothing on stderr'
+    assert failure(-11, '{"dof": 180}\n', '') == \
+        'failed: SIGSEGV after printing its result, nothing on stderr'
+    assert failure(1, '', 'Traceback\nValueError: no') == 'failed: exit 1, ValueError: no'
+    assert failure(0xC0000005, '', '') == 'failed: exit 0xC0000005, nothing on stderr'
+    assert failure(2, 'Intel oneMKL FATAL ERROR: Cannot load libmkl_core.so.3.\n', '') == \
+        'failed: exit 2, Intel oneMKL FATAL ERROR: Cannot load libmkl_core.so.3.', \
+        "oneMKL's own errors go to stdout"
+    assert failure(-11, '{"dof": 180}\n', 'Fatal Python error: Segmentation fault') == \
+        'failed: SIGSEGV after printing its result, Fatal Python error: Segmentation fault'

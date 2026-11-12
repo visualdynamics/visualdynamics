@@ -2029,6 +2029,30 @@ class TimeHistory(DataArray):
 
         return differentiate(self)
 
+    def rescale(self, factor: float, records: Any = None) -> TimeHistory:
+        """This record with `records` (all of them when omitted)
+        multiplied by `factor`, the rest unchanged
+        (`core.rescale.rescaled`): the correction for a channel
+        recorded with the wrong sensitivity, whose factor
+        `core.rescale.sensitivity_factor` gives.
+
+        Parameters
+        ----------
+        factor : float
+            Finite and not zero; negative flips the sign.
+        records : sequence of int, optional
+            Which records, counting from zero.
+
+        Returns
+        -------
+        TimeHistory
+            The rescaled record, with this one's clock, channels and
+            settings.
+        """
+        from .rescale import rescaled
+
+        return rescaled(self, factor, records)
+
     def time_statistics(self, record: int = 0, **options: Any
                         ) -> TimeStatistics:
         """Read one channel's statistics in the time domain: the

@@ -26,6 +26,7 @@ Mesa.
 from __future__ import annotations
 
 import ctypes
+import os
 import re
 import sys
 from ctypes import wintypes
@@ -186,6 +187,8 @@ def ready() -> bool:
     without asking again or saying it again, so the check runs once,
     before the first 3-D view, however many views are built after it.
     """
+    if os.environ.get('VISUALDYNAMICS_SAFE_2D') == '1':
+        return False
     if not _found:
         # recorded before it is said: on Windows the message box runs
         # an event loop of its own, which can deliver an event that asks
@@ -200,6 +203,8 @@ def ready() -> bool:
 def refusal() -> str | None:
     """Why 3-D views are refused here, or None: either the check found
     nothing missing, or it has not run yet. Never runs the check."""
+    if os.environ.get('VISUALDYNAMICS_SAFE_2D') == '1':
+        return '3-D rendering is disabled by the safe 2-D launcher.'
     return _found[0] if _found else None
 
 
@@ -325,6 +330,8 @@ def one_graphics_system() -> None:
     # refused ("version '120' is not supported", the core profile takes
     # 150 and up) and the application crashed; the same import worked
     # on the next launch.
+    if os.environ.get('VISUALDYNAMICS_SAFE_2D') == '1':
+        return
     from PySide6.QtGui import QSurfaceFormat
 
     QSurfaceFormat.setDefaultFormat(view_format())
@@ -334,8 +341,6 @@ def one_graphics_system() -> None:
     # packaged app): 0.3 % of the view drawn, 21 % with this set, the
     # report unchanged. Setting the widgets' backend as well
     # (QT_WIDGETS_RHI_BACKEND=opengl) blanked it again.
-    import os
-
     os.environ.setdefault(QUICK_BACKEND, 'opengl')
 
 

@@ -218,3 +218,14 @@ def test_the_launch_needs_nothing_private_from_pyvistaqt(monkeypatch, qt_app):
         assert QSurfaceFormat.defaultFormat() == opengl.view_format()
     finally:
         QSurfaceFormat.setDefaultFormat(before)
+
+
+def test_safe_2d_refuses_a_3d_view_without_probing(monkeypatch):
+    monkeypatch.setenv('VISUALDYNAMICS_SAFE_2D', '1')
+
+    def unexpected_probe():
+        pytest.fail('Safe 2D startup attempted to probe OpenGL')
+
+    monkeypatch.setattr(opengl, 'missing', unexpected_probe)
+    assert opengl.three_d_view() is None
+    assert 'safe 2-D' in opengl.refusal()

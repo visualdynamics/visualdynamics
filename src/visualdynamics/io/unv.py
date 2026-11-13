@@ -28,7 +28,9 @@ Datasets read:
   `ordinate_unit` is given, and keeps the quantity's name as a hint.
   Records are grouped by function type into one data object per type,
   and records of one type with different abscissas go into separate
-  objects. Other function types are skipped.
+  objects. Explicitly labeled response/reference time traces are instead
+  kept as one object per acquisition pair, with channel roles assigned.
+  Other function types are skipped.
 - 58b, the binary form of 58: the same eleven ASCII header records,
   followed by the values as raw floats. Read in either byte order at
   single or double precision. Only IEEE 754 floats are read; DEC VMS
@@ -663,9 +665,48 @@ def _build_data_objects(functions, factors, ordinate_unit, path,
             else:
                 grouped.append([entry])
         for which, entries in enumerate(grouped):
+            if code == 1 and _build_trace_pairs(
+                    out, entries, factors, ordinate_unit, temperature):
+                continue
             _build_one(out, name if which == 0 else f'{name} ({which + 1})',
                        code, entries, factors, ordinate_unit, temperature)
     return out
+
+
+def _build_trace_pairs(out, entries, factors, ordinate_unit, temperature):
+    """Keep explicitly labeled response/reference traces in acquisition pairs.
+
+    These exports put the measurement DOF on both headers. The reference
+    trace's channel identity comes from the reference field instead.
+    Ordinary time records retain their shared multichannel object.
+    """
+    labels = {'Response Time Trace', 'Reference Time Trace'}
+    if not any(e['comment'] in labels for e in entries):
+        return False
+    if not all(e['comment'] in labels for e in entries):
+        return False
+    pairs = {}
+    for entry in entries:
+        pairs.setdefault((entry['response'], entry['reference']), []).append(entry)
+    for (response, reference), pair in pairs.items():
+        responses = [e for e in pair if e['comment'] == 'Response Time Trace']
+        references = [e for e in pair if e['comment'] == 'Reference Time Trace']
+        if len(responses) != 1 or len(references) != 1 or not reference:
+            raise ValueError(f'Time traces at {response}: expected one response '
+                             'and one reference trace with a reference DOF')
+        records = [{**responses[0], 'reference': ''},
+                   {**references[0], 'response': reference, 'reference': ''}]
+        name = f'time - {response} - ref {reference}'
+        if name in out:
+            index = 2
+            while f'{name} ({index})' in out:
+                index += 1
+            name = f'{name} ({index})'
+        _build_one(out, name, 1, records, factors, ordinate_unit, temperature)
+        data = out[name]
+        data.roles = {(response, data.known_dim(0)): 'response',
+                      (reference, data.known_dim(1)): 'reference'}
+    return True
 
 
 def _build_one(out, name, code, entries, factors, ordinate_unit,
@@ -736,7 +777,15 @@ def _build_one(out, name, code, entries, factors, ordinate_unit,
 
 
 def load(path: str | os.PathLike, length_unit: str | None = None,
-         ordinate_unit: str | None = None) -> Any:
+         ordinate_unit: str | None = None,
+         reference_node: int | None = None) -> Any:
+    """Read a Universal file, preserving explicitly labeled trace pairs.
+
+    ``reference_node`` supplies a known physical reference node for
+    paired time traces when the exporter uses a channel number there.
+    The header's direction is preserved. Without an override the file's
+    node is retained. Other function types are unaffected.
+    """
     from ..units import si_factor
 
     # bytes, because a 58b dataset holds raw floats that are not text
@@ -768,6 +817,19 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
             _parse_55(records, mode_shapes, path)
         elif number == 2420:
             _parse_2420(records, systems)
+
+    if reference_node is not None:
+        from ..core.data import dof_string, parse_dof
+
+        if (isinstance(reference_node, bool)
+                or int(reference_node) != reference_node or reference_node <= 0):
+            raise ValueError('reference_node must be a positive integer')
+        for entry in functions:
+            if (entry['function_type'] == 1
+                    and entry['comment'] in {'Response Time Trace', 'Reference Time Trace'}
+                    and entry['reference']):
+                _node, direction = parse_dof(entry['reference'])
+                entry['reference'] = dof_string(int(reference_node), direction_code(direction))
 
     out = _build_data_objects(functions, factors, ordinate_unit, path,
                               temperature)

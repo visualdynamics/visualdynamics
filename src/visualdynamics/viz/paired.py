@@ -190,14 +190,16 @@ def add_paired_stage(plotter: Any, loud: Any, quiet: Any,
                      theme: Any = None,
                      budget: int = POINT_BUDGET,
                      quantity: tuple[str, str | None] | None = None,
-                     page: int = 0) -> dict[str, Any]:
+                     page: int = 0,
+                     station_notes: dict[str, str] | None = None) -> dict[str, Any]:
     """Draw the pair into a plotter, overlaid or divided in dB.
 
     The numbers come from `paired_stage_curves`, which the report's
     canvas figure uses too, with the same arguments; this function draws
     them in VTK and labels the axes with the real ranges the stage
     stands for. Returns that dict with ``points``, the vertices drawn,
-    added.
+    added. `station_notes` labels the tail of each station with its
+    optional comparison reading.
     """
     import pyvista as pv
 
@@ -250,6 +252,16 @@ def add_paired_stage(plotter: Any, loud: Any, quiet: Any,
             np.asarray(spots), names, font_size=12, always_visible=True,
             text_color=colors['scene_text'], shape=None,
             fill_shape=False, show_points=False, name='paired-labels')
+    if station_notes:
+        last = {run['station']: run for run in louds}
+        spots = [[run['points'][-1][0] + 0.025 * STAGE[0], station,
+                  run['points'][-1][2]] for station, run in last.items()]
+        texts = [station_notes.get(run['label'], '') for run in last.values()]
+        if spots:
+            plotter.add_point_labels(np.asarray(spots), texts, font_size=12,
+                                     always_visible=True, text_color=colors['scene_text'],
+                                     shape=None, fill_shape=False, show_points=False,
+                                     name='paired-end-notes')
     if total:
         plotter.show_bounds(
             axes_ranges=(x0, x1, 0, max(len(louds) - 1, 1), z0, z1),
@@ -266,7 +278,8 @@ def plot_paired_stage(loud: Any, quiet: Any, mode: str = 'overlay',
                       unit_system: UnitSystem | None = None,
                       theme: Any = None,
                       screenshot: str | None = None,
-                      show: bool = True) -> Any:
+                      show: bool = True,
+                      station_notes: dict[str, str] | None = None) -> Any:
     """Show the paired stage of `loud` and `quiet` interactively, or
     render it to `screenshot`, overlaid or divided (`mode`, as in
     `paired_stage_curves`). Returns the image array when rendering to a
@@ -277,7 +290,7 @@ def plot_paired_stage(loud: Any, quiet: Any, mode: str = 'overlay',
     plotter = pv.Plotter(off_screen=screenshot is not None or not show)
     plotter.set_background(colors['scene_background'],
                            top=colors['scene_background_top'])
-    add_paired_stage(plotter, loud, quiet, mode=mode,
+    add_paired_stage(plotter, loud, quiet, mode=mode, station_notes=station_notes,
                      unit_system=unit_system, theme=theme)
     place_camera(plotter)
     return finish_scene(plotter, screenshot, show)

@@ -52,7 +52,7 @@ from .core.report import Report
 from .core.run_log_extract import RunLogExtract
 from .core.shapes import ShapeSet
 from .core.sine import SineLevelSet, SineSweepSpecification
-from .names import display_name
+from .names import display_name, imported_name
 from .report.features import FeatureSelection
 
 # An object group: the objects declared to belong together, and what the
@@ -214,6 +214,11 @@ def retarget(obj: Any, mapping: dict[str, str]) -> None:
     the reference has to be changed with it, or the report figure has
     nothing to draw. The object is changed in place.
     """
+    comparison = getattr(obj, 'time_comparison', None)
+    if comparison is not None:
+        from .core.time_compare import retarget_pairs
+
+        retarget_pairs(comparison, mapping)
     follow = getattr(obj, 'rename_source', None)
     if callable(follow):                            # MatchedModes
         for old, new in mapping.items():
@@ -758,7 +763,7 @@ class Project(dict):
         if isinstance(result, dict):
             # a reader's keys are for code; the name is what the object
             # *is*, and the key stays available on the result
-            added = [self.add(display_name(type(obj).__name__), obj)
+            added = [self.add(imported_name(obj), obj)
                      for obj in result.values()]
             # a controller's run arrives as a channel table beside the
             # data it describes: one file, so one group (Brandon,
@@ -769,7 +774,7 @@ class Project(dict):
                                       for obj in result.values()):
                 self.link(*added)
         else:
-            added = [self.add(display_name(type(result).__name__), result)]
+            added = [self.add(imported_name(result), result)]
         self._index_import(local, result, added, checksum)
         return added
 
@@ -867,6 +872,10 @@ class Project(dict):
         for record in self.provenance.values():
             if record.get('source') == old:
                 record['source'] = new
+            if record.get('verb') == 'compare_time_histories':
+                from .core.time_compare import retarget_pairs
+
+                retarget_pairs(record['params'], {old: new})
         self.data_index.rename_object(old, new)
         return new
 
@@ -1702,6 +1711,35 @@ class Project(dict):
         if active is not None and active in self:
             return active, self[active]
         return None
+
+    def time_histories_at_node(self, geometry: Any, node: int) -> list[tuple[str, int]]:
+        """Find response records at a node on an explicitly linked geometry.
+
+        Parameters
+        ----------
+        geometry : str or Geometry
+            Geometry whose link group owns the measurements.
+        node : int
+            Geometry node ID, matched to the node portion of each signed DOF.
+
+        Returns
+        -------
+        list of (str, int)
+            History name and response record index, in project order. Force
+            references and saved comparison copies are excluded.
+        """
+        from .core.data import parse_dof
+        from .core.time_compare import response_records
+
+        name = self.name_of(geometry)
+        if not isinstance(self[name], Geometry) or node not in self[name].node_id:
+            return []
+        linked = set(self.object_group_of(name) or ())
+        return [(n, i) for n, data in self.items()
+                if n in linked and isinstance(data, TimeHistory)
+                and not getattr(data, 'time_comparison', None)
+                for i in response_records(data)
+                if parse_dof(data.response_dof[i])[0] == node]
 
     def sensors(self, name: Any) -> tuple[list, list[str]]:
         """The sensors a channel table places on its geometry, and notes on
@@ -2893,6 +2931,128 @@ class Project(dict):
         history = self[source]
         history.shocks = find(history)
         return len(history.shocks or ())
+
+    def filter_histories(self, *sources: Any, filtering: Any = None) -> list[str]:
+        """Apply one filter to all selected histories, keeping independent copies.
+
+        Parameters
+        ----------
+        *sources : str or TimeHistory
+            Histories to process. Every channel is filtered, as in filter_data.
+        filtering : Filtering, optional
+            Shared settings; the first history's current or suggested settings
+            when omitted. All histories are validated before results are added.
+
+        Returns
+        -------
+        list of str
+            Names of the derived histories, in selection order.
+        """
+        sources = list(dict.fromkeys(self.name_of(n) for n in sources))
+        if not sources or any(not isinstance(self[n], TimeHistory) for n in sources):
+            raise ValueError('Select time histories to filter')
+        setting = filtering or self[sources[0]].filtering or self[sources[0]].suggest_filtering()
+        made = [self[n].filter(setting) for n in sources]
+        for n in sources:
+            self[n].filtering = setting
+        results = [self._derive(n, obj, f'{n} Filtered', recipe=('filter_data', {}))
+                   for n, obj in zip(sources, made)]
+        if len(results) > 1:
+            for name in results:
+                self.provenance[name]['params']['tree_batch'] = results[0]
+        return results
+
+    def scale_time_histories(self, *sources: Any, factor: float = 1.0,
+                             include_references: bool = False,
+                             records: Any = None) -> list[str]:
+        """Scale selected time-history responses without changing their units.
+
+        Parameters
+        ----------
+        *sources : str or TimeHistory
+            The selected histories.
+        factor : float, default 1
+            Finite multiplier, including negative factors for sign reversal.
+        include_references : bool, default False
+            Scale reference force channels too. Normally only responses change.
+        records : dict, optional
+            Explicit selected record indices by source name, overriding roles.
+
+        Returns
+        -------
+        list of str
+            Names of independent scaled copies. Originals stay unchanged.
+        """
+        from .core.time_compare import scaled
+
+        sources = list(dict.fromkeys(self.name_of(n) for n in sources))
+        if not sources or any(not isinstance(self[n], TimeHistory) for n in sources):
+            raise ValueError('Select time histories to scale')
+        made = [scaled(self[n], factor, (records or {}).get(n), include_references)
+                for n in sources]
+        return [self._derive(n, obj, f'{n} Scaled', recipe=('scale_time_histories',
+                {'factor': float(factor), 'include_references': include_references,
+                 'records': (records or {}).get(n)})) for n, obj in zip(sources, made)]
+
+    def compare_time_histories(self, *sources: Any, pairs: Any = None,
+                               records: Any = None, start: float | None = None,
+                               stop: float | None = None,
+                               name: str = 'Time Response Comparison') -> str:
+        """Pair time responses for an overlay and windowed TRAC comparison.
+
+        Parameters
+        ----------
+        *sources : str or TimeHistory
+            The histories containing both sets. Reference channels are excluded.
+        pairs : sequence, optional
+            Explicit (left name, record, right name, record) pairs. Omitted,
+            exactly two records must match each signed DOF and quantity.
+        records : dict, optional
+            Selected record indices by source name for automatic matching.
+        start, stop : float, optional
+            TRAC window in seconds within the common overlap. No fitting or
+            automatic time shift is applied.
+        name : str, default 'Time Response Comparison'
+            Name for the saved comparison.
+
+        Returns
+        -------
+        str
+            Name of the saved paired histories and their comparison settings.
+        """
+        from .core.time_compare import compare
+
+        sources = list(dict.fromkeys(self.name_of(n) for n in sources))
+        obj = compare(self, sources, pairs=pairs, records=records, start=start, stop=stop)
+        params = {'sources': sources, 'pairs': obj.time_comparison['pairs'],
+                  'start': obj.time_comparison['start'], 'stop': obj.time_comparison['stop']}
+        return self._derive(sources[0], obj, name,
+                            recipe=('compare_time_histories', params))
+
+    def set_time_comparison_window(self, source: Any, start: float, stop: float) -> None:
+        """Keep the chosen TRAC time window on a saved comparison.
+
+        Parameters
+        ----------
+        source : str or TimeHistory
+            A saved time-response comparison.
+        start, stop : float
+            Window limits in seconds, inside the shared clock.
+
+        Returns
+        -------
+        None
+        """
+        from .core.time_compare import scores
+
+        name = self.name_of(source)
+        data = self[name]
+        if not getattr(data, 'time_comparison', None):
+            raise ValueError('Select a saved time-response comparison')
+        scores(data, start, stop)
+        data.time_comparison.update(start=float(start), stop=float(stop))
+        if name in self.provenance:
+            self.provenance[name]['params'].update(start=float(start), stop=float(stop))
 
     def filter_data(self, source: Any) -> str:
         """Filter a time history with its own filter settings (Apply
@@ -8762,6 +8922,7 @@ class Project(dict):
         # and differentiation read the record's bytes, so refreshing a
         # re-filtered source cascades down the whole motion chain
         'filter_data': 'filtering', 'truncate_data': 'truncation',
+        'scale_time_histories': 'content', 'compare_time_histories': 'time_pairs',
         # the smoothing and the refinement the levels were read with
         'extract_sine': 'sine_extraction',
         'integrate': 'content', 'differentiate': 'content',
@@ -8798,6 +8959,18 @@ class Project(dict):
         obj = self.get(source)
         if reads is None or obj is None:
             return None
+        if reads == 'time_pairs':
+            import hashlib
+
+            digest = hashlib.blake2b(digest_size=16)
+            for name in (params or {}).get('sources', [source]):
+                other = self.get(name)
+                if other is None:
+                    return None
+                digest.update(np.ascontiguousarray(other.abscissa).tobytes())
+                digest.update(np.ascontiguousarray(other.ordinate).tobytes())
+                digest.update(repr([other.channel_key(i) for i in range(other.num_records)]).encode())
+            return ('content', digest.hexdigest())
         if reads in ('pair', 'pair+model'):
             other = self.get((params or {}).get('shapes'))
             if other is None:
@@ -9403,6 +9576,7 @@ _VERB_APPLIES: tuple = (
     ('integrate', _integrable),
     ('differentiate', _differentiable),
     ('filter_data', _is_time),
+    ('scale_time_histories', _is_time),
     ('truncate_data', _is_time),
     ('resample', _is_time),
     ('rescale', _is_time),
@@ -9635,6 +9809,8 @@ def holds_forces(data: Any) -> bool:
 
 
 _SELECTION_APPLIES: tuple = (
+    ('filter_histories', lambda p, o: all(isinstance(x, TimeHistory) for x in o)),
+    ('compare_time_histories', lambda p, o: all(isinstance(x, TimeHistory) for x in o)),
     ('compute_modal_responses', lambda p, o: _forces_and_modes(o)),
     ('transform', lambda p, o: _pair_reads(p, o, 'physical')),
     ('expand', lambda p, o: (_pair_reads(p, o, 'modal')
@@ -9695,8 +9871,9 @@ _JOURNALED_VERBS = (
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'make_realizable',
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
-    'detect_shocks', 'filter_data', 'truncate_data', 'resample', 'rescale',
-    'integrate',
+    'detect_shocks', 'filter_data', 'filter_histories', 'scale_time_histories',
+    'compare_time_histories', 'set_time_comparison_window', 'truncate_data',
+    'resample', 'rescale', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'generate_signal', 'compute_modal_responses', 'synthesize_modal_frfs',
     'plan_instrumentation',
@@ -9767,6 +9944,12 @@ _RECOMPUTE = {
     'compute_octave': lambda p, s, k: p[s].to_octave(
         k.get('per_octave', 6)),
     'filter_data': lambda p, s, k: p[s].filter(),
+    'scale_time_histories': lambda p, s, k: __import__(
+        'visualdynamics.core.time_compare', fromlist=['scaled']).scaled(
+            p[s], k['factor'], k.get('records'), k.get('include_references', False)),
+    'compare_time_histories': lambda p, s, k: __import__(
+        'visualdynamics.core.time_compare', fromlist=['compare']).compare(
+            p, k['sources'], pairs=k['pairs'], start=k['start'], stop=k['stop']),
     'extract_sine': lambda p, s, k: _extract_again(p, s, k),
     'truncate_data': lambda p, s, k: p[s].truncate(),
     'resample': lambda p, s, k: p[s].resample(

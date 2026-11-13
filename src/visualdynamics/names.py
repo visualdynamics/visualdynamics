@@ -14,6 +14,7 @@ them back.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 # 'Frf' is not a word, and neither is 'Cpsd'. Capitalizing the first letter of
 # every word is the rule; these are the exceptions a structural dynamicist
@@ -31,6 +32,25 @@ ACRONYMS = {
 # underscores, spaces, and the internal capitals of a class name — 'ShapeSet'
 # and 'shape_set' are the same two words written two ways
 _WORDS = re.compile(r'[A-Z]+(?![a-z])|[A-Z][a-z]*|[a-z]+|\d+')
+
+
+def imported_name(obj: Any) -> str:
+    """Name an imported acquisition pair by its response and reference.
+
+    Explicit channel roles distinguish a pair from an ordinary
+    multichannel history, whose name remains its data type.
+    """
+    from .core.data import TimeHistory
+
+    if isinstance(obj, TimeHistory) and obj.num_records == 2:
+        roles = getattr(obj, 'roles', None) or {}
+        response = [dof for (dof, _quantity), role in roles.items()
+                    if role == 'response']
+        reference = [dof for (dof, _quantity), role in roles.items()
+                     if role == 'reference']
+        if len(response) == len(reference) == 1:
+            return f'Time History - {response[0]} - ref {reference[0]}'
+    return display_name(type(obj).__name__)
 
 
 def display_name(key: str) -> str:

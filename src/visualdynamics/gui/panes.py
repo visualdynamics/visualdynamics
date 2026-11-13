@@ -10,6 +10,7 @@ of its own opened from a script.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from functools import partial
 from typing import Any, ClassVar, NamedTuple
@@ -702,8 +703,11 @@ class DataPane(QWidget):
         self.waterfall_action.setToolTip(
             'Spread the channels along a depth axis, colored by level')
         self.waterfall_action.setChecked(True)
-        self.waterfall_action.triggered.connect(
-            lambda _checked: self.reread.emit())
+        # A Windows data selection can reach the native 3-D probe before
+        # the scene has initialized it. Keep the flat plot available on
+        # first selection and let the 3D button explicitly start the view.
+        self._defer_first_waterfall = os.name == 'nt' and not self.offscreen
+        self.waterfall_action.triggered.connect(self._request_waterfall)
         toolbar.addAction(self.waterfall_action)
         # the 3-D form's projection, on the bar while that form is up
         # (`show_waterfall`), as on the 3-D view's bar
@@ -2173,6 +2177,11 @@ class DataPane(QWidget):
         applies only to FRFs, so the caller checks that first."""
         return self.cmif_action.isChecked()
 
+    def _request_waterfall(self, checked: bool) -> None:
+        self._defer_first_waterfall = False
+        self.waterfall_action.setChecked(checked)
+        self.reread.emit()
+
     @property
     def showing_waterfall(self) -> bool:
         """Whether the 3-D form is checked. It applies only where the
@@ -2195,8 +2204,11 @@ class DataPane(QWidget):
         # Asked last, so the OpenGL check runs only when the 3-D form
         # would be drawn, and a machine that cannot draw it gets the
         # flat one instead
-        from .opengl import ready
+        from .opengl import probed, ready
 
+        if self._defer_first_waterfall and not probed():
+            self.waterfall_action.setChecked(False)
+            return False
         return (self.waterfall_action.isChecked() and not self.flat_only
                 and ready())
 

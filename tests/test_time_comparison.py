@@ -291,3 +291,18 @@ def test_import_sections_survive_reopen_and_select_a_whole_trac_pair(window, tmp
     window.show_object(comparison)
     assert window.time_tools.table.rowCount() == 1
     assert window.time_tools.saved == comparison
+
+
+def test_windows_first_time_trace_waits_for_an_explicit_3d_request(window, monkeypatch):
+    from visualdynamics.gui import opengl
+
+    monkeypatch.setattr(window.data_pane, '_defer_first_waterfall', True, raising=False)
+    monkeypatch.setattr(opengl, '_found', [])
+    calls = []
+    monkeypatch.setattr(opengl, 'ready', lambda: calls.append('OpenGL') or False)
+    name, _ = _pair(window.project)
+    window.data_pane.waterfall_action.setChecked(True)
+    window.show_object(name)
+    assert calls == []
+    window.data_pane.waterfall_action.trigger()
+    assert calls

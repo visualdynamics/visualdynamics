@@ -179,6 +179,11 @@ def missing() -> str | None:
 _found: list[str | None] = []
 
 
+def probed() -> bool:
+    """Whether the session has already run the 3-D capability check."""
+    return bool(_found)
+
+
 def ready() -> bool:
     """Whether a 3-D view may be built here, asked once per process.
 

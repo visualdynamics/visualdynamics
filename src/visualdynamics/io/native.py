@@ -326,6 +326,10 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
     from ..core.data import DataArray  # noqa: F401 (documented schema owner)
 
     group.attrs['function_type'] = data.function_type
+    if getattr(data, 'time_comparison', None) is not None:
+        import json
+
+        group.attrs['time_comparison'] = json.dumps(data.time_comparison)
     group.create_dataset('abscissa', data=data.abscissa)
     group.create_dataset('ordinate', data=data.ordinate)
     _write_strings(group, 'response_dof', data.response_dof)
@@ -574,6 +578,10 @@ def load_data(group: h5py.Group) -> DataArray:
         reference_unit=_read_strings(group, 'reference_unit'),
         dimension_hint=_read_strings(group, 'dimension_hint'),
     )
+    if 'time_comparison' in group.attrs:
+        import json
+
+        data.time_comparison = json.loads(str(group.attrs['time_comparison']))
     if 'interpolation' in group.attrs:
         data.interpolation = str(group.attrs['interpolation'])
     if 'band_constraints' in group.attrs:

@@ -635,6 +635,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.state_space_panel)
         plot_row.addWidget(self.averaging_panel)
         plot_row.addWidget(self.shock_panel)
+        self._time_tools_layout = plot_row
         plot_row.addWidget(self.filter_panel)
         plot_row.addWidget(self.sine_panel)
         plot_row.addWidget(self.truncate_panel)
@@ -1580,7 +1581,7 @@ class DataPane(QWidget):
     #: other reading's handler. The order is the bar's.
     _READINGS: ClassVar[tuple[Reading, ...]] = (
         Reading('averaging', 'averaging_panel', 'averaging'),
-        Reading('filter', 'filter_panel', 'averaging'),
+        Reading('filter', 'filter_panel', 'filtering'),
         # offered for a record that has a sweep specification to be
         # read against, and nowhere else (principle 3)
         Reading('sine', 'sine_panel', 'sine'),
@@ -2482,6 +2483,7 @@ class DataPane(QWidget):
                       averaging: bool = False, shocks: bool = False,
                       residual: bool = False,
                       octave: bool = False, sine: bool = False,
+                      filtering: bool = False,
                       tone: bool = False, fit: bool = False,
                       transmissibility: bool = False,
                       confidence: bool = False,
@@ -2547,7 +2549,8 @@ class DataPane(QWidget):
         # whichever button had been pressed, with no way back except
         # unpicking it first (Brandon, 2026-08-27). A fenced set of
         # five that shows one is worse than the undivided row was.
-        offers = {'averaging': averaging, 'sine': averaging and sine,
+        offers = {'averaging': averaging, 'filtering': filtering or averaging,
+                  'sine': averaging and sine,
                   'shocks': shocks, 'fit': fit,
                   'record': averaging or shocks,
                   'table': (averaging or shocks) and table}

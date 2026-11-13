@@ -252,7 +252,7 @@ RESAMPLE_INLINE_SAMPLES = 400_000
 #: worker with the bar up (`_run_long`), as a long verb does
 RMS_CHECK_INLINE_SAMPLES = 1_000_000
 from ..core.report import OTHER_SIDE
-from ..names import display_name
+from ..names import display_name, imported_name
 from ..project import TYPE_ORDER, Project, describe, type_rank
 from .object_tables import (
     ENTITY_TABLES,
@@ -1074,6 +1074,9 @@ class MainWindow(QMainWindow):
         #: {name: why} for derived objects whose source's settings have
         #: moved — read by the badges, refreshed at every settings edit
         self._stale: dict[str, str] = {}
+        from .time_tools import TimeTools
+
+        self.time_tools: TimeTools = TimeTools(self)
         self.data_pane.reread.connect(self.render_current)
         self.data_pane.copied.connect(self._show_status)
         self.scene.copied.connect(self._show_status)
@@ -2149,6 +2152,14 @@ class MainWindow(QMainWindow):
         # deliberately spare: import in, project out. Per-object save,
         # export and delete live on the object's own context menu.
         file_menu = self.menuBar().addMenu('&File')
+        view_menu = self.menuBar().addMenu('&View')
+        self.group_time_histories_action: QAction = view_menu.addAction('Group Time Histories')
+        self.group_time_histories_action.setCheckable(True)
+        self.group_time_histories_action.setChecked(
+            os.environ.get('VISUALDYNAMICS_GROUP_HISTORIES') == '1')
+        self.group_time_histories_action.toggled.connect(self._regroup_time_histories)
+        self.tree.itemDoubleClicked.connect(self._toggle_history_section)
+        self._closed_history_sections: set[str] = set()
         file_menu.addAction('&Import...', self.import_files)
         file_menu.addAction(self.save_test_action)
         report_menu = file_menu.addMenu('Generate &Report')
@@ -2368,7 +2379,20 @@ class MainWindow(QMainWindow):
                     series.append((name, obj, [detail]))
             else:
                 series.append((name, obj, None))
-        return kinds, series
+        return kinds, series or self._linked_node_series()
+
+    def _linked_node_series(self):
+        """A picked geometry node shows only its explicitly linked responses."""
+        picked = self._selected_entities()
+        if self.editing is not None or picked is None:
+            return []
+        name, component, nodes = picked
+        if component != 'nodes' or len(nodes) != 1:
+            return []
+        records = {}
+        for source, index in self.project.time_histories_at_node(name, int(nodes[0])):
+            records.setdefault(source, []).append(index)
+        return [(source, self.objects[source], rows) for source, rows in records.items()]
 
     def _select_records(self, name, records):
         """Make `records` the selection for `name`, grid or flat list alike.
@@ -3335,7 +3359,8 @@ class MainWindow(QMainWindow):
             self._remember_run_log_place()
             self.run_log_dock.panel.shut_down()
         plotters = [self.scene.built_plotter, self.data_pane.waterfall_plotter,
-                    self._mac_bars_plotter_obj]
+                    self._mac_bars_plotter_obj, self.time_tools.correlation_view]
+        self.time_tools.correlation_view = None
         self.scene.plotter = None
         self.data_pane.waterfall_plotter = None
         self._mac_bars_plotter_obj = None
@@ -6081,7 +6106,44 @@ class MainWindow(QMainWindow):
         after; the gray placeholders keep the bottom. Everywhere —
         inside a group and out — types keep the canonical order, and
         objects of one type keep their arrival order."""
+        with QSignalBlocker(self.tree):
+            self._reorder_object_rows()
+
+    def _reorder_object_rows(self):
+        selected_sections = {
+            ref[1] for item in self.tree.selectedItems()
+            if (ref := item.data(0, ROLE_REFERENCE)) and ref[0] == 'history_section'
+        }
+        sections = {}
+        for i in reversed(range(self.test_item.childCount())):
+            item = self.test_item.child(i)
+            if (item.data(0, ROLE_REFERENCE) or (None,))[0] == 'history_section':
+                self.test_item.takeChild(i)
         wanted = self._object_order(self.object_groups)
+        if self.group_time_histories_action.isChecked():
+            imported = {
+                name: (entry.path, entry.name)
+                for entry in self.project.data_index if entry.source == 'import'
+                for name in entry.objects
+            }
+            loose = []
+            for name in wanted:
+                obj = self.objects[name]
+                if not isinstance(obj, TimeHistory) or getattr(obj, 'time_comparison', None):
+                    loose.append(name)
+                    continue
+                recipe = self.project.provenance.get(name, {})
+                if recipe.get('verb') == 'filter_data':
+                    section = recipe.get('params', {}).get('tree_batch')
+                    key = f'Filtered batch: {section}' if section else 'Filtered time histories'
+                elif recipe.get('verb') == 'scale_time_histories':
+                    key = 'Scaled time histories'
+                else:
+                    key = imported.get(name, ('Raw time histories', 'Raw time histories'))
+                if isinstance(key, str):
+                    key = (key, key)
+                sections.setdefault(key, []).append(name)
+            wanted = loose + [name for names in sections.values() for name in names]
         selected = self.tree.selectedItems()
         current = self.tree.currentItem()
         moved = []
@@ -6089,6 +6151,7 @@ class MainWindow(QMainWindow):
             item = self._item_for_object(name)
             if item is None:
                 continue
+            item.setHidden(False)
             if self.test_item.indexOfChild(item) != position:
                 self.test_item.takeChild(
                     self.test_item.indexOfChild(item))
@@ -6107,6 +6170,51 @@ class MainWindow(QMainWindow):
             for item in selected:
                 item.setSelected(True)
         self._refresh_placeholders()
+        for key, names in sections.items():
+            first = self._item_for_object(names[0])
+            if first is None:
+                continue
+            header = QTreeWidgetItem()
+            header.setData(0, ROLE_REFERENCE, ('history_section', key, tuple(names)))
+            header.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            header.setToolTip(0, 'Double-click to expand or collapse. Ctrl-click another '
+                              'history group to compare the two sets.')
+            self.test_item.insertChild(self.test_item.indexOfChild(first), header)
+            self._show_history_section(header, key, names)
+            header.setSelected(key in selected_sections)
+
+    def _show_history_section(self, header, key, names):
+        closed = key in self._closed_history_sections
+        header.setText(0, f'{"▸" if closed else "▾"} {key[1]} ({len(names)})')
+        for name in names:
+            item = self._item_for_object(name)
+            if item is not None:
+                if closed:
+                    for selected in self.tree.selectedItems():
+                        ancestor = selected
+                        while ancestor is not None and ancestor is not item:
+                            ancestor = ancestor.parent()
+                        if ancestor is item:
+                            selected.setSelected(False)
+                item.setHidden(closed)
+
+    def _toggle_history_section(self, item, _column):
+        ref = item.data(0, ROLE_REFERENCE)
+        if not ref or ref[0] != 'history_section':
+            return
+        _, key, names = ref
+        if key in self._closed_history_sections:
+            self._closed_history_sections.remove(key)
+        else:
+            self._closed_history_sections.add(key)
+        with QSignalBlocker(self.tree):
+            self._show_history_section(item, key, names)
+        self._selection_changed()
+
+    def _regroup_time_histories(self, _checked):
+        self._reorder_tree()
+        self._paint_links()
+        self._selection_changed()
 
     # the Basis keeps the comparison overlay's baseline blue; other
     # groups cycle the curve palette
@@ -6168,6 +6276,9 @@ class MainWindow(QMainWindow):
         shows both groups before anything exists. The Basis is told
         apart by its blue, bold bracket alone — no text — and other
         groups take the rest of the curve palette."""
+        if self.group_time_histories_action.isChecked():
+            self.tree.link_spans = []
+            return
         placeholders = getattr(self, '_placeholder_items', {})
         tag_groups = {tag: self._role_holder(tag) for tag in placeholders}
         colors = self._group_colors()
@@ -9368,7 +9479,7 @@ class MainWindow(QMainWindow):
                         text = self._text_import_choices(path)
                         if text is None:
                             continue
-                        options = {**options, **text}
+                        options = {**options, **text, **self._unv_import_choices(path)}
                         # a stream that would take a large share of
                         # the machine is imported through a window the
                         # user chooses on a preview — or not at all
@@ -9604,9 +9715,18 @@ class MainWindow(QMainWindow):
                 f'{name} ({target.num_photos} total)')
         return name
 
+    def _unv_import_choices(self, path):
+        """Use the locally configured reference node for labeled UNV pairs."""
+        from .preferences import settings
+
+        if os.path.splitext(str(path))[1].lower() not in ('.unv', '.uff', '.uf'):
+            return {}
+        node = settings().value('unv_reference_node')
+        return {'reference_node': int(node)} if node is not None else {}
+
     def import_path(self, path: str, **units: str) -> str | None:
         try:
-            result = io.import_file(path, **units)
+            result = io.import_file(path, **{**self._unv_import_choices(path), **units})
         except (ValueError, OSError) as e:
             QMessageBox.critical(self, 'Import failed', str(e))
             return None
@@ -9643,6 +9763,8 @@ class MainWindow(QMainWindow):
         try:
             checksum = self._checksum(local)
             self.project._index_import(local, result, names, checksum)
+            if self.group_time_histories_action.isChecked():
+                self._reorder_tree()
         except (OSError, ValueError, Cancelled) as failure:
             self._show_status(f'{os.path.basename(local)} is imported but '
                               f'not in the data index: {failure}')
@@ -9743,7 +9865,8 @@ class MainWindow(QMainWindow):
                          if group['role']}
                 mapping, contents = {}, list(result.items())
                 for n, (name, obj) in enumerate(contents):
-                    mapping[name] = self.add_object(name, obj, source=path)
+                    added = self.project.add(name, obj)
+                    mapping[name] = self.show_object(added, source=path, select=False)
                     if tick is not None:
                         tick(n + 1, len(contents))
                 if any(old != new for old, new in mapping.items()):
@@ -9773,15 +9896,19 @@ class MainWindow(QMainWindow):
                         self.set_project_type(result.project_type)
                 if self.object_groups:
                     self._links_changed()
+                else:
+                    self._reorder_tree()
                 imported = list(mapping.values())
+                if fresh:
+                    self.tree.setCurrentItem(self.test_item)
             elif isinstance(result, dict):
                 imported = [
-                    self.add_object(display_name(type(obj).__name__), obj,
+                    self.add_object(imported_name(obj), obj,
                                     source=path, key=key)
                     for key, obj in result.items()]
             else:
                 imported = self.add_object(
-                    display_name(type(result).__name__), result, source=path)
+                    imported_name(result), result, source=path)
         if fresh_open:
             self.project.journal = [
                 f'project = visualdynamics.Project.open({str(path)!r})']
@@ -10466,6 +10593,7 @@ class MainWindow(QMainWindow):
     def render_current(self) -> None:
         """Draw everything selected: geometries are drawn together, and
         curves share axes."""
+        self.time_tools.hide()
         self._update_toolbar_actions()
         # the drive box belongs to the modal FRFs' deflection, which
         # puts it back when it is what is drawn
@@ -10493,6 +10621,16 @@ class MainWindow(QMainWindow):
         # exits before _show_views runs
         self.data_pane.show_waterfall(False)
         references = self.selected_references()
+        selected_sections = [
+            ref[2] for item in self.tree.selectedItems()
+            if (ref := item.data(0, ROLE_REFERENCE)) and ref[0] == 'history_section'
+        ]
+        compare_sections = len(selected_sections) == 2 and not references
+        if compare_sections:
+            # Section rows only supply the comparison view. Object actions
+            # still require picking the individual histories.
+            names = dict.fromkeys(name for section in selected_sections for name in section)
+            references = [('object', name, self.objects[name], None) for name in names]
         # the fit owns the panes while its FRF stays selected; looking at
         # anything else ends the fit (the fitted modes are already in the
         # project — nothing is lost by leaving)
@@ -10643,6 +10781,7 @@ class MainWindow(QMainWindow):
                 else:
                     picture_sets.append((name, obj, None))
 
+        series = series or self._linked_node_series()
         self._update_dof_controls(geometries, series, channels)
         self._update_sensor_controls(geometries, series, channels, shapes)
         self._update_link_actions()
@@ -10752,7 +10891,8 @@ class MainWindow(QMainWindow):
             elif series:
                 overlay, synthesis_note = self._synthesis_series(shapes,
                                                                  series)
-                parts.append(self._render_series(series + overlay))
+                parts.append(self._render_series(
+                    series + overlay, compare_sections=compare_sections))
                 if synthesis_note:
                     parts.append(synthesis_note)
                 parts.append(self._transformed_rows_note(series))
@@ -14112,6 +14252,10 @@ class MainWindow(QMainWindow):
                 FilterOverlay(item, filtering, rate, colors))
         panel = self.data_pane.filter_panel
         panel.show_history(history, filtering)
+        _kinds, series = self._current_series()
+        count = len(series)
+        panel.apply_button.setText(f'Apply Filter to {count} Histories' if count > 1
+                                   else 'Apply Filter')
         panel.show()
 
     def _clear_filtering(self):
@@ -15897,11 +16041,13 @@ class MainWindow(QMainWindow):
         provenance fingerprints the source's `filtering`, so the edit
         is the moment its refresh badge appears.
         """
-        history = self._averaging_history()
-        if history is None:
+        _kinds, series = self._current_series()
+        histories = [d for _n, d, _r in series if isinstance(d, TimeHistory)]
+        if not histories:
             return
-        history.filtering = filtering
-        self.project.record_setting(history, 'filtering', filtering)
+        for history in histories:
+            history.filtering = filtering
+            self.project.record_setting(history, 'filtering', filtering)
         for overlay in self.filter_overlays:
             overlay.set_filtering(filtering)
         # and the stage's twin, when that is the reading up: the flat
@@ -16208,7 +16354,10 @@ class MainWindow(QMainWindow):
             return ' — the 0 Hz line is off the log axis'
         return ''
 
-    def _render_series(self, series, cursor=False, chosen='selected'):
+    def _render_series(self, series, cursor=False, chosen='selected', compare_sections=False):
+        special = self.time_tools.render(series, compare_sections=compare_sections)
+        if special is not None:
+            return special
         wants_map = self._map_wanted(series)
         diagonals = self._drive_points_for(series)
         all_frf = bool(series) and all(isinstance(data, Frf)
@@ -16246,6 +16395,8 @@ class MainWindow(QMainWindow):
                                      complex_data=complex_series,
                                      pair=offered,
                                      averaging=history is not None,
+                                     filtering=bool(series) and all(isinstance(d, TimeHistory)
+                                                                   for _n, d, _r in series),
                                      sine=history is not None
                                      and bool(self.project.sine_sweep_specifications),
                                      shocks=history is not None,
@@ -16613,6 +16764,17 @@ class MainWindow(QMainWindow):
                             f'{info["drawn"]} shared '
                             f'channel{"s" * (info["drawn"] != 1)} on the '
                             f'stage{note}')
+        if (len(series) > 1 and self.data_pane.showing_filter
+                and all(isinstance(d, TimeHistory) for _n, d, _r in series)):
+            # Preview the first history at its own sample rate. The same
+            # settings are validated at every selected history's rate on Apply.
+            self.data_pane.offer_waterfall(False)
+            self.data_pane.show_waterfall(False)
+            self.data_pane.toolbar.show()
+            build_plots(self.data_pane.graphics, series[:1], unit_system=self.unit_system,
+                        theme=self.theme_name)
+            self._draw_filtering(series[0][1])
+            return f'Filter preview: {series[0][0]}; Apply filters all {len(series)} histories'
         entry = series[0] if len(series) == 1 else None
         if entry is None and series and not pairs and not lone_fed \
                 and not any(getattr(data, 'synthesized', False)
@@ -16675,6 +16837,8 @@ class MainWindow(QMainWindow):
             component=self.data_pane.component()
             if complex_series else 'magnitude')
         axis_note = self._offer_frequency_axis(series)
+        if self.time_tools.scale_action.isVisible():
+            self.data_pane.toolbar.show()
         if len(series) == 1:
             # the *unpaged* entry: paging swaps records=None for a slice,
             # and reading that back would report a whole object as
@@ -16720,8 +16884,9 @@ class MainWindow(QMainWindow):
             self._draw_averaging(history)
         if history is not None and self.data_pane.showing_shocks:
             self._draw_shocks(history)
-        if history is not None and self.data_pane.showing_filter:
-            self._draw_filtering(history)
+        if self.data_pane.showing_filter and series and all(
+                isinstance(d, TimeHistory) for _n, d, _r in series):
+            self._draw_filtering(series[0][1])
         if history is not None and self.data_pane.showing_sine:
             self._draw_sine(history)
         if history is not None and self.data_pane.showing_truncate:
@@ -17980,6 +18145,15 @@ class MainWindow(QMainWindow):
 
         The settings are the history's own; with none set, the suggested
         filter is used, as in `Project.filter_data`."""
+        _kinds, series = self._current_series()
+        if len(series) > 1 and all(isinstance(d, TimeHistory) for _n, d, _r in series):
+            try:
+                names = self.project.filter_histories(*(n for n, _d, _r in series))
+                self.time_tools.add_results(names)
+                self._show_status(f'Filtered {len(names)} histories; originals kept')
+            except ValueError as error:
+                self._show_status(str(error))
+            return
         acted = self._act_on(
             TimeHistory,
             'Select a time history to filter',

@@ -991,7 +991,10 @@ class ShapeSet:
         (`pair_caption`). When the sets are on two geometries, the other
         set is projected onto this one's DOFs to measure the alignment
         (`correlate.project_shapes`) and drawn on its own geometry, or,
-        with `on_basis`, the projection is drawn on this geometry.
+        with `on_basis`, the projection is drawn on this geometry. Drawn
+        on two geometries, each node the projection matched is joined to
+        the other geometry's node it was matched to by a dashed
+        connector; pass ``matches=()`` to leave them out.
         Raises ValueError when either set has no DOFs on its geometry.
 
         Parameters
@@ -1018,7 +1021,9 @@ class ShapeSet:
             ('first', 'second').
         **kwargs
             Passed through to `viz.animate.animate_pair`: `colors`,
-            `alphas`, `scale`, `screenshot=`, `movie=`.
+            `alphas`, `scale`, `screenshot=`, `movie=`, and `matches`,
+            the (node id here, node id there) pairs to connect, by
+            default the projection's own.
 
         Returns
         -------
@@ -1028,10 +1033,13 @@ class ShapeSet:
         from ..viz.animate import animate_pair, pair_deflections
 
         other_geometry = other_geometry or geometry
+        report = getattr(projected, 'projection_report', None) or {}
         if other_geometry is not geometry and projected is None:
             from .correlate import project_shapes
-            projected, _report = project_shapes(other, other_geometry,
-                                                self, geometry)
+            projected, report = project_shapes(other, other_geometry,
+                                               self, geometry)
+        if other_geometry is not geometry and not on_basis:
+            kwargs.setdefault('matches', report.get('pairs'))
         first, second = pair_deflections(self, mode, other, other_mode,
                                          geometry, other_geometry,
                                          projected, on_basis)

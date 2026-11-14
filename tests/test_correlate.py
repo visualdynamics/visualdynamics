@@ -77,6 +77,19 @@ def test_the_tolerance_drops_far_nodes_until_loosened():
     assert report['dropped'] == []
 
 
+def test_the_report_names_each_matched_pair_and_the_unmatched():
+    """The pairing itself, by node id: 101 sits a millimeter from the
+    cube's corner 1, 102 a millimeter from corner 8, and 103 is far
+    outside the tolerance."""
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model(extra_node=True)
+    _projected, report = project_shapes(fem_shapes, fem_geometry,
+                                        test_shapes, test_geometry)
+    assert report['pairs'] == [(101, 1), (102, 8)]
+    assert report['unmatched'] == [103]
+    assert len(report['pairs']) == report['matched']
+
+
 def test_mismatched_unit_definitions_are_refused():
     fem_geometry, fem_shapes = _fem()
     test_geometry, test_shapes = _test_model()
@@ -226,6 +239,81 @@ def test_comparing_across_geometries_always_projects(window, pump):
     pump()
     assert window.animator.second.geometry is \
         window.objects['FEM Geometry']
+
+
+def test_the_overlay_joins_each_matched_pair_with_a_dashed_line(window,
+                                                                pump):
+    """Two sets on two geometries: each basis node the projection
+    matched is joined to its FEM node by a dashed connector, in a color
+    neither geometry wears, and the connector keeps joining the two
+    nodes while they move."""
+    from visualdynamics.viz.animate import LINK_DASHES
+
+    _populate(window)      # ends with the two shape sets selected
+    window.set_link_role('Test Shapes', 'Basis')
+    window.render_current()
+    pump()
+    assert window.node_pairs_action.isVisible()
+    links = window.animator.links
+    assert links is not None
+    test, fem = (window.objects['Test Geometry'],
+                 window.objects['FEM Geometry'])
+    drawn = [(int(test.node_id[a]), int(fem.node_id[b]))
+             for a, b in links.rows]
+    assert drawn == [(101, 1), (102, 8)], 'the pairs drawn are the pairs matched'
+    assert links.mesh.n_lines == 2 * LINK_DASHES, 'dashed: four dashes each'
+    assert links.dots.n_verts == 2, "a dot on each pair's FEM node"
+    actor = window.scene.plotter.renderer.actors['node-links']
+    color = actor.prop.color.hex_rgb
+    assert color.lower() not in {c.lower() for c in window._compare['colors']}
+
+    def ends():
+        along = links.view.reshape(len(links.rows), -1, 3)
+        return along[:, 0], along[:, -1]
+
+    window.animator.set_parameter(np.pi / 3)
+    start, end = ends()
+    assert start[1] == pytest.approx(
+        window.animator.first.view[test.node_index(102)])
+    assert end[1] == pytest.approx(
+        window.animator.second.view[fem.node_index(8)])
+    assert not np.allclose(end[1], window.animator.second.base[
+        fem.node_index(8)]), 'the end moved with the deflected FEM node'
+
+    # off: the scene carries no connectors, and the toggle stays offered
+    window.node_pairs_action.setChecked(False)
+    window.render_current()
+    pump()
+    assert window.animator.links is None
+    assert 'node-links' not in window.scene.plotter.renderer.actors
+    assert window.node_pairs_action.isVisible()
+    window.node_pairs_action.setChecked(True)
+    # the projection on the basis mesh draws one geometry: nothing to join
+    window.project_action.setChecked(True)
+    window.render_current()
+    pump()
+    assert window.animator.links is None
+    assert not window.node_pairs_action.isVisible()
+    window.project_action.setChecked(False)
+
+
+def test_one_geometry_offers_no_matched_nodes(window, pump):
+    geometry, shapes = _fem()
+    copy = ShapeSet(shapes.frequency, shapes.damping, shapes.coordinate,
+                    -shapes.shape_matrix)
+    window.add_object('FEM Geometry', geometry)
+    window.add_object('FEM Shapes', shapes)
+    window.add_object('Copy', copy)
+    _select(window, 'FEM Geometry', 'FEM Shapes', 'Copy')
+    window.link_selected()
+    _select(window, 'FEM Shapes', 'Copy')
+    window.render_current()
+    pump()
+    from visualdynamics.viz.animate import PairedAnimator
+
+    assert isinstance(window.animator, PairedAnimator)
+    assert window.animator.links is None
+    assert not window.node_pairs_action.isVisible()
 
 
 def test_the_report_animates_the_matched_overlay(window, pump):

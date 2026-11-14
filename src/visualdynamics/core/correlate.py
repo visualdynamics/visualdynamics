@@ -59,9 +59,12 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
     Returns (shape_set, report): the projected ShapeSet and a dict with
     'matched' and 'total' test node counts, the 'worst' matched
     distance and the 'limit' (both in meters when the units are
-    defined), and 'dropped', the test DOFs that could not be projected
+    defined), 'dropped', the test DOFs that could not be projected
     (those that are not translations on the test geometry, and those
-    at unmatched nodes).
+    at unmatched nodes), 'pairs', each matched test node with the FEM
+    node it was matched to as (test node id, FEM node id) in the test
+    geometry's node order, and 'unmatched', the ids of the test nodes
+    with no FEM node within the limit.
 
     Raises ValueError when only one geometry has units defined, when
     either has no nodes, when none of the test DOFs are translations
@@ -152,7 +155,16 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
         comment=['projected to test DOFs'] * fem_shapes.num_shapes,
         mass_unit=fem_shapes.mass_unit,
         unscaled=getattr(fem_shapes, 'unscaled', False))
+    # the pairing itself, by node id, so it can be drawn and checked:
+    # the counts alone cannot show a test node matched to the wrong FEM
+    # node (Brandon, 2026-11-13: which nodes were matched to each other)
+    test_ids, fem_ids = test_geometry.node_id, fem_geometry.node_id
+    pairs = [(int(test_ids[row]), int(fem_ids[nearest[int(row)]]))
+             for row in unique_rows if int(row) in matched_rows]
+    unmatched = [int(test_ids[row]) for row in unique_rows
+                 if int(row) not in matched_rows]
     report = {'matched': len(matched_rows), 'total': len(unique_rows),
               'worst': max(distance[row] for row in matched_rows),
-              'limit': limit, 'dropped': dropped}
+              'limit': limit, 'dropped': dropped, 'pairs': pairs,
+              'unmatched': unmatched}
     return projected, report

@@ -175,7 +175,9 @@ as a monitor.
 
 A controller run sets these for you. A channel with a feedback device
 is a drive, which is Rattlesnake's own rule, so it imports as a
-reference; every other enabled channel imports as a response. Each
+reference. So does a channel an environment names as its reference,
+such as the hammer's force in a modal hammer test, which has no feedback
+device. Every other enabled channel imports as a response. Each
 environment in the file names its control channels, and those import
 with Control checked. A run with more than one environment is
 described in the next section.

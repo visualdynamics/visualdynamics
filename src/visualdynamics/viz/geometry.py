@@ -63,6 +63,13 @@ COLORMAP = 'viridis'
 #: plate seen from behind is still the plate.
 SKIN_OPACITY = 0.5
 
+#: the width, in pixels, a traceline or a bar element is drawn at. 3
+#: rather than 2: a geometry of lines alone was hard to see with a
+#: finite element model's shape drawn over the test's (Brandon,
+#: 2026-11-13). The faint context and the picked highlight are set
+#: against it by their callers, at 1 and at 4 to 6.
+LINE_WIDTH = 3.0
+
 
 def color_name(index: int) -> str:
     """The name of a color index ('gray', 'blue', ...), wrapping past 9."""
@@ -217,7 +224,7 @@ def _cells(index_lists: Sequence[Sequence[int]]) -> np.ndarray:
 
 def geometry_scene(geometry: Geometry, unit_system: UnitSystem | None = None,
                    plotter: Any = None, node_size: float = 8.0,
-                   line_width: float = 2.0, show_edges: bool = True,
+                   line_width: float = LINE_WIDTH, show_edges: bool = True,
                    opacity: float = 1.0,
                    labels: Sequence[str] | None = None,
                    off_screen: bool = False, theme: Any = None,
@@ -824,7 +831,7 @@ def label_spots(geometry: Geometry, points: np.ndarray, kind: str,
 
 def add_geometry(plotter: Any, geometry: Geometry,
                  unit_system: UnitSystem | None = None,
-                 node_size: float = 8.0, line_width: float = 2.0,
+                 node_size: float = 8.0, line_width: float = LINE_WIDTH,
                  show_edges: bool = True, opacity: float = 1.0,
                  labels: Sequence[str] |
                  Mapping[str, Sequence[int] | None] | None = None,

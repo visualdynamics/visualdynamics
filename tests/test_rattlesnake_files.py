@@ -519,6 +519,77 @@ def test_the_drives_come_from_the_channel_table_not_from_elimination(tmp_path):
     assert set(frf.reference_dof) == {'105Z+', '106Z+'}, 'the feedback pair'
 
 
+def write_hammer_run(path, units, *, environments=(('Modal', None, (3,)),)):
+    """A Rattlesnake time recording of a hammer test: no channel has a
+    feedback device, and each environment, `(name, active rows or None
+    for all, reference indices counted among its own channels)`, states
+    its references."""
+    import netCDF4
+
+    channels, samples = len(units), 64
+    with netCDF4.Dataset(path, 'w', format='NETCDF4') as ds:
+        ds.sample_rate = 256.0
+        ds.createDimension('response_channels', channels)
+        ds.createDimension('time_samples', samples)
+        ds.createDimension('num_environments', len(environments))
+        ds.createVariable('time_data', 'f8',
+                          ('response_channels', 'time_samples'))[...] = (
+            np.random.default_rng(1).standard_normal((channels, samples)))
+        group = ds.createGroup('channels')
+        for name, values in (('node_number', [str(100 + i) for i in range(channels)]),
+                             ('node_direction', ['Z+'] * channels),
+                             ('unit', units),
+                             ('feedback_device', [''] * channels)):
+            group.createVariable(name, str, ('response_channels',))[:] = \
+                np.array(values, dtype=object)
+        ds.createVariable('environment_names', str, ('num_environments',))[:] = \
+            np.array([name for name, _rows, _refs in environments], dtype=object)
+        mask = np.zeros((channels, len(environments)), dtype='i1')
+        for index, (name, rows, references) in enumerate(environments):
+            active = list(range(channels)) if rows is None else list(rows)
+            mask[active, index] = 1
+            env = ds.createGroup(name)
+            env.createDimension('reference_channels', len(references))
+            env.createVariable('reference_channel_indices', 'i8',
+                               ('reference_channels',))[...] = references
+        ds.createVariable('environment_active_channels', 'i1',
+                          ('response_channels', 'num_environments'))[...] = mask
+    return path
+
+
+def test_a_hammers_force_is_a_reference(tmp_path, qt_app):
+    """A modal hammer's force channel has no feedback device, the one
+    thing that made a channel a reference, so it came in a response and
+    the averaging panel offered no FRFs (Brandon, 2026-11-13). The Modal
+    environment states its references; those are references."""
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.gui.averaging_panel import AveragingPanel
+
+    path = write_hammer_run(str(tmp_path / 'hammer.nc4'),
+                            ['m/s^2'] * 3 + ['N'])
+    out = visualdynamics.import_file(path)
+    history = out['time_data']
+    assert history.reference_channels() == [('103Z+', 'force')]
+    assert history.response_channels() == [('100Z+', 'acceleration'),
+                                           ('101Z+', 'acceleration'),
+                                           ('102Z+', 'acceleration')]
+    assert out['channel_table'].roles() == ['response'] * 3 + ['reference']
+    panel = AveragingPanel()
+    panel.show_history(history, Averaging(frame_length=32))
+    assert panel.frfs_button.isVisibleTo(panel), 'Compute FRFs is offered'
+
+
+def test_an_environment_counts_its_references_among_its_own_channels(tmp_path):
+    """Rattlesnake numbers an environment's channels among those its
+    active-channel mask marks: the Modal run's reference 3 here is the
+    file's channel 5, not its channel 3."""
+    path = write_hammer_run(
+        str(tmp_path / 'two.nc4'), ['m/s^2'] * 5 + ['N'],
+        environments=(('Random', (0, 1), ()), ('Modal', (2, 3, 4, 5), (3,))))
+    table = visualdynamics.import_file(path)['channel_table']
+    assert table.roles() == ['response'] * 5 + ['reference']
+
+
 def test_a_spectral_saves_time_data_splits_into_its_captures(tmp_path):
     """Its UI appends one accepted average's frame at a time, so the samples
     are separate captures laid end to end."""

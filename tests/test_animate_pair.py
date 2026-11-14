@@ -93,6 +93,29 @@ def test_two_geometries_align_through_the_projection(plate, monkeypatch):
     assert seen['second'][0] is sparse
 
 
+def test_two_geometries_connect_the_nodes_the_projection_matched(
+        plate, monkeypatch):
+    geometry, truth, flipped, sparse, test = plate
+    from visualdynamics.core.correlate import project_shapes
+
+    seen = _captured(monkeypatch)
+    test.animate_pair(sparse, 8, flipped, 8, geometry)
+    _projected, report = project_shapes(flipped, geometry, test, sparse)
+    assert seen['matches'] == report['pairs']
+    assert len(seen['matches']) == 10, 'each test node, once'
+    # the plate's test nodes are a subset of the model's: each matched
+    # to itself
+    assert all(a == b for a, b in seen['matches'])
+    test.animate_pair(sparse, 8, flipped, 8, geometry, matches=())
+    assert seen['matches'] == (), 'a script can leave them out'
+    seen.clear()
+    test.animate_pair(sparse, 8, flipped, 8, geometry, on_basis=True)
+    assert seen.get('matches') is None, 'one geometry drawn: nothing to join'
+    seen.clear()
+    truth.animate_pair(geometry, 8, flipped, 8)
+    assert seen.get('matches') is None
+
+
 def test_a_set_off_its_geometry_is_refused(plate):
     geometry, truth, _flipped, _sparse, _test = plate
     far = ShapeSet(truth.frequency, truth.damping, ['9999X+'],

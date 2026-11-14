@@ -219,6 +219,15 @@ set projected onto the Basis geometry instead of on its own. *Add
 Matches* (the **+** on the bar) commits the selected squares to the
 matched-modes object for that pair of sets.
 
+When the sets are on two geometries, the overlay joins each Basis node
+the projection matched to the node of the other geometry it was matched
+to, with a dashed line in the scene's text color and a dot on the other
+geometry's node. The lines move with the two shapes, and the dot shows
+the matched node even where the two nodes are at the same point.
+*Show Matched Nodes* turns the lines off and on, and the status line
+gives how many of the Basis nodes were matched. With *Animate the
+Projection* on, only the Basis geometry is drawn, so there are no lines.
+
 ![Two shape sets: the MAC, one pair chosen](images/modal-mac.png)
 
 ### An FRF and a shape set

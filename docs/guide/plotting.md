@@ -22,7 +22,9 @@ shapes.animate(geometry, 2, screenshot='mode3.png')
 shapes.animate(geometry, 2, movie='mode3.mp4')   # whole cycles, as a video
 shapes.animate_pair(geometry, 2, fem_shapes, 3, fem_geometry)
                                         # two modes overlaid, as a MAC
-                                        # cell animates them
+                                        # cell animates them, dashed lines
+                                        # joining the matched nodes
+                                        # (matches=() leaves them out)
 
 history.animate(geometry)               # time records on the geometry
 history.animate(geometry, quantity='force')   # one quantity of a mixed record

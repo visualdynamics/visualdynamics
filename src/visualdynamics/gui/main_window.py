@@ -2520,6 +2520,21 @@ class MainWindow(QMainWindow):
             lambda _checked: self.render_current())
         toolbar.addAction(self.project_action)
         self.project_action.setVisible(False)
+        # which nodes the projection matched across the two geometries:
+        # dashed connectors between each pair (Brandon, 2026-11-13: no
+        # way to tell which nodes were matched to each other). Only when
+        # both geometries are drawn, so not with the projection on
+        self.node_pairs_action: QAction = QAction(
+            control_icon('node_pairs'), 'Show Matched Nodes', self)
+        self.node_pairs_action.setCheckable(True)
+        self.node_pairs_action.setChecked(True)
+        self.node_pairs_action.setToolTip(
+            'Join each node of the basis geometry to the node of the '
+            'other geometry it was matched to, with a dashed line')
+        self.node_pairs_action.triggered.connect(
+            lambda _checked: self.render_current())
+        toolbar.addAction(self.node_pairs_action)
+        self.node_pairs_action.setVisible(False)
 
         # Every action below appears only when it is a real option — see
         # the interface note in PLAN.md. A toolbar of grayed-out buttons is
@@ -10946,6 +10961,7 @@ class MainWindow(QMainWindow):
             self.add_matches_action.setVisible(False)
             self.overlay_action.setVisible(False)
             self.project_action.setVisible(False)
+            self.node_pairs_action.setVisible(False)
 
     def _show_bracket_menu(self, span, position):
         """Right-clicking a link bracket: the group's own options.
@@ -11099,15 +11115,17 @@ class MainWindow(QMainWindow):
         on different linked geometries, `b` is projected onto `a`'s
         DOFs first — matching DOF names across geometries would trust
         the names to mean the same physical directions. Returns
-        (matrix, note, projected): the note says what the projection
-        did, and the projected set (or None) is what an overlay
-        animation of `b` should deflect."""
+        (matrix, note, projected, pairs): the note says what the
+        projection did, the projected set (or None) is what an overlay
+        animation of `b` should deflect, and the pairs are the
+        projection's matched nodes, (a's node id, b's node id), that the
+        overlay joins with dashed connectors."""
         from ..core.correlate import project_shapes
 
         a_home = self.linked_geometry(a_name)
         b_home = self.linked_geometry(b_name)
         if a_home is None or b_home is None or a_home[1] is b_home[1]:
-            return cross_mac(a, b), None, None
+            return cross_mac(a, b), None, None, []
         try:
             projected, report = project_shapes(b, b_home[1], a,
                                                a_home[1])
@@ -11120,7 +11138,7 @@ class MainWindow(QMainWindow):
         note = (f'{b_name} projected onto {a_name} DOFs — '
                 f'{report["matched"]} of {report["total"]} nodes '
                 f'matched{dropped}')
-        return cross_mac(a, projected), note, projected
+        return cross_mac(a, projected), note, projected, report['pairs']
 
     def _compare_mac_view(self, shapes):
         """The interactive cross-MAC both comparison screens share:
@@ -11135,7 +11153,7 @@ class MainWindow(QMainWindow):
         a_name, b_name = names
         a, b = self.objects[a_name], self.objects[b_name]
         try:
-            matrix, note, projected = self._comparison_matrix(
+            matrix, note, projected, node_pairs = self._comparison_matrix(
                 a_name, a, b_name, b)
         except ValueError as why:
             self._clear_animator()
@@ -11156,6 +11174,7 @@ class MainWindow(QMainWindow):
         self._compare['matrix'] = matrix
         self._compare['note'] = note
         self._compare['projected'] = projected
+        self._compare['node_pairs'] = node_pairs
         # the grid reads tall: whichever set has more modes makes the
         # rows, and clicks map back through the same orientation
         tall = b.num_shapes > a.num_shapes
@@ -11235,6 +11254,7 @@ class MainWindow(QMainWindow):
             return view
         a_name, a, b_name, b, matrix, row, column = view
         self.table_bar.show()
+        self.node_pairs_action.setVisible(False)
         home = (self.linked_geometry(a_name)
                 or self.linked_geometry(b_name))
         self.overlay_action.setVisible(home is not None)
@@ -11266,6 +11286,7 @@ class MainWindow(QMainWindow):
             return view
         a_name, a, b_name, b, matrix, row, column = view
         self.table_bar.show()
+        self.node_pairs_action.setVisible(False)
         self.overlay_action.setVisible(True)
         self.project_action.setVisible(
             self._compare.get('projected') is not None)
@@ -11318,6 +11339,14 @@ class MainWindow(QMainWindow):
         first, second = pair_deflections(a, row, b, column, a_geometry,
                                          b_geometry, projected, on_basis)
         showing = (a_geo_name, 'projected' if on_basis else b_geo_name)
+        # the connectors join two drawn geometries: none on one geometry,
+        # and none with the projection drawn on the basis mesh in place
+        # of the other geometry
+        joined = (a_geometry is not b_geometry and not on_basis
+                  and bool(self._compare.get('node_pairs')))
+        self.node_pairs_action.setVisible(joined)
+        matches = (self._compare['node_pairs']
+                   if joined and self.node_pairs_action.isChecked() else None)
         # each mesh wears its own bracket's color, so the scene reads
         # straight off the project tree; unlinked sets keep the old
         # natural-vs-orange contrast
@@ -11335,7 +11364,8 @@ class MainWindow(QMainWindow):
         self._build_comparison_animator(
             first, second,
             caption=pair_caption(a_name, a, b_name, b, row, column),
-            showing=showing, colors=(color_a, color_b), alphas=alphas)
+            showing=showing, colors=(color_a, color_b), alphas=alphas,
+            matches=matches)
         # the phase carries over: stepping through MAC cells mid-swing
         # must not snap the model straight every time
         self.animator.set_parameter(
@@ -11346,10 +11376,12 @@ class MainWindow(QMainWindow):
         return None
 
     def _build_comparison_animator(self, first_pair, second_pair,
-                                   caption, showing, colors, alphas):
+                                   caption, showing, colors, alphas,
+                                   matches=None):
         """Like _build_animator, twice: two moving copies in one
         scene (`viz.animate.build_pair`), each (geometry, deflection)
-        pair on its own mesh, in its own color and at its own opacity."""
+        pair on its own mesh, in its own color and at its own opacity,
+        and `matches`' node pairs joined by dashed connectors."""
         from ..viz.animate import build_pair
 
         theme = resolve_theme(self.theme_name)
@@ -11363,7 +11395,7 @@ class MainWindow(QMainWindow):
         self.animator = build_pair(
             self.scene.plotter, first_pair, second_pair, colors=colors,
             alphas=alphas, unit_system=self.unit_system,
-            text_color=theme['scene_text'])
+            text_color=theme['scene_text'], matches=matches)
         self.animator.set_scale(self.scale_box.value())
         self._add_sensors([first_pair[0]], follow=self.animator)
         self.scene.axis_unit = self.animator.axis_unit

@@ -3352,8 +3352,8 @@ class Project(dict):
         -------
         tuple of (ShapeSet, dict)
             The set to read, and the projection's report ('matched',
-            'total', 'worst', 'limit', 'dropped'), empty when the set's
-            own DOFs are read.
+            'total', 'worst', 'limit', 'dropped', 'pairs', 'unmatched'),
+            empty when the set's own DOFs are read.
         """
         from .core.correlate import project_shapes
 

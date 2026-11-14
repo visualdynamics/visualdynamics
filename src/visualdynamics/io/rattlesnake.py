@@ -256,11 +256,45 @@ def _channel_table(ds):
     columns['daq_range'] = _input_ranges(columns.get('minimum_value'),
                                      columns.get('maximum_value'),
                                      num_channels)
-    columns['role'] = ['reference' if str(value).strip() else 'response'
-                       for value in columns.get(
-                           'feedback_device', [''] * num_channels)]
+    # and a channel an environment names as its reference is one too: a
+    # modal hammer's force has no feedback device, so the rule above
+    # alone made it a response, and a hammer run offered no FRFs
+    # (Brandon, 2026-11-13)
+    feedback = columns.get('feedback_device', [''] * num_channels)
+    references = ({i for i, value in enumerate(feedback) if str(value).strip()}
+                  | _stated_references(ds, num_channels))
+    columns['role'] = ['reference' if i in references else 'response'
+                       for i in range(num_channels)]
     table = ChannelTable(columns)
     return table, table.dof_strings(), units, columns
+
+
+def _stated_references(ds, num_channels: int) -> set[int]:
+    """The channels an environment states as its references
+    (`reference_channel_indices`, a Modal environment's hammer or shaker
+    force), as rows of the file's channel table.
+
+    An environment counts its channels among the ones
+    `environment_active_channels` marks for it, in the file's order, as
+    Rattlesnake loads them; a file without the mask has every channel in
+    every environment.
+    """
+    names = (_strings(ds.variables['environment_names'])
+             if 'environment_names' in ds.variables
+             else [name for name in ds.groups if name != 'channels'])
+    mask = (np.asarray(ds.variables['environment_active_channels'][:], dtype=bool)
+            if 'environment_active_channels' in ds.variables else None)
+    found: set[int] = set()
+    for index, name in enumerate(names):
+        group = ds.groups.get(name)
+        if group is None or 'reference_channel_indices' not in group.variables:
+            continue
+        rows = (np.arange(num_channels) if mask is None
+                else np.flatnonzero(mask[:, index]))
+        stated = np.asarray(group.variables['reference_channel_indices'][()],
+                            dtype=int).ravel()
+        found.update(int(rows[i]) for i in stated if 0 <= i < len(rows))
+    return found
 
 
 def _streams(ds) -> list[tuple[str, str, str]]:

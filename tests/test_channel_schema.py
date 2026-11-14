@@ -157,7 +157,9 @@ def test_a_rattlesnake_run_states_each_input_range():
         'unit': var(['g', 'g', 'N']),
         'minimum_value': var(['-10', '-0.5', '']),
         'maximum_value': var(['10', '0.5', ''])})
-    table = _channel_table(SimpleNamespace(groups={'channels': channels}))[0]
+    # a file's root has variables too; this one names no environment
+    table = _channel_table(SimpleNamespace(groups={'channels': channels},
+                                           variables={}))[0]
     assert list(table.daq_ranges()[:2]) == [10.0, 0.5]
     assert np.isnan(table.daq_ranges()[2])
 

@@ -113,6 +113,14 @@ class PairedAnimator:
         self.first: GeometryAnimator = first
         self.second: GeometryAnimator = second
         self.axis_unit: str = first.axis_unit
+        #: the connectors between the two copies' matched nodes, or None
+        self.links: NodeLinks | None = None
+
+    def link(self, links: NodeLinks) -> None:
+        """Draw `links` between the copies from now on, moving with
+        both."""
+        self.links = links
+        links.place()
 
     @property
     def deflection(self) -> Any:
@@ -130,11 +138,15 @@ class PairedAnimator:
         automatic scale."""
         self.first.set_scale(user_scale)
         self.second.set_scale(user_scale)
+        if self.links is not None:
+            self.links.place()
 
     def set_parameter(self, parameter: float) -> None:
         """Move both copies to this phase or index."""
         self.first.set_parameter(parameter)
         self.second.set_parameter(parameter)
+        if self.links is not None:
+            self.links.place()
 
     def follow(self, drawn: Any) -> None:
         """Move a mesh drawn at nodes with the first copy: the +
@@ -149,6 +161,80 @@ class PairedAnimator:
         """Put both copies back at their undeformed positions."""
         self.first.reset()
         self.second.reset()
+        if self.links is not None:
+            self.links.place()
+
+
+#: dashes in each connector between matched nodes. A count rather than a
+#: length: matched nodes are close by construction, often a hair apart,
+#: and a dash of fixed length would draw a short connector as a dot or
+#: as a solid bar
+LINK_DASHES = 4
+
+
+class NodeLinks:
+    """Dashed connectors between the matched nodes of two moving
+    copies, with a dot on the second copy's node of each pair.
+
+    `rows` holds (first row, second row) pairs, positions in each
+    geometry's `node_id`. Each connector is `LINK_DASHES` dashes from
+    one node to the other, and `place` puts them where the two copies'
+    nodes are now, so a connector keeps joining its nodes while they
+    move. The dot shows which node of the second copy was picked even
+    where the two nodes coincide and the connector has no length.
+    """
+
+    def __init__(self, plotter: Any, first: GeometryAnimator,
+                 second: GeometryAnimator, rows: Any, *, color: str,
+                 line_width: float = 2.0, node_size: float = 9.0) -> None:
+        import pyvista as pv
+
+        self.first: GeometryAnimator = first
+        self.second: GeometryAnimator = second
+        self.rows: np.ndarray = np.asarray(rows, dtype=np.intp).reshape(-1, 2)
+        count = len(self.rows)
+        pieces = 2 * LINK_DASHES - 1
+        # every piece's ends along its connector, 0 at the first copy's
+        # node and 1 at the second's: the even pieces are the dashes,
+        # the odd ones the gaps between them
+        per = pieces + 1
+        self._weights: np.ndarray = (np.arange(per) / pieces).reshape(1, -1, 1)
+        # preallocated: a frame gathers and blends into VTK's memory
+        # without allocating, as the animators themselves do
+        self._at_first: np.ndarray = np.empty((count, 3))
+        self._at_second: np.ndarray = np.empty((count, 3))
+        self.points, self.view = shared_points(np.zeros((count * per, 3)))
+        starts = np.arange(count * per).reshape(count, per)[:, 0:pieces:2]
+        dashes = np.column_stack([np.full(starts.size, 2), starts.ravel(),
+                                  starts.ravel() + 1]).ravel()
+        self.mesh: Any = pv.PolyData()
+        self.mesh.SetPoints(self.points)
+        self.mesh.lines = dashes.astype(np.int64)
+        plotter.add_mesh(self.mesh, color=color, line_width=line_width,
+                         name='node-links')
+        self.dots: Any = pv.PolyData()
+        self.dots.SetPoints(self.points)
+        self.dots.verts = np.column_stack(
+            [np.ones(count, dtype=np.int64),
+             np.arange(count, dtype=np.int64) * per + pieces]).ravel()
+        plotter.add_mesh(self.dots, color=color, point_size=node_size,
+                         render_points_as_spheres=True,
+                         name='node-link-ends')
+
+    def place(self) -> None:
+        """Put every connector between its two nodes as the copies
+        stand now."""
+        if not len(self.rows):
+            return
+        np.take(self.first.view, self.rows[:, 0], axis=0,
+                out=self._at_first)
+        np.take(self.second.view, self.rows[:, 1], axis=0,
+                out=self._at_second)
+        np.subtract(self._at_second, self._at_first, out=self._at_second)
+        along = self.view.reshape(len(self.rows), -1, 3)
+        np.multiply(self._weights, self._at_second[:, None, :], out=along)
+        along += self._at_first[:, None, :]
+        self.points.Modified()
 
 
 class GeometryAnimator:
@@ -508,17 +594,32 @@ def build_pair(plotter: Any, first: tuple[Geometry, Any],
                colors: tuple[str | None, str | None],
                alphas: tuple[float, float],
                unit_system: UnitSystem | None = None,
-               text_color: str = '#000000') -> PairedAnimator:
+               text_color: str = '#000000',
+               matches: Sequence[tuple[int, int]] | None = None,
+               match_color: str | None = None) -> PairedAnimator:
     """Two (geometry, deflection) copies moving in step in one scene,
     each on its own meshes in one flat color (`colors`, None for the
     geometry's own colors) at its own opacity (`alphas`). This is the
-    overlay that the window, the report and `animate_pair` all show."""
-    return PairedAnimator(*(
+    overlay that the window, the report and `animate_pair` all show.
+
+    `matches` pairs a node of the first geometry with a node of the
+    second, as (first node id, second node id), the 'pairs' of
+    `core.correlate.project_shapes`. Each pair is joined by a dashed
+    connector (`NodeLinks`) in `match_color`, `text_color` when that is
+    not given, so it reads apart from both copies' flat colors."""
+    pair = PairedAnimator(*(
         GeometryAnimator(plotter, geometry, deflection,
                          unit_system=unit_system, color_override=color,
                          opacity=alpha, text_color=text_color)
         for (geometry, deflection), color, alpha
         in ((first, colors[0], alphas[0]), (second, colors[1], alphas[1]))))
+    if matches:
+        ids = np.asarray(matches, dtype=np.int64).reshape(-1, 2)
+        rows = np.column_stack([first[0].node_index(ids[:, 0]),
+                                second[0].node_index(ids[:, 1])])
+        pair.link(NodeLinks(plotter, pair.first, pair.second, rows,
+                            color=match_color or text_color))
+    return pair
 
 
 def pair_deflections(a: ShapeSet, i: int, b: ShapeSet, j: int,
@@ -556,9 +657,12 @@ def animate_pair(first: tuple[Geometry, Any], second: tuple[Geometry, Any],
                  scale: float = 1.0,
                  cycle_seconds: float = SECONDS_PER_CYCLE,
                  theme: Any = None, screenshot: str | None = None,
-                 movie: str | None = None, show: bool = True) -> Any:
+                 movie: str | None = None, show: bool = True,
+                 matches: Sequence[tuple[int, int]] | None = None) -> Any:
     """Two deflections overlaid and moving together, as the window
     animates a picked MAC cell. `pair_deflections` makes the pair.
+    `matches`, (first node id, second node id) pairs, are joined by
+    dashed connectors in the theme's text color (`build_pair`).
 
     Each copy is scaled to its own peak, so the picture compares shape
     and not level. `caption`, when given, is written in the corner of
@@ -581,7 +685,8 @@ def animate_pair(first: tuple[Geometry, Any], second: tuple[Geometry, Any],
                           colors=colors or PAIR_COLORS,
                           alphas=alphas or overlay_alphas(None, None),
                           unit_system=unit_system,
-                          text_color=palette['scene_text'])
+                          text_color=palette['scene_text'],
+                          matches=matches)
         pair.set_scale(scale)
         return pair
 

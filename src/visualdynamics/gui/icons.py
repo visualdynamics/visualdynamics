@@ -1507,6 +1507,24 @@ def _draw_project(painter, color):
         painter.drawEllipse(x - 4, y - 4, 8, 8)
 
 
+def _draw_node_pairs(painter, color):
+    """Two pairs of nodes, a solid one and a faded one, each joined by
+    a dashed line: the matched nodes of two geometries."""
+    faded = QColor(color)
+    faded.setAlpha(120)
+    for (x0, y0), (x1, y1) in (((12, 16), (50, 26)), ((14, 40), (48, 52))):
+        pen = _pen(color, 4)
+        pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        pen.setDashPattern([2, 1.5])
+        painter.setPen(pen)
+        painter.drawLine(x0, y0, x1, y1)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(color)))
+        painter.drawEllipse(x0 - 5, y0 - 5, 10, 10)
+        painter.setBrush(QBrush(faded))
+        painter.drawEllipse(x1 - 5, y1 - 5, 10, 10)
+
+
 def _draw_state_space(painter, color):
     """A block with a force arrow in and a response arrow out, and the
     state fed back under it: the model a controller integrates."""
@@ -2732,6 +2750,7 @@ def control_icon(name: str) -> QIcon:
      'table': _draw_channel_table, 'overlay': _draw_overlay,
      'ratio': _draw_ratio,
      'project': _draw_project,
+     'node_pairs': _draw_node_pairs,
      'state_space': _draw_state_space,
      'rotate': _draw_rotate,
      'reset': _draw_reset,

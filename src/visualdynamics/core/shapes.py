@@ -57,18 +57,37 @@ def mac_matrix(shapes: ArrayLike,
     return np.abs(cross) ** 2 / np.outer(own, theirs)
 
 
+def _participation(shapes: ShapeSet) -> set[str]:
+    """The DOFs of an unscaled set whose values are on another scale than
+    its shapes': those a fit measured only as references."""
+    if not getattr(shapes, 'unscaled', False):
+        return set()
+    return set(getattr(shapes, 'reference_only', ()))
+
+
 def cross_mac(a: ShapeSet, b: ShapeSet) -> np.ndarray:
     """MAC between two shape sets, on the DOFs they share.
 
     The sets do not have to cover the same DOFs or list them in the same
     order; each shape is limited to the shared DOFs before the
-    comparison. Rows are `a`'s modes and columns are `b`'s. Raises
-    ValueError when the sets share no DOFs.
+    comparison. An unscaled set's `reference_only` DOFs are left out:
+    they hold the references' participation, on a scale of their own,
+    and with them in a MAC reads a good fit as a poor one. Rows are
+    `a`'s modes and columns are `b`'s. Raises ValueError when the sets
+    share no DOFs, or none but those.
     """
     positions = {dof: i for i, dof in enumerate(b.coordinate)}
     shared = [dof for dof in a.coordinate if dof in positions]
     if not shared:
         raise ValueError('the shape sets share no DOFs')
+    left_out = _participation(a) | _participation(b)
+    if left_out:
+        shared = [dof for dof in shared if dof not in left_out]
+        if not shared:
+            raise ValueError(
+                'the shape sets share only DOFs an unscaled fit measured '
+                "as references alone, whose values are not on its shapes' "
+                'scale')
     ours = [a.coordinate.index(dof) for dof in shared]
     theirs = [positions[dof] for dof in shared]
     return mac_matrix(a.shape_matrix[:, ours], b.shape_matrix[:, theirs])
@@ -444,6 +463,14 @@ class ShapeSet:
             mass-normalized scale. Shapes and MACs are not affected, but
             the modal masses are only a convention, and comparisons do
             not report a scale factor from them.
+        reference_only: The DOFs a fit measured only as references, in
+            the order of `coordinate`. Their values come from the
+            references' participation: a residue is the product of a
+            response's value and a reference's, so without a drive point
+            to measure the split, the two parts of a shape are each on a
+            scale of their own. The values are kept, since the synthesis
+            and Edit Fit need them, and `cross_mac` leaves these DOFs out
+            of an unscaled set.
     """
 
     def __init__(self, frequency: ArrayLike, damping: ArrayLike,
@@ -453,7 +480,8 @@ class ShapeSet:
                  mass_unit: str | None = None,
                  description: Sequence[str] | None = None,
                  unscaled: bool = False,
-                 modal_damping: ArrayLike | None = None) -> None:
+                 modal_damping: ArrayLike | None = None,
+                 reference_only: Sequence[str] | None = None) -> None:
         # True when the fit had no drive point to pin the
         # mass-normalized scale: shapes and MACs are fine, modal
         # masses are a convention, not physics
@@ -510,6 +538,13 @@ class ShapeSet:
         self.mass_unit: str | None = mass_unit or None
         if self.mass_unit is not None:
             si_factor(self.mass_unit, 'mass')  # validates
+        held = set(_dofs(reference_only or [], 'reference_only'))
+        outside = held - set(self.coordinate)
+        if outside:
+            raise ValueError(f'reference_only names {min(outside)}, which '
+                             'is not in coordinate')
+        self.reference_only: list[str] = [dof for dof in self.coordinate
+                                          if dof in held]
         self._sort_by_frequency()
 
     def _sort_by_frequency(self) -> None:

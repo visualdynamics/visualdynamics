@@ -32,6 +32,7 @@ from .core.data import parse_dof
 if TYPE_CHECKING:                                    # pragma: no cover
     from .core.data import DataArray
     from .core.geometry import Geometry
+    from .core.modal_frf import DrivenModes
     from .core.shapes import ShapeSet
 
 AXES = {'X': 0, 'Y': 1, 'Z': 2}
@@ -401,8 +402,16 @@ class OdsDeflection(Deflection):
         self._line = int(np.clip(index, 0, self.num_lines - 1))
         self._bake()
 
+    def _columns_at(self, lines):
+        """The records' values at `lines`, records × lines."""
+        return self._ordinate[:, lines]
+
+    def _survey_lines(self):
+        """The lines `peak_magnitude` reads."""
+        return np.arange(self.num_lines)
+
     def _bake(self):
-        column = self._ordinate[:, self._line]
+        column = self._columns_at(np.array([self._line]))[:, 0]
         # each line at its own full scale: the shape is the answer here,
         # the amplitude is the curve on the plot
         strongest = float(np.abs(column).max(initial=0.0))
@@ -458,8 +467,9 @@ class OdsDeflection(Deflection):
             return 0.0
         largest = 0.0
         chunk = max(1, int(4e6) // (3 * nodes) or 1)
-        for start in range(0, self.num_lines, chunk):
-            block = self._ordinate[:, start:start + chunk]
+        lines = self._survey_lines()
+        for start in range(0, len(lines), chunk):
+            block = self._columns_at(lines[start:start + chunk])
             norms = np.abs(block).max(axis=0)
             block = block / np.where(norms, norms, 1.0)
             spread = np.zeros((nodes, block.shape[1], 3), dtype=np.complex128)
@@ -473,6 +483,115 @@ class OdsDeflection(Deflection):
                 ((a + b) / 2 + np.hypot((a - b) / 2, cross))
                 .max(initial=0.0))))
         return largest
+
+
+class ModalOdsDeflection(OdsDeflection):
+    """The operating deflection shape of a force at one DOF, from each
+    mode's modal coordinate per unit of that force and the modes'
+    shapes: at a line, the shapes scaled by the coordinates and summed.
+
+    It reads as `OdsDeflection` does, a line at a time at full scale,
+    and makes the pattern when a line is asked for. The response at
+    every DOF and every line is never held: a model of a million DOFs
+    with fifty modes costs its shapes, where its FRFs on four thousand
+    lines would be sixty gigabytes.
+
+    A line where a coordinate is not a number (a rigid-body mode's
+    displacement at 0 Hz) has no shape and is drawn at rest;
+    `line_defined` says so.
+    """
+
+    #: the most values (DOFs × lines) `peak_magnitude` reads exactly;
+    #: past it, it reads the strongest lines
+    EXACT_BUDGET = 50_000_000
+
+    #: how many of the strongest lines are read past the budget
+    STRONGEST_LINES = 64
+
+    def __init__(self, geometry: Geometry, dofs: Sequence[str],
+                 shapes: ArrayLike, coordinates: ArrayLike) -> None:
+        """`dofs` are the set's DOFs, `shapes` its real shape values at
+        them, one row per mode used, and `coordinates` the modal
+        coordinates, one row per mode in the same order."""
+        rows, directions, used = dof_directions(geometry, dofs)
+        # DOF-major, so a line's pattern is one matrix-vector product
+        self._phi = np.ascontiguousarray(
+            np.real(np.asarray(shapes))[:, used].T, dtype=float)
+        self._coordinates = np.ascontiguousarray(
+            np.asarray(coordinates, dtype=np.complex128))
+        self._directions = directions
+        self.rows, self._targets = _unique_rows(rows)
+        self._real = np.zeros((len(self.rows), 3))
+        self._imag = np.zeros((len(self.rows), 3))
+        self._buffer = np.empty_like(self._real)
+        self.num_lines: int = (self._coordinates.shape[1]
+                               if len(rows) else 0)
+        self._line = 0
+        if self.num_lines:
+            self._bake()
+
+    def _columns_at(self, lines):
+        block = self._phi @ self._coordinates[:, lines]
+        block[:, ~np.isfinite(block).all(axis=0)] = 0.0
+        return block
+
+    def _reach(self) -> np.ndarray:
+        """An upper bound on the largest DOF value at each line: each
+        coordinate's size times the most its mode moves any DOF. -1
+        where the line has no shape."""
+        if not self._phi.size:
+            return np.full(self.num_lines, -1.0)
+        with np.errstate(invalid='ignore'):
+            bound = np.abs(self._phi).max(axis=0) @ np.abs(self._coordinates)
+        bound[~np.isfinite(bound)] = -1.0
+        return bound
+
+    def _survey_lines(self):
+        if self._phi.shape[0] * self.num_lines <= self.EXACT_BUDGET:
+            return np.arange(self.num_lines)
+        bound = self._reach()
+        count = min(self.STRONGEST_LINES, self.num_lines)
+        strongest = np.argpartition(bound, self.num_lines - count)[
+            self.num_lines - count:]
+        own = np.nan_to_num(np.abs(self._coordinates)).argmax(axis=1)
+        return np.unique(np.concatenate([strongest, own]))
+
+    @property
+    def line_defined(self) -> bool:
+        """Whether the line shown has a shape: False where a coordinate
+        is not a number."""
+        return bool(self.num_lines) and bool(
+            np.isfinite(self._coordinates[:, self._line]).all())
+
+    @property
+    def strongest_line(self) -> int:
+        """The line where the modes reach furthest (`_reach`), which is
+        where the cursor starts."""
+        if not self.num_lines:
+            return 0
+        return int(np.argmax(self._reach()))
+
+    @property
+    def peak(self) -> float:
+        """1.0, the value the animator scales against, or 0.0 when
+        nothing moves at any line."""
+        return 1.0 if self.num_lines and self._reach().max() > 0.0 else 0.0
+
+
+def modal_ods_deflection(geometry: Geometry, shapes: ShapeSet,
+                         driven: DrivenModes) -> ModalOdsDeflection:
+    """The operating deflection shape on `geometry` of the force
+    `driven` is for (`core.modal_frf.driven_modes`), through `shapes`,
+    the set its modal coordinates are of."""
+    if shapes.is_complex:
+        raise ValueError('a complex shape set cannot show modal '
+                         'coordinates as motion')
+    if driven.modes[-1] >= shapes.num_shapes:
+        raise ValueError(f'the set has {shapes.num_shapes} modes, and the '
+                         f'modal FRFs reach M{driven.modes[-1] + 1}')
+    return ModalOdsDeflection(
+        geometry, shapes.coordinate,
+        np.asarray(shapes.shape_matrix)[driven.modes], driven.coordinates)
 
 
 class EnvelopeDeflection(Deflection):

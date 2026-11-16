@@ -227,6 +227,8 @@ Present only where they mean something:
             where a source carried complex modes), modal_mass
             (complex where measured), coordinate, comment, description
             modal_damping        only where a source carried one
+            reference_only       only where a fit measured some DOFs
+                                 as references alone
 
 ## `channel_table/`
 

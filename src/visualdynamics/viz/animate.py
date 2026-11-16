@@ -831,7 +831,9 @@ def animate_ods(geometry: Geometry, data: Any,
                 screenshot: str | None = None,
                 movie: str | None = None,
                 show: bool = True, sensors: Any = None,
-                sensor_size: float = 1.0) -> Any:
+                sensor_size: float = 1.0, shapes: Any = None,
+                drive: str | None = None,
+                drive_shapes: Any = None) -> Any:
     """The operating deflection shape of complex spectra at one line, as
     the app animates it when the object is selected with a geometry.
 
@@ -851,11 +853,23 @@ def animate_ods(geometry: Geometry, data: Any,
     With `sensors`, a channel table, the sensors it places are drawn at
     their nodes and move with them (`viz.sensors`), `sensor_size` times
     true size.
+
+    With `shapes`, a shape set, and `drive`, a DOF, the data are modal
+    FRFs of that set and the shape is the response to a force at
+    `drive`: each mode's shape scaled by its modal FRF and its shape
+    value at the drive, summed (`core.modal_frf.driven_modes`), at every
+    DOF of the set on this geometry. The `records` picked are the modes
+    included, so leaving the rigid-body modes out gives the elastic
+    response, which at 0 Hz is the static deflection. `drive_shapes` is
+    the set read at the drive when that is another set (one projected
+    onto a test geometry's DOFs); `shapes` when omitted. `quantity` is
+    not used: the response is in the modal FRFs' own.
     """
     from ..deform import (
         OdsDeflection,
         animation_records,
         first_capture,
+        modal_ods_deflection,
         quantity_records,
     )
     from ..theme import theme as resolve_theme
@@ -863,14 +877,26 @@ def animate_ods(geometry: Geometry, data: Any,
     if not np.iscomplexobj(data.ordinate):
         raise ValueError('an operating deflection needs phase — '
                          'this data is real')
-    captured, _note = first_capture(data, records)
-    of_kind, quantity, _left_out = quantity_records(data, captured, quantity)
-    if not of_kind:
-        raise ValueError(f'no records measure {quantity!r}')
-    indices, _notes = animation_records(data, of_kind)
-    dofs = [data.response_dof[i] for i in indices]
-    deflection = OdsDeflection(geometry, dofs,
-                               np.asarray(data.ordinate)[list(indices)])
+    if shapes is not None:
+        from ..core.modal_frf import driven_modes
+
+        if drive is None:
+            raise ValueError('modal FRFs move a geometry by a force: give '
+                             'the DOF it is at as drive=')
+        deflection = modal_ods_deflection(
+            geometry, shapes,
+            driven_modes(data, shapes if drive_shapes is None
+                         else drive_shapes, drive, records))
+    else:
+        captured, _note = first_capture(data, records)
+        of_kind, quantity, _left_out = quantity_records(data, captured,
+                                                        quantity)
+        if not of_kind:
+            raise ValueError(f'no records measure {quantity!r}')
+        indices, _notes = animation_records(data, of_kind)
+        dofs = [data.response_dof[i] for i in indices]
+        deflection = OdsDeflection(geometry, dofs,
+                                   np.asarray(data.ordinate)[list(indices)])
     if not len(deflection.rows):
         raise ValueError('none of the records land on this geometry')
     abscissa = np.asarray(data.abscissa, dtype=float)

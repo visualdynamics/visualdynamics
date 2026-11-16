@@ -379,6 +379,13 @@ def modal_fit_table_model(session: ModalFitSession,
             session.pending['damping'] = value
             session.pending['overridden'] = True
         else:
+            # the replay list follows a typed damping, by the pole the
+            # mode was confirmed at (Refine may have moved it since)
+            pick = session.pick(row)
+            if pick in session.confirmed:
+                session.confirmed[session.confirmed.index(pick)] = (
+                    pick[0], value)
+            session.modes[row]['pick'] = (pick[0], value)
             session.modes[row]['damping'] = value
 
     def set_description(session: Any, row: int, text: str) -> None:

@@ -716,6 +716,9 @@ def save_shapes(shapes: ShapeSet, group: h5py.Group) -> None:
     _write_strings(group, 'coordinate', shapes.coordinate)
     _write_strings(group, 'comment', shapes.comment)
     _write_strings(group, 'description', shapes.description)
+    # only where a fit measured some DOFs as references alone
+    if getattr(shapes, 'reference_only', None):
+        _write_strings(group, 'reference_only', shapes.reference_only)
 
 
 def load_shapes(group: h5py.Group) -> ShapeSet:
@@ -733,6 +736,8 @@ def load_shapes(group: h5py.Group) -> ShapeSet:
         unscaled=bool(group.attrs['unscaled']),
         modal_damping=(group['modal_damping'][()]
                        if 'modal_damping' in group else None),
+        reference_only=(_read_strings(group, 'reference_only')
+                        if 'reference_only' in group else None),
     )
 
 

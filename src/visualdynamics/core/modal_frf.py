@@ -29,11 +29,19 @@ response channel against each reference channel, each row in what its
 channel measures. Modal FRFs that hold each mode against itself are a
 diagonal matrix; a transform of a measured FRF holds every mode against
 every mode, and both expand the same way.
+
+`driven_modes` is the same sum stopped half way: a force at one DOF is
+a modal force on each mode, its shape value there, and the modal FRFs
+turn those into each modal coordinate's response. The shapes then give
+the motion at every DOF the set covers (`deform.modal_ods_deflection`),
+which is the operating deflection shape for that drive point with no
+FRF made for any of them.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -248,6 +256,87 @@ def modal_matrix(modal: Frf, records: Sequence[int] | None = None
     for (row, column), i in entries.items():
         matrix[:, where[row], where[column]] = modal.ordinate[i]
     return modes, matrix, quantities.pop(), known
+
+
+@dataclass(frozen=True)
+class DrivenModes:
+    """Each mode's modal coordinate per unit force at one DOF.
+
+    Attributes
+    ----------
+    drive : str
+        The DOF the force is at.
+    modes : list of int
+        The modes, by index from zero into the shape set.
+    coordinates : numpy.ndarray
+        The modal coordinates, complex, modes × lines.
+    lines : numpy.ndarray
+        The frequency lines, in Hz.
+    quantity : str
+        What the coordinates answer in: 'acceleration', 'velocity' or
+        'length'.
+    known : bool
+        Whether the modal FRFs' units are defined.
+    """
+
+    drive: str
+    modes: list[int]
+    coordinates: np.ndarray
+    lines: np.ndarray
+    quantity: str
+    known: bool
+
+
+def driven_modes(modal: Frf, shapes: ShapeSet, drive: str,
+                 records: Sequence[int] | None = None) -> DrivenModes:
+    """Each modal coordinate's response to a unit force at `drive`:
+
+        q_r(f) = sum_s H_rs(f) phi_ks,
+
+    with k the drive DOF. A mode's shape may be scaled or turned over
+    freely: its modal FRF carries the modal mass and its shape value
+    appears here and again when the coordinates are turned into motion,
+    so the motion does not change.
+
+    Parameters
+    ----------
+    modal : Frf
+        Modal FRFs (`modal_matrix`).
+    shapes : ShapeSet
+        The real set the modal FRFs are of, or that set at the drive's
+        DOF: its mode `r` is the modal coordinate `M{r+1}`.
+    drive : str
+        The DOF the force is at, such as '101Z+'.
+    records : sequence of int, optional
+        Which modal records; all of them when omitted. Leaving a mode's
+        record out leaves the mode out of the response.
+
+    Returns
+    -------
+    DrivenModes
+        The modal coordinates per unit force.
+
+    Raises
+    ------
+    ValueError
+        As `modal_matrix`; if the set is complex; if a modal coordinate
+        is past the set's last mode; or if the set does not cover the
+        drive DOF.
+    """
+    if shapes.is_complex:
+        raise ValueError('a complex shape set has no real motion to drive')
+    modes, matrix, quantity, known = modal_matrix(modal, records)
+    if modes[-1] >= shapes.num_shapes:
+        raise ValueError(f'the set has {shapes.num_shapes} modes, and the '
+                         f'modal FRFs reach M{modes[-1] + 1}')
+    kept, phi = _columns(shapes, [drive], TransformReport())
+    if not kept:
+        raise ValueError(f'the shape set has no DOF {drive}')
+    force = np.real(np.asarray(phi))[0, modes]             # modal forces
+    coordinates = (matrix @ force).T                       # modes × lines
+    return DrivenModes(drive, modes, coordinates,
+                       np.asarray(modal.abscissa, dtype=float), quantity,
+                       known)
 
 
 def frfs_at_channels(modal: Frf, shapes: ShapeSet, references: Sequence[str],

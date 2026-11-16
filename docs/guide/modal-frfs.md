@@ -98,6 +98,40 @@ Physical Responses**, which gives the FRFs between every pair of the
 set's DOFs. For a finite element model that is a great many records;
 the channel table is the way to ask for the few that matter.
 
+## The response to a force, on the geometry
+
+Select the modal FRFs, a channel table that has a force reference, and
+the geometry the shape set is on. The 3-D view shows the operating
+deflection shape for a force at that reference: at the cursor's
+frequency, each mode's shape is scaled by its modal FRF and by its
+shape value at the force's DOF, and the scaled shapes are added,
+
+    uⱼ(ω) = Σᵣ φⱼᵣ Hᵣ(ω) φₖᵣ,
+
+at every DOF j the shape set has on the geometry, with k the force's
+DOF. It is the shape the FRFs from that force to every DOF would give,
+and none of those FRFs is made, so a finite element model with many
+thousands of DOFs needs no channel table that lists them. The table
+only has to name the force.
+
+Drag the cursor on the plot to pick the frequency, and press Play to
+sweep the phase. Each line is drawn at full scale, as an FRF's
+operating deflection shape is. An arrow marks the force. When the
+table has more than one force reference, a drop-down on the 3-D view's
+bar picks which one is used.
+
+To leave modes out, pick the records of the modes to keep in the modal
+FRFs' grid, then Cmd-click the table and the geometry. With the
+rigid-body modes of a free-free model left out and the modal FRFs in
+displacement, the shape at 0 Hz is the elastic static deflection for
+that force, from the modes that were solved. With the rigid-body modes
+in, displacement at 0 Hz is unbounded, the geometry is drawn at rest
+on that line and the caption says so.
+
+When the table is linked to a test geometry and the shape set to a
+finite element geometry, the force is applied at the model node nearest
+its channel, as it is for **Expand to Physical Responses**.
+
 ## Units
 
 Through a mass-normalized set the modal displacement is in m·kg½ and
@@ -128,3 +162,17 @@ channels. The calculation is in `core.modal_frf`:
 `synthesize_modal_frfs` for the modal FRFs, `modal_matrix` for the
 matrix a modal FRF's records hold, and `frfs_at_channels` for the
 expansion.
+
+The response to a force is `project.animate` with `drive=` or `table=`:
+
+    elastic = [k for k, f in enumerate(project['FE Modes'].frequency)
+               if f > 1.0]
+    project.animate(modal, drive='101Z+', frequency=0.0, records=elastic,
+                    screenshot='static.png')
+
+`drive=` is the force's DOF, and `table=` a channel table whose one
+force reference is used. `project.driven_modes(modal, '101Z+')` returns
+each mode's modal coordinate per unit force, which
+`core.modal_frf.driven_modes` computes, and
+`project.drive_points('Test Channels')` the DOFs of a table's force
+references.

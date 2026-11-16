@@ -128,9 +128,10 @@ twenty captures](../images/modal-psds.png)
 4. Press **Confirm Mode**. The mode is added to the table and the
    cursor moves to the next peak.
 5. Repeat steps 2 to 4 for each mode. Once two modes are confirmed,
-   **Refine All** appears at the left of the bar: it refits every
-   mode's residues jointly with all the modes present, for close modes
-   that affect each other (`fit_modes(..., refine=n)` in a script).
+   **Refine All** appears at the left of the bar: it fits modes whose
+   bands overlap again together, their frequencies and dampings and
+   then their shapes, for close modes that affect each other
+   (`fit_modes(..., refine=n)` in a script).
 
 ![Where to click: select the FRF (1), then Fit Modal Model on the bar
 (2)](../images/modal-fit-click.png)

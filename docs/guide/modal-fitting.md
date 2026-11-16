@@ -309,11 +309,28 @@ residues take up part of the neighbor. The sum of the pair still
 matches the measurement, so the error is in how the response is split
 between the two modes. It does not show on the CMIF, and it appears as
 MAC leakage between the pair or as modal masses that depend on the
-order the modes were fit in.
+order the modes were fit in. The pole of each mode was searched alone
+as well, so where the half-power widths of two modes overlap, the
+frequencies and dampings come out biased too. On a synthetic test with
+three modes at 1 % damping between 1125 and 1216 Hz, the one-at-a-time
+search gave 1.74 % and 0.75 % for two of them.
 
-**Refine All** appears once two modes are confirmed. It refits every
-mode's residues with the poles held exactly where they were placed:
+**Refine All** appears once two modes are confirmed. It fits the modes
+again, neighbors together:
 
+- The poles of a cluster are searched together first. For each trial
+  set of frequencies and dampings, the residues are a linear least
+  squares, with a mass line and a stiffness line per record for the
+  modes below and above the cluster's band, and the poles kept are the
+  ones that leave the least behind. Each frequency may move two of its
+  half-power half-widths and no further than its neighbors, and each
+  damping a factor of four. A mode that stops on one of those limits,
+  ends within a line of another mode, or comes out with a damping below
+  0.01 % or above 50 % keeps its pole, and the others are searched
+  with it held. The searched poles are used only where they make the
+  cluster's CMIF match better; otherwise the poles stay exactly where
+  they were. The status bar says how many modes moved, and the table
+  shows the new frequencies and dampings.
 - Modes are solved together only where their bands overlap. An
   accelerance SDOF term tends to a constant far above its pole (the
   mass line), so a single global solve would let a quiet low mode
@@ -356,7 +373,8 @@ methods:
   damping) lose their phase; their frequencies and dampings are still
   usable.
 - No global pole search. Poles are where you or Find Mode put them,
-  refined locally. A stabilization diagram can find repeated roots
+  refined locally, and **Refine All** searches the poles of
+  overlapping modes together. A stabilization diagram can find repeated roots
   under a peak that looks like one mode; here you find them by
   watching the residual after each confirm. If a peak remains after a
   confirm, there is another mode under it.

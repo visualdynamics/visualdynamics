@@ -231,7 +231,9 @@ def _merge_shapes(objects):
         description=[d for obj in objects for d in obj.description],
         mass_unit=objects[0].mass_unit,
         unscaled=any(getattr(obj, 'unscaled', False)
-                     for obj in objects))
+                     for obj in objects),
+        reference_only=sorted({dof for obj in objects
+                               for dof in getattr(obj, 'reference_only', ())}))
     # a mode table reads by frequency, whatever order the sets arrived in
     sorted_order = np.argsort(merged.frequency, kind='stable')
     merged.frequency = merged.frequency[sorted_order]

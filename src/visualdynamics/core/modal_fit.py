@@ -21,6 +21,11 @@ One mode is fitted from the residual alone:
   magnitudes, the synthesis still reproduces the measured records, and
   the shape set is marked unscaled.
 
+A pole searched alone is biased where a neighbor's half-power width
+overlaps its own, so Refine (`refine_residues`) fits modes whose bands
+overlap together: their poles by one joint least squares over the band,
+and their residues with those poles held.
+
 References
 ----------
 The single-degree-of-freedom residue fit is standard; these are where
@@ -36,11 +41,16 @@ it and the indicator driving it are set out.
 3. Maia, N. M. M., & Silva, J. M. M. (1997). *Theoretical and
    Experimental Modal Analysis*. Research Studies Press. Residue to
    mode-shape scaling, including the unit-modal-mass convention.
+4. Golub, G. H., & Pereyra, V. (1973). "The Differentiation of
+   Pseudo-Inverses and Nonlinear Least Squares Problems Whose Variables
+   Separate." *SIAM Journal on Numerical Analysis*. Variable
+   projection: the joint pole search, in which the residues are solved
+   linearly for each trial set of poles.
 
 The way of working, one mode at a time with the analyst choosing each
 pole, was inspired by SMAC; its computations are not the ones here.
 
-4. Klenke, S. E., & Mayes, R. L. (1999). "The SMAC Modal Parameter
+5. Klenke, S. E., & Mayes, R. L. (1999). "The SMAC Modal Parameter
    Extraction Package." *International Modal Analysis Conference*,
    Orlando, FL. Synthesize Modes And Correlate, which fits modes one
    at a time by correlating a trial root's synthesized response with
@@ -61,6 +71,10 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 from ..units import UNKNOWN
 from .half_power import HALF_POWER, HalfPower, crossings, read_half_power
+
+#: the fraction of critical a mode here can have: what the searches run
+#: over, and what a hand may hold or type
+DAMPING_LIMITS = (1e-4, 0.5)
 
 _POWERS = {'length': 0, 'velocity': 1, 'acceleration': 2}
 
@@ -225,7 +239,9 @@ class ModalFitSession:
                                'shape': shape,
                                'scaled': not getattr(shapes, 'unscaled',
                                                      False),
-                               'description': shapes.description[m]})
+                               'description': shapes.description[m],
+                               'pick': (float(shapes.frequency[m]),
+                                        float(shapes.damping[m]))})
             # a published set has lost its confirm order, so an
             # adopted session replays in frequency order — the one
             # canonical reading of a set whose sequence is gone
@@ -253,18 +269,21 @@ class ModalFitSession:
                             for dof in self.references])
         return q[:, None, None] * residue[None, :, :]
 
-    def _mode_scalars(self, mode):
+    def _mode_scalars(self, mode, omega=None):
         """This mode's frequency response, one complex value per line —
         the scalar half of `_mode_term`, shared with the factored CMIF
         so the two paths cannot disagree about what a mode sounds
-        like."""
+        like. Over every line, or over the lines `omega` gives in
+        rad/s."""
+        if omega is None:
+            omega = self.omega
         omega_r = 2.0 * np.pi * mode['frequency']
         with np.errstate(divide='ignore', invalid='ignore'):
-            q = ((1j * self.omega) ** self.power
-                 / (omega_r ** 2 - self.omega ** 2
-                    + 2j * mode['damping'] * omega_r * self.omega))
+            q = ((1j * omega) ** self.power
+                 / (omega_r ** 2 - omega ** 2
+                    + 2j * mode['damping'] * omega_r * omega))
         if omega_r == 0.0:
-            q[self.omega == 0.0] = 1.0 if self.power == 2 else 0.0
+            q[omega == 0.0] = 1.0 if self.power == 2 else 0.0
         return q
 
     def synthesis_matrix(self) -> np.ndarray:
@@ -769,9 +788,9 @@ class ModalFitSession:
             mode = self._fit_mode(frequency, damping, description,
                                   pin=self.pending['overridden'])
         mode['description'] = description
+        mode['pick'] = (float(mode['frequency']), float(mode['damping']))
         self.modes.append(mode)
-        self.confirmed.append((float(mode['frequency']),
-                               float(mode['damping'])))
+        self.confirmed.append(mode['pick'])
         self.modes.sort(key=lambda entry: entry['frequency'])
         self.pending['description'] = ''
         self.pending['overridden'] = False
@@ -887,36 +906,39 @@ class ModalFitSession:
         return shape, bool(kept)
 
     def refine_residues(self) -> int:
-        """Fit the residues of all confirmed modes again, together, with
-        the frequencies and dampings held, and return how many modes were
-        refined (0 with none confirmed).
+        """Fit the confirmed modes again, neighbors together, and return
+        how many modes were refined (0 with none confirmed).
 
         Each mode was fit on the residual as it stood when it was
         confirmed, so the first of a close pair was fit on data that
         still held the second mode's tail, and its residues took up part
-        of it. The sum of the pair matches the measurement; the error is
-        in how it is split between them. Here the residues are fitted
-        with all the SDOF terms present at once, over the lines near
-        each mode (3ζf either side, at least two lines). Lines far from
-        every mode are left out, because they hold only what was never
-        fitted, and a full-band solve would spread that into the shapes.
+        of it. Its pole was searched alone too (`search`), so where
+        half-power widths overlap the poles come out biased as well, and
+        the amplitudes with them. Here modes whose bands (3ζf either side,
+        at least two lines) overlap are fitted together as a cluster, on
+        the measurement minus the other modes at their current residues.
+        Lines far from every mode are left out, because they hold only
+        what was never fitted, and a full-band solve would spread that
+        into the shapes.
 
-        Modes are solved together only when their bands overlap, and
-        each such cluster is solved on the measurement minus the other
-        modes at their current residues. Where close modes have similar
-        shapes the least squares is badly conditioned and noise moves
-        amplitude between the pair, so each cluster compares five
-        candidates: the plain least-squares answer, three answers
-        regularized toward the current residues (ridge weights 0.01,
-        0.05 and 0.2 of the mean diagonal), and the current residues
-        themselves. The candidate whose synthesized CMIF is closest to
-        the measured CMIF over the cluster's band is kept, so refining
-        cannot make that score worse. A mode alone in its cluster keeps
-        its shape. With coherence weights, each response channel's
-        equations are weighted by its coherence weight.
+        In each cluster the poles are first searched together
+        (`_joint_poles`). The residues are then fitted with the poles
+        held. Where close modes have similar shapes that least squares is
+        badly conditioned and noise moves amplitude between them, so each
+        cluster compares five candidates: the plain least-squares answer,
+        three answers regularized toward the current residues (ridge
+        weights 0.01, 0.05 and 0.2 of the mean diagonal), and the current
+        residues themselves. The five are tried at the current poles and
+        at the jointly searched ones, and the candidate whose synthesized
+        CMIF is closest to the measured CMIF over the cluster's band is
+        kept, poles and all, so refining cannot make that score worse. A
+        mode alone in its cluster keeps its pole and its shape. With
+        coherence weights, each response channel's equations are weighted
+        by its coherence weight.
 
-        The frequencies and dampings do not change, and the shapes do not
-        change where the current residues won. Any preview is dropped.
+        Any preview is dropped. Each mode keeps the pole it was confirmed
+        at as its pick (`pick`), which is what `confirmed` holds, so taking
+        a refined mode back or replaying the fit still finds it.
         """
         # Why a ladder of candidates and not one solve: the plain joint
         # solve shipped first and its failure was caught by eye. With
@@ -928,29 +950,31 @@ class ModalFitSession:
         # suits both a parallel pair and a well-separated one. The
         # residues are optimized on the FRFs and the candidate is chosen
         # on the CMIF, the curve the fit is judged by.
+        #
+        # Why the poles move here (ported from Hertzforge's 8fe67687,
+        # Brandon, 2026-11-16): on a simulated plate test with three
+        # modes at 1 % damping whose half-power widths overlap, the
+        # one-at-a-time search gave 0.88 %, 0.50 % and 0.68 %, and the
+        # amplitudes came out 1.2 to 1.6 times too small, while every
+        # mode standing alone came out at 1.00 % (2026-11-15). Residues
+        # refitted at those poles cannot make up for them.
         if not self.modes:
             return 0
         self.refined += 1
         df = (self.frequencies[1] - self.frequencies[0]
               if len(self.frequencies) > 1 else 1.0)
-        lines: set[int] = set()
+        bands = []
         for mode in self.modes:
             index = int(np.argmin(np.abs(self.frequencies
                                          - mode['frequency'])))
             half_width = 3.0 * mode['damping'] * mode['frequency']
             reach = max(round(half_width / df), 2)
-            lines.update(range(max(index - reach, 0),
-                               min(index + reach + 1,
-                                   len(self.frequencies))))
-        chosen = np.array(sorted(lines))
-        omega = self.omega[chosen]
-        terms = []
-        for mode in self.modes:
-            omega_r = 2.0 * np.pi * mode['frequency']
-            terms.append((1j * omega) ** self.power
-                         / (omega_r ** 2 - omega ** 2
-                            + 2j * mode['damping'] * omega_r * omega))
-        basis = np.stack(terms, axis=1)               # (lines, modes)
+            bands.append((max(index - reach, 0),
+                          min(index + reach + 1, len(self.frequencies))))
+        # (lines, modes), every mode's own term, the 0 Hz line of a rigid
+        # one included
+        scalars = np.stack([self._mode_scalars(mode) for mode in self.modes],
+                           axis=1)
         count = len(self.modes)
         responses, references = len(self.responses), len(self.references)
         # the sequential answer, as residue matrices: the ridge's prior
@@ -962,13 +986,6 @@ class ModalFitSession:
                             for dof in self.references])
             prior.append(np.outer(phi, psi))
         prior = np.stack(prior).reshape(count, -1)
-        # real residues: the real and imaginary parts are two statements
-        # of the same unknowns, stacked into one real least squares.
-        # With coherence weights the solve runs per response, each
-        # channel's equations scaled by the root of its weight — the
-        # measurement's own statement of which channel to believe where,
-        # which is what keeps one bad channel from voting noise into
-        # every mode's residues.
 
         # Modes couple through the solve only when their bands overlap.
         # An accelerance SDOF term tends to a constant at frequencies
@@ -984,15 +1001,7 @@ class ModalFitSession:
         # measurement as it stood, a 50/53 Hz pair that refits exactly
         # alone came back 1.2 % and 4.0 % off beside a 75 Hz mode
         # (2026-10-11): the pair's residues absorbed the third mode's
-        # tail.
-        bands = []
-        for mode in self.modes:
-            index = int(np.argmin(np.abs(self.frequencies
-                                         - mode['frequency'])))
-            half_width = 3.0 * mode['damping'] * mode['frequency']
-            reach = max(round(half_width / df), 2)
-            bands.append((max(index - reach, 0),
-                          min(index + reach + 1, len(self.frequencies))))
+        # tail. Overlapping bands make each cluster one run of lines.
         clusters, current = [], [0]
         for r in range(1, count):
             if bands[r][0] <= max(bands[i][1] for i in current):
@@ -1002,95 +1011,8 @@ class ModalFitSession:
                 current = [r]
         clusters.append(current)
 
-        def solve_joint(fraction):
-            answer = prior.copy()
-            for members in clusters:
-                lo = min(bands[r][0] for r in members)
-                hi = max(bands[r][1] for r in members)
-                lines = chosen[(chosen >= lo) & (chosen < hi)]
-                omega_c = self.omega[lines]
-                columns_c = []
-                for r in members:
-                    omega_r = 2.0 * np.pi * self.modes[r]['frequency']
-                    columns_c.append(
-                        (1j * omega_c) ** self.power
-                        / (omega_r ** 2 - omega_c ** 2
-                           + 2j * self.modes[r]['damping'] * omega_r
-                           * omega_c))
-                basis_c = np.stack(columns_c, axis=1)
-                n = len(members)
-                sub_prior = prior[members]
-                others = [r for r in range(count) if r not in members]
-                target = self.matrix[lines]
-                if others:
-                    held = basis[np.isin(chosen, lines)][:, others]
-                    target = target - (held @ prior[others]).reshape(
-                        len(lines), responses, references)
-                if self.weights is None:
-                    stacked_c = np.vstack([basis_c.real, basis_c.imag])
-                    block = target.reshape(len(lines), -1)
-                    rhs = np.vstack([block.real, block.imag])
-                    g = stacked_c.T @ stacked_c
-                    u = float(np.trace(g)) / n
-                    if fraction == 0.0:
-                        solved, *_ = np.linalg.lstsq(stacked_c, rhs,
-                                                     rcond=None)
-                    else:
-                        solved = np.linalg.solve(
-                            g + fraction * u * np.eye(n),
-                            stacked_c.T @ rhs + fraction * u * sub_prior)
-                    answer[members] = solved
-                    continue
-                for j in range(responses):
-                    root = np.sqrt(self.weights[lines, j])
-                    weighted = np.vstack([basis_c.real * root[:, None],
-                                          basis_c.imag * root[:, None]])
-                    block = target[:, j, :]
-                    rhs = np.vstack([block.real * root[:, None],
-                                     block.imag * root[:, None]])
-                    g = weighted.T @ weighted
-                    u = float(np.trace(g)) / n
-                    cols = [j * references + k for k in range(references)]
-                    if fraction == 0.0:
-                        solved, *_ = np.linalg.lstsq(weighted, rhs,
-                                                     rcond=None)
-                    else:
-                        solved = np.linalg.solve(
-                            g + fraction * u * np.eye(n),
-                            weighted.T @ rhs
-                            + fraction * u * sub_prior[:, cols])
-                    answer[np.ix_(members, cols)] = solved
-            return answer
-        # Each cluster judges its own ladder, on its own band. A
-        # global score was tried twice and failed twice: linearly, a
-        # quiet fundamental's fivefold inflation cost nothing against a
-        # loud cluster's lines; and in log, the noise floor's vote came
-        # back. Locally, the mode being judged dominates the lines
-        # doing the judging, so a weak mode's sequential rung wins
-        # whenever the refit would only be chasing noise — and the
-        # never-worse guarantee holds cluster by cluster, in the score
-        # each cluster is chosen by. The other clusters stand as a
-        # fixed background at their prior residues while one is judged.
-        candidates = {fraction: solve_joint(fraction)
-                      for fraction in (0.0, 0.01, 0.05, 0.2)}
-        best_shapes: list[tuple[np.ndarray, bool] | None] = [None] * count
-
-        def adopted_forms(residues_flat, members):
-            """(shapes, rank-one adopted matrices) for these modes."""
-            shapes, adopted = [], []
-            for r in members:
-                matrix = residues_flat[r].reshape(responses, references)
-                u, _s, _vh = np.linalg.svd(matrix)
-                direction = u[:, 0]
-                shape, scaled = self._shape_from(direction,
-                                                 direction @ matrix)
-                shapes.append((shape, scaled))
-                adopted.append(np.outer(
-                    shape[:responses],
-                    [shape[self.coordinate.index(dof)]
-                     for dof in self.references]).ravel())
-            return shapes, adopted
-
+        refined = [(mode['frequency'], mode['damping'], mode['shape'],
+                    mode['scaled']) for mode in self.modes]
         for members in clusters:
             if len(members) == 1:
                 # A cluster of one has nobody to borrow from, and
@@ -1102,52 +1024,271 @@ class ModalFitSession:
                 # genuinely fits the measurement better. The sequential
                 # estimator's projection is the robust answer for a
                 # lone mode, and it stands.
-                mode = self.modes[members[0]]
-                best_shapes[members[0]] = (mode['shape'], mode['scaled'])
                 continue
-            lo = min(bands[r][0] for r in members)
-            hi = max(bands[r][1] for r in members)
-            lines = chosen[(chosen >= lo) & (chosen < hi)]
-            local_basis = np.stack(
-                [basis[np.isin(chosen, lines)][:, r]
-                 for r in range(count)], axis=1)
+            lines = np.arange(min(bands[r][0] for r in members),
+                              max(bands[r][1] for r in members))
             others = [r for r in range(count) if r not in members]
-            background = (local_basis[:, others]
-                          @ prior[others] if others else 0.0)
-            if self.weights is None:
-                trust = None
-                judged = self.matrix[lines]
-            else:
-                trust = np.sqrt(self.weights[lines])[:, :, None]
-                judged = self.matrix[lines] * trust
-            s_measured = np.linalg.svd(judged, compute_uv=False)[:, 0]
-            chosen_shapes, chosen_score = None, None
-            for fraction in (0.0, 0.01, 0.05, 0.2, None):
-                flat = prior if fraction is None else candidates[fraction]
-                shapes, adopted = adopted_forms(flat, members)
-                cluster_part = local_basis[:, members] @ np.stack(adopted)
-                synthesis = (background + cluster_part).reshape(
+            background = np.zeros((len(lines), responses, references),
+                                  dtype=np.complex128)
+            if others:
+                background += (scalars[lines][:, others]
+                               @ prior[others]).reshape(
                     len(lines), responses, references)
-                if trust is not None:
-                    synthesis = synthesis * trust
-                s_synthesis = np.linalg.svd(synthesis,
-                                            compute_uv=False)[:, 0]
-                score = float(np.linalg.norm(s_synthesis - s_measured))
-                if chosen_score is None or score < chosen_score:
-                    chosen_shapes, chosen_score = shapes, score
-            for r, pair in zip(members, chosen_shapes):
-                best_shapes[r] = pair
+            poles = [(self.modes[r]['frequency'], self.modes[r]['damping'])
+                     for r in members]
+            score, shapes = self._ladder(lines, background,
+                                         scalars[lines][:, members],
+                                         prior[members])
+            searched = self._joint_poles(lines,
+                                         self.matrix[lines] - background,
+                                         poles)
+            if searched is not None:
+                trial = np.stack(
+                    [self._mode_scalars({'frequency': f, 'damping': z},
+                                        self.omega[lines])
+                     for f, z in searched], axis=1)
+                moved, moved_shapes = self._ladder(lines, background, trial,
+                                                   prior[members])
+                # better by more than rounding: poles that were already
+                # right must not drift by a last digit from one machine's
+                # arithmetic to another's
+                if moved < score - 1e-9:
+                    poles, shapes = searched, moved_shapes
+            for r, (frequency, damping), (shape, scaled) in zip(
+                    members, poles, shapes):
+                refined[r] = (frequency, damping, shape, scaled)
 
-        for mode, (shape, scaled) in zip(self.modes, best_shapes):
+        for mode, (frequency, damping, shape, scaled) in zip(self.modes,
+                                                             refined):
+            mode['frequency'] = float(frequency)
+            mode['damping'] = float(damping)
             mode['shape'] = shape
             mode['scaled'] = scaled
+        self.modes.sort(key=lambda entry: entry['frequency'])
         # the caches stamp on the mode *count*, which did not change —
-        # the shapes did, so the residual is stale and must be dropped
-        # by hand or the plot goes on drawing the unrefined world
+        # the shapes did, and the poles may have, so the residual is
+        # stale and must be dropped by hand or the plot goes on drawing
+        # the unrefined world
         self._residual = None
         self._cmif = None
         self.preview = None
         return count
+
+    def _ladder(self, lines, background, basis, prior):
+        """(score, [(shape, scaled) per mode]) of the refine's best
+        candidate for one cluster, at the poles `basis` holds.
+
+        `lines` are the cluster's lines, `background` the other modes over
+        them (lines, responses, references), `basis` the cluster's SDOF
+        terms (lines, modes) and `prior` its current residues (modes,
+        responses x references). The score is how far the synthesized
+        CMIF lies from the measured one over these lines, relative to the
+        measured one.
+        """
+        # Each cluster judges its own ladder, on its own band. A
+        # global score was tried twice and failed twice: linearly, a
+        # quiet fundamental's fivefold inflation cost nothing against a
+        # loud cluster's lines; and in log, the noise floor's vote came
+        # back. Locally, the mode being judged dominates the lines
+        # doing the judging, so a weak mode's sequential rung wins
+        # whenever the refit would only be chasing noise — and the
+        # never-worse guarantee holds cluster by cluster, in the score
+        # each cluster is chosen by. The other clusters stand as a
+        # fixed background at their prior residues while one is judged.
+        responses, references = len(self.responses), len(self.references)
+        target = self.matrix[lines] - background
+        if self.weights is None:
+            trust = None
+            judged = self.matrix[lines]
+        else:
+            trust = np.sqrt(self.weights[lines])[:, :, None]
+            judged = self.matrix[lines] * trust
+        s_measured = np.linalg.svd(judged, compute_uv=False)[:, 0]
+        scale = float(np.linalg.norm(s_measured)) or 1.0
+        best = None
+        for fraction in (0.0, 0.01, 0.05, 0.2, None):
+            flat = (prior if fraction is None
+                    else self._cluster_residues(lines, basis, target, prior,
+                                                fraction))
+            shapes, adopted = [], []
+            for row in flat:
+                matrix = row.reshape(responses, references)
+                u, _s, _vh = np.linalg.svd(matrix)
+                direction = u[:, 0]
+                shape, scaled = self._shape_from(direction,
+                                                 direction @ matrix)
+                shapes.append((shape, scaled))
+                adopted.append(np.outer(
+                    shape[:responses],
+                    [shape[self.coordinate.index(dof)]
+                     for dof in self.references]).ravel())
+            synthesis = background + (basis @ np.stack(adopted)).reshape(
+                len(lines), responses, references)
+            if trust is not None:
+                synthesis = synthesis * trust
+            s_synthesis = np.linalg.svd(synthesis, compute_uv=False)[:, 0]
+            score = float(np.linalg.norm(s_synthesis - s_measured) / scale)
+            if best is None or score < best[0]:
+                best = (score, shapes)
+        return best
+
+    def _cluster_residues(self, lines, basis, target, prior, fraction):
+        """One cluster's residues (modes, responses x references) fitted to
+        `target` with its poles held: plain least squares when `fraction`
+        is 0, otherwise regularized toward `prior` by that fraction of the
+        mean diagonal."""
+        # real residues: the real and imaginary parts are two statements
+        # of the same unknowns, stacked into one real least squares.
+        # With coherence weights the solve runs per response, each
+        # channel's equations scaled by the root of its weight — the
+        # measurement's own statement of which channel to believe where,
+        # which is what keeps one bad channel from voting noise into
+        # every mode's residues.
+        n = basis.shape[1]
+        responses, references = len(self.responses), len(self.references)
+
+        def solve(stacked, rhs, toward):
+            if fraction == 0.0:
+                return np.linalg.lstsq(stacked, rhs, rcond=None)[0]
+            g = stacked.T @ stacked
+            u = float(np.trace(g)) / n
+            return np.linalg.solve(g + fraction * u * np.eye(n),
+                                   stacked.T @ rhs + fraction * u * toward)
+
+        if self.weights is None:
+            block = target.reshape(len(lines), -1)
+            return solve(np.vstack([basis.real, basis.imag]),
+                         np.vstack([block.real, block.imag]), prior)
+        answer = np.empty_like(prior)
+        for j in range(responses):
+            root = np.sqrt(self.weights[lines, j])[:, None]
+            block = target[:, j, :]
+            cols = [j * references + k for k in range(references)]
+            answer[:, cols] = solve(
+                np.vstack([basis.real * root, basis.imag * root]),
+                np.vstack([block.real * root, block.imag * root]),
+                prior[:, cols])
+        return answer
+
+    def _joint_poles(self, lines, target, poles):
+        """The poles of one cluster of overlapping modes searched together
+        over its `lines`, as [(frequency, damping)], or None when the
+        search gives nothing to trust.
+
+        `target` is the measurement over the lines with the other modes
+        taken out (lines, responses, references), and `poles` the current
+        (frequency, damping) of each mode. Only the poles are nonlinear:
+        for each trial set, the residues, one real value per mode and
+        record, are a linear least squares, and so are a mass line and a
+        stiffness line per record for what modes below and above the band
+        leave in it. The poles are then the ones whose least squares
+        leaves the least behind (variable projection). With coherence,
+        each response counts by its weight's median over the whole band.
+
+        Each frequency may move two of its current half-power half-widths,
+        and no further than its neighbors' current poles (or the band's
+        edges), and each damping a factor of four. A mode whose search
+        stops on one of those limits or gives a damping outside
+        `DAMPING_LIMITS` keeps its pole, and the others are searched again
+        with it held. So does a mode whose pole ends within a line of
+        another's: with free residues one pole can stand for two modes
+        with different shapes, and two poles meeting is that, not two
+        modes. The answer is None when the search fails or no mode is
+        left to move.
+        """
+        # The residues here are one free value per record, not a shape
+        # times a participation: the rank-one form would make the shapes
+        # nonlinear too. `_ladder` then fits the rank-one shapes at these
+        # poles, and keeps them only where the CMIF agrees.
+        #
+        # A mode that cannot move is held rather than the whole cluster
+        # refused: a sequential loop on noisy data had put a 50 % mode
+        # among three real ones, and refusing the cluster for it left the
+        # real ones as biased as before.
+        from scipy.optimize import least_squares
+
+        omega = self.omega[lines]
+        start = np.array(poles, dtype=np.float64)
+        n = len(start)
+        if (np.any(omega <= 0.0) or np.any(start[:, 0] <= 0.0)
+                or 2 * len(lines) <= n + 2):
+            return None
+        width = start[:, 0] * start[:, 1]
+        residual_terms = [term / np.linalg.norm(term)
+                          for term in ((1j * omega) ** self.power / omega ** 2,
+                                       (1j * omega) ** self.power)]
+
+        block = target
+        if self.weights is not None:
+            block = target * np.sqrt(
+                np.median(self.weights, axis=0))[None, :, None]
+        block = block.reshape(len(lines), -1)
+        # the leftover has the norm it has on the measurement's left
+        # singular vectors scaled, which are far fewer columns than the
+        # records
+        u, s, _vh = np.linalg.svd(np.vstack([block.real, block.imag]),
+                                  full_matrices=False)
+        values = u * s
+        low, high = DAMPING_LIMITS
+        # each pole stays between its neighbors' current poles, the band's
+        # edges at the ends: a pole passing a neighbor is a mode trading
+        # places, not one refined
+        order = np.argsort(start[:, 0])
+        fences = np.concatenate([[self.frequencies[lines[0]]],
+                                 start[order, 0],
+                                 [self.frequencies[lines[-1]]]])
+        between = np.empty((n, 2))
+        between[order, 0], between[order, 1] = fences[:-2], fences[2:]
+        line = float(np.median(np.diff(self.frequencies[lines])))
+        free = list(range(n))
+        while free:
+            def found(x, free=free):
+                out = [tuple(pole) for pole in start]
+                for k, i in enumerate(free):
+                    out[i] = (start[i, 0] + width[i] * x[k],
+                              start[i, 1] * np.exp(x[len(free) + k]))
+                return out
+
+            def leftover(x, found=found):
+                columns = [self._mode_scalars({'frequency': f, 'damping': z},
+                                              omega)
+                           for f, z in found(x)]
+                stacked = np.stack(columns + residual_terms, axis=1)
+                q, _r = np.linalg.qr(np.vstack([stacked.real, stacked.imag]))
+                return (values - q @ (q.T @ values)).ravel()
+
+            limit = np.concatenate([np.full(len(free), 2.0),
+                                    np.full(len(free), np.log(4.0))])
+            try:
+                result = least_squares(leftover, np.zeros(2 * len(free)),
+                                       bounds=(-limit, limit))
+            except (ValueError, np.linalg.LinAlgError):
+                return None
+            if not result.success:
+                return None
+            answer = found(result.x)
+            # on a limit, or within rounding of one: least squares reports
+            # a bound it stops a hair short of as inactive
+            held = np.abs(result.x) >= limit - 1e-6
+            stuck = [i for k, i in enumerate(free)
+                     if held[k] or held[len(free) + k]
+                     or not between[i, 0] < answer[i][0] < between[i, 1]
+                     or not low <= answer[i][1] <= high
+                     or any(abs(answer[i][0] - answer[j][0]) < line
+                            for j in range(n) if j != i)]
+            if not stuck:
+                break
+            free = [i for i in free if i not in stuck]
+        if not free:
+            return None
+        return [(float(f), float(z)) for f, z in answer]
+
+    def pick(self, index: int) -> tuple[float, float]:
+        """The (frequency, damping) mode `index` was confirmed at, as
+        `confirmed` holds it: its pole until Refine moved it."""
+        mode = self.modes[index]
+        return mode.get('pick', (float(mode['frequency']),
+                                 float(mode['damping'])))
 
     def residual_records(self) -> np.ndarray:
         """The residual in the source FRF's record layout, (records,
@@ -1408,7 +1549,10 @@ class ModalFitSession:
         The mass unit is kg when every fit record has a defined
         dimension, and None otherwise, since shapes fitted to raw values
         are raw. The set is marked unscaled when any mode had no drive
-        point to set its scale.
+        point to set its scale. The references not also measured as
+        responses are listed in `reference_only`: their values are the
+        references' participation, on the shapes' scale only when a
+        drive point set it.
         """
         from .shapes import ShapeSet
 
@@ -1424,4 +1568,5 @@ class ModalFitSession:
             description=[mode['description'] for mode in self.modes],
             mass_unit='kg' if known else None,
             unscaled=any(not mode.get('scaled', True)
-                         for mode in self.modes))
+                         for mode in self.modes),
+            reference_only=self.coordinate[len(self.responses):])

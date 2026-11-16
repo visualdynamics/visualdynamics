@@ -124,6 +124,7 @@ from ..deform import (
     TimeDeflection,
     animation_records,
     modal_deflection,
+    modal_ods_deflection,
 )
 from ..io.escdf_objects import SUFFIX as ESCDF_SUFFIX
 from ..io.escdf_objects import SUFFIXES as ESCDF_SUFFIXES
@@ -1753,13 +1754,16 @@ class MainWindow(QMainWindow):
         #
         # Sequential fitting never goes back: the first of a close pair
         # was fit on data still containing the second. This goes back —
-        # poles held, every mode's residues re-fit together. Offered
-        # only once there are two modes to influence each other.
+        # the poles of modes whose bands overlap searched together, and
+        # their residues re-fit together (the poles were held until
+        # 2026-11-16). Offered only once there are two modes to
+        # influence each other.
         self.refine_modes_button: QPushButton = QPushButton('Refine All')
         self.refine_modes_button.setToolTip(
-            'Re-fit every confirmed mode\'s shape together, holding the '
-            'frequencies and dampings — close modes stop borrowing from '
-            'each other')
+            'Re-fit the confirmed modes, neighbors together: modes whose '
+            'half-power bands overlap get their frequencies and dampings '
+            'searched together and their shapes fitted together, so '
+            'close modes stop borrowing from each other')
         self.refine_modes_button.clicked.connect(self.refine_all_modes)
         fit_layout.addWidget(self.refine_modes_button)
         self.find_mode_button: QPushButton = QPushButton('Find Mode')
@@ -2493,6 +2497,17 @@ class MainWindow(QMainWindow):
         self.sensor_size_action: QAction = toolbar.addWidget(
             self.sensor_size_combo)
         self.sensor_size_action.setVisible(False)
+        # modal FRFs, a channel table and a geometry: the table's force
+        # references are where the force may be, and this picks one
+        # (Brandon, 2026-11-16). Offered only when there is a choice.
+        self.drive_combo: QComboBox = QComboBox()
+        self.drive_combo.setToolTip(
+            'Which of the channel table\'s force references the geometry '
+            'is driven at')
+        self.drive_combo.currentIndexChanged.connect(
+            lambda _index: self.render_current())
+        self.drive_combo_action: QAction = toolbar.addWidget(self.drive_combo)
+        self.drive_combo_action.setVisible(False)
         #: (geometry, channel table) for each geometry drawn with sensors
         self._sensor_pairs = []
         self._sensor_geometries = []
@@ -2982,8 +2997,12 @@ class MainWindow(QMainWindow):
             # the cursor picks which frequency deflects; the phase the
             # sweep is at stays where it was
             deflection.line = index
+            # displacement at 0 Hz with a rigid-body mode among the
+            # modes is unbounded: nothing is drawn moved, and this is why
             self._caption_scene(
-                f'ODS — {self._cursor_abscissa[index]:.5g} Hz')
+                f'ODS — {self._cursor_abscissa[index]:.5g} Hz'
+                + ('' if getattr(deflection, 'line_defined', True)
+                   else ': no shape, a mode is unbounded here'))
             self._draw_frame(
                 self.phase_slider.value() / PHASE_STEPS * 2 * np.pi)
             return
@@ -10436,6 +10455,9 @@ class MainWindow(QMainWindow):
         """Draw everything selected: geometries are drawn together, and
         curves share axes."""
         self._update_toolbar_actions()
+        # the drive box belongs to the modal FRFs' deflection, which
+        # puts it back when it is what is drawn
+        self.drive_combo_action.setVisible(False)
         # the frames and the shock windows belong to the plot that was
         # up; whatever is drawn next puts its own back if it wants them
         self._clear_averaging()
@@ -10695,7 +10717,8 @@ class MainWindow(QMainWindow):
         # one (`opengl.ready`, which says why) the scene keeps its page
         # saying so, and the rest of the selection is drawn without it
         drawable = not geometries or self.scene.plotter is not None
-        deflection = (self._deflection_for(geometries, series, shapes)
+        deflection = (self._deflection_for(geometries, series, shapes,
+                                           channels)
                       if drawable else None)
         parts = []
         synthesis_note = ''
@@ -10812,7 +10835,7 @@ class MainWindow(QMainWindow):
                   'groups': len(entry['object'].group_id)}
         return component if not counts.get(component, 1) else None
 
-    def _deflection_for(self, geometries, series, shapes):
+    def _deflection_for(self, geometries, series, shapes, channels=()):
         """Show data on the geometry: one shape set animates, two compare.
 
         Returns a status line, or None when there is nothing to deflect and
@@ -10838,6 +10861,9 @@ class MainWindow(QMainWindow):
                 panel.show()
                 return None
             return self._deflect_rigid(name, geometry, showing=name)
+        driven = self._modal_ods_selection(series, channels, shapes)
+        if driven is not None:
+            return self._deflect_modal_ods(geometry, *driven, showing=name)
         if shapes and not series:
             sets = list(dict.fromkeys(n for n, _obj, _detail in shapes))
             if len(sets) == 2:
@@ -12968,6 +12994,13 @@ class MainWindow(QMainWindow):
                                           showing=showing, why=why)
         if (data.abscissa_dim == 'frequency'
                 and np.iscomplexobj(data.ordinate)):
+            picked = range(data.num_records) if records is None else records
+            if isinstance(data, Frf) and len(picked) and all(
+                    modal_coordinate(data.response_dof[i]) is not None
+                    for i in picked):
+                return (f'{name}: its records are modal FRFs — select a '
+                        'channel table with a force reference too, to see '
+                        'the response to that force')
             return self._deflect_ods(geometry, name, data, records,
                                      showing=showing)
         if data.abscissa_dim != 'time':
@@ -13188,6 +13221,85 @@ class MainWindow(QMainWindow):
             np.asarray(data.ordinate)[list(indices)],
             f'operating deflection proportional to {units}',
             notes, showing)
+
+    def _modal_ods_selection(self, series, channels, shapes):
+        """(FRF name, records, table name, drive DOFs) when the selection
+        is modal FRFs, whole or some records picked, and one channel
+        table with a force reference: what, with a geometry, shows the
+        response to a force there. A shape set selected with them has to
+        be the one the modal FRFs are of. None otherwise."""
+        if len(series) != 1 or not isinstance(series[0][1], Frf):
+            return None
+        name, data, records = series[0]
+        picked = range(data.num_records) if records is None else records
+        if not len(picked) or any(
+                modal_coordinate(data.response_dof[i]) is None
+                or modal_coordinate(data.reference_dof[i]) is None
+                for i in picked):
+            return None
+        tables = list(dict.fromkeys(n for n, _table, _detail in channels))
+        if len(tables) != 1:
+            return None
+        points = self.project.drive_points(tables[0])
+        if not points:
+            return None
+        sets = {n for n, _obj, _detail in shapes}
+        if sets and sets != {self.project.modal_basis(name, records)}:
+            return None
+        return name, records, tables[0], points
+
+    def _deflect_modal_ods(self, geometry, name, records, table, points,
+                           showing=None):
+        """Modal FRFs deflect the geometry by a force at one of a channel
+        table's force references: at the cursor line, each mode's shape
+        scaled by its modal FRF and its shape value at the drive, summed
+        (`Project.driven_modes`), at every DOF the shape set has on this
+        geometry. The records picked are the modes included. The FRFs at
+        those DOFs are never made (`deform.ModalOdsDeflection`)."""
+        from ..viz.geometry import add_dof_arrows
+
+        self._fill_combo(self.drive_combo, [(dof, dof) for dof in points],
+                         'Which of the channel table\'s force references '
+                         'the geometry is driven at')
+        self.drive_combo_action.setVisible(len(points) > 1)
+        # the arrows mark what data measures, and modal coordinates are
+        # at no node: the one arrow drawn here is the force
+        self.dofs_action.setVisible(False)
+        self.dofs_combo_action.setVisible(False)
+        self._cursor_dimension = None
+        drive = self.drive_combo.currentData()
+        try:
+            basis, driven = self.project.driven_modes(
+                name, drive, table=table, records=records)
+            deflection = modal_ods_deflection(geometry, self.objects[basis],
+                                              driven)
+        except (ValueError, TypeError) as refusal:
+            return f'{name}: {refusal}'
+        if not len(deflection.rows):
+            return f'{name}: {basis} has no DOF on this geometry'
+        if deflection.peak == 0.0:
+            return f'{name}: a force at {drive} moves none of its modes'
+        deflection.line = deflection.strongest_line
+        data = self.objects[name]
+        frequency = float(np.asarray(
+            data.display_abscissa(self.unit_system))[deflection.line])
+        self._shape_mode = True      # Play sweeps phase, the line holds
+        self._build_animator(geometry, deflection,
+                             caption=f'ODS — {frequency:.5g} Hz',
+                             showing=showing)
+        add_dof_arrows(self.scene.plotter, geometry, [drive],
+                       unit_system=self.unit_system, incoming=True,
+                       name='drive-dof')
+        self.phase_slider.blockSignals(True)
+        self.phase_slider.setValue(0)
+        self.phase_slider.blockSignals(False)
+        self._show_animation_controls(True, phase=True)
+        self.play_action.setEnabled(True)
+        count = len(driven.modes)
+        return (f'{name} — the response to a force at {drive}: {count} mode '
+                f'shape{"s" if count != 1 else ""} of {basis} scaled by '
+                'their modal FRFs and summed; drag the cursor to pick the '
+                'frequency, Play sweeps the phase')
 
     def _deflect_principal(self, geometry, name, data, showing=None):
         """The whole CPSD's reading: the principal operating deflection
@@ -21528,26 +21640,43 @@ class MainWindow(QMainWindow):
             f'of the plot to {proposed[1] * 100.0:g} % at the bottom')
 
     def refine_all_modes(self) -> None:
-        """Fit the residues of every confirmed mode again, together, with
-        the frequencies and dampings held. It needs at least two
-        confirmed modes; `ModalFitSession.refine_residues` explains what
-        it corrects."""
+        """Fit the confirmed modes again, neighbors together: the poles
+        of modes whose bands overlap, then their residues. It needs at
+        least two confirmed modes; `ModalFitSession.refine_residues`
+        explains what it corrects."""
         if self.fit is None or len(self.fit.modes) < 2:
             return
-        before = [mode['shape'].copy() for mode in self.fit.modes]
+        # by pick, which a refine never changes: the modes are sorted
+        # by frequency again afterwards, and a pole may have moved
+        before = {self.fit.pick(k): (mode['frequency'], mode['damping'],
+                                     mode['shape'].copy())
+                  for k, mode in enumerate(self.fit.modes)}
         count = self.fit.refine_residues()
-        changed = any(not np.array_equal(early, mode['shape'])
-                      for early, mode in zip(before, self.fit.modes))
+        after = {self.fit.pick(k): mode
+                 for k, mode in enumerate(self.fit.modes)}
+        moved = sum((mode['frequency'], mode['damping']) != before[pick][:2]
+                    for pick, mode in after.items())
+        changed = moved or any(
+            not np.array_equal(before[pick][2], mode['shape'])
+            for pick, mode in after.items())
         self._publish_fit()
+        # the table's frequencies and dampings may have moved
+        self._fit_model.layoutChanged.emit()
         self._render_fit()
         # the CMIF may have chosen the sequential answer — see
         # refine_residues — and saying "re-fit" about an unchanged fit
         # would send the eye hunting for a difference that is not there
-        self._show_status(
-            f'Re-fit {count} modes\' shapes together — frequencies and '
-            'dampings kept' if changed else
-            'Refine changed nothing — the fits are already as '
-            'consistent as the measured CMIF supports')
+        if not changed:
+            said = ('Refine changed nothing — the fits are already as '
+                    'consistent as the measured CMIF supports')
+        elif moved:
+            said = (f'Re-fit {count} modes together — {moved} '
+                    f'mode{"s" * (moved != 1)} moved in frequency or '
+                    'damping')
+        else:
+            said = (f'Re-fit {count} modes\' shapes together — '
+                    'frequencies and dampings kept')
+        self._show_status(said)
 
     def _toggle_fit_residual(self, _checked: bool = False) -> None:
         """Draw or drop the residual CMIF — a full re-render, which
@@ -21981,8 +22110,9 @@ class MainWindow(QMainWindow):
         if not picked:
             return
         for row in picked:
-            pick = (float(session.modes[row]['frequency']),
-                    float(session.modes[row]['damping']))
+            # the pole it was confirmed at, which Refine may have moved
+            # it from
+            pick = session.pick(row)
             if pick in session.confirmed:
                 # the replay list follows: the journal's fit_modes call
                 # holds what stands, not what was taken back
@@ -22056,8 +22186,8 @@ class MainWindow(QMainWindow):
         # and the published name — settling in place as the fit grows
         # (Brandon, 2026-08-30: nothing in the console may be
         # not-replayable)
-        described = {(float(m['frequency']), float(m['damping'])):
-                     m['description'] for m in self.fit.modes}
+        described = {self.fit.pick(k): m['description']
+                     for k, m in enumerate(self.fit.modes)}
         picks = [(f, z, described[(f, z)])
                  if described.get((f, z)) else (f, z)
                  for f, z in self.fit.confirmed]

@@ -25,6 +25,7 @@ class _Kept:
 
     def __init__(self):
         self.meshes, self.labels, self.camera_position = {}, None, None
+        self.renderers = ()
 
     def add_mesh(self, mesh, name=None, **_style):
         self.meshes[name] = mesh

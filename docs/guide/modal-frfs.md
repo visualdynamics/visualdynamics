@@ -116,9 +116,13 @@ only has to name the force.
 
 Drag the cursor on the plot to pick the frequency, and press Play to
 sweep the phase. Each line is drawn at full scale, as an FRF's
-operating deflection shape is. An arrow marks the force. When the
-table has more than one force reference, a drop-down on the 3-D view's
-bar picks which one is used.
+operating deflection shape is. An arrow marks the force and moves with
+the node it is on. When the table has more than one force reference, a
+drop-down on the 3-D view's bar picks which one is used, and the
+cursor stays on its frequency, so the same line can be compared from
+one force to the next. When the table is linked to a geometry of its
+own, such as a test geometry over a finite element model, the arrow is
+drawn at that geometry's node, where the shapes are read.
 
 To leave modes out, pick the records of the modes to keep in the modal
 FRFs' grid, then Cmd-click the table and the geometry. With the

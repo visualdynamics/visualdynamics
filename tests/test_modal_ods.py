@@ -545,6 +545,158 @@ def test_several_force_references_offer_the_drive(window, pump, model):
     assert not window.drive_combo_action.isVisible()
 
 
+def test_moving_the_force_keeps_the_cursor_line(window, pump, model):
+    """Comparing drive points is one frequency asked of each: the cursor
+    stays where it was put, and a fresh selection still starts on the
+    strongest line."""
+    from conftest import select_objects
+
+    modal = _window(window, pump, model, Two=_table(
+        ('101', '505'), ('reference',) * 2, ('force',) * 2))
+    select_objects(window, pump, modal, 'Two', 'Plate')
+    combo = window.drive_combo
+    assert window.animator.deflection.strongest_line != 5
+    window._cursor.setValue(float(window._cursor_abscissa[5]))
+    pump()
+    for index, drive in ((1, '505Z+'), (0, '101Z+')):
+        combo.setCurrentIndex(index)
+        pump()
+        deflection = window.animator.deflection
+        assert f'a force at {drive}' in window.statusBar().currentMessage()
+        assert deflection.line == 5
+        assert window._cursor.value() == float(window._cursor_abscissa[5])
+        assert _caption(window) == f'ODS — {window._cursor_abscissa[5]:.5g} Hz'
+    assert window._drive_line is None
+    select_objects(window, pump, modal)
+    select_objects(window, pump, modal, 'Two', 'Plate')
+    deflection = window.animator.deflection
+    assert deflection.line == deflection.strongest_line != 5
+
+
+def test_the_force_arrow_is_at_the_tables_own_geometry(window, pump):
+    """A table on a test geometry over an FE model: the drive is a node
+    of the test geometry, so the arrow ends there and points along that
+    node's coordinate system, whatever the model numbers its nodes."""
+    from conftest import select_objects
+    from test_correlate import _fem, _test_model
+
+    from visualdynamics.viz.geometry import display_points
+
+    fem_geometry, fem_shapes = _fem()
+    fem_shapes.define_units('kg')
+    # the model has a node 2 of its own, far from the test geometry's
+    test_geometry, _shapes = _test_model()
+    test_geometry = visualdynamics.Geometry(
+        node_id=[2, 102], node_xyz=test_geometry.node_xyz,
+        node_disp_cs=[0, 5], cs_id=[5], cs_type=[0], cs_name=['rotated'],
+        cs_matrix=[[[0, 1, 0], [-1, 0, 0], [0, 0, 1], [0, 0, 0]]])
+    table = visualdynamics.ChannelTable({
+        'channel': [1, 2], 'node': ['2', '102'], 'direction': ['X+', 'X+'],
+        'role': ['reference'] * 2, 'unit': ['N'] * 2,
+        'channel_type': ['force'] * 2})
+    for name, thing in (('FEM Geometry', fem_geometry),
+                        ('FEM Shapes', fem_shapes),
+                        ('Test Geometry', test_geometry), ('Channels', table)):
+        window.add_object(name, thing)
+    pump()
+    window.project.link('FEM Geometry', 'FEM Shapes')
+    window.project.link('Test Geometry', 'Channels')
+    modal = window.project.synthesize_modal_frfs(
+        'FEM Shapes', sample_rate=128.0, frame_length=128)
+    window.show_object(modal)
+    pump()
+    select_objects(window, pump, modal, 'Channels', 'FEM Geometry')
+    assert isinstance(window.animator.deflection, ModalOdsDeflection)
+    places, _unit = display_points(test_geometry, window.unit_system)
+
+    def arrow():
+        (name,) = [str(actor) for actor in window.scene.plotter.actors
+                   if str(actor).startswith('drive-dof-arrows')]
+        low, high = np.reshape(
+            window.scene.plotter.actors[name].GetBounds(), (3, 2)).T
+        return low, high
+
+    for index, (place, along) in enumerate(zip(places, (0, 1))):
+        window.drive_combo.setCurrentIndex(index)
+        pump()
+        window.animator.reset()     # the arrow rides its node: at rest
+        low, high = arrow()
+        size = high - low
+        assert np.argmax(size) == along, 'along the node\'s own X'
+        # a force arrow ends on the node: the node is the far end of it
+        assert np.isclose(high[along], place[along], atol=0.02 * size[along])
+        across = [axis for axis in range(3) if axis != along]
+        assert np.allclose((low + high)[across] / 2, np.asarray(place)[across],
+                           atol=1e-6)
+
+
+def _marks(window):
+    """The force arrow's points and its label's, as they are drawn."""
+    from vtkmodules.util.numpy_support import vtk_to_numpy
+
+    found = {}
+    for name, actor in window.scene.plotter.actors.items():
+        if str(name).startswith('drive-dof-arrows'):
+            found['arrow'] = np.array(actor.mapper.dataset.points)
+        elif str(name).startswith('drive-dof-labels'):
+            placed = actor.GetMapper().GetInputConnection(0, 0).GetProducer()
+            found['label'] = np.array(vtk_to_numpy(
+                placed.GetInputDataObject(0, 0).GetPoints().GetData()))
+            found['drawn'] = (placed.GetMTime(), actor.GetMapper().GetMTime())
+    return found
+
+
+@pytest.mark.parametrize('linked', [False, True])
+def test_the_force_arrow_moves_with_its_node(window, pump, model, linked):
+    """The arrow and its label ride the node the force is on, through the
+    phase sweep and at any scale, whether the table is on the geometry
+    drawn or on a copy of it linked to the table."""
+    from PySide6.QtCore import QItemSelectionModel
+
+    geometry, shapes = model
+    modal = _window(window, pump, model, Force=_table(('505',)))
+    if linked:
+        ids = list(geometry.node_id)
+        sparse = visualdynamics.Geometry(
+            [101, 303, 505], [geometry.node_xyz[ids.index(node)]
+                              for node in (101, 303, 505)])
+        sparse.define_units('m')
+        window.add_object('Sparse', sparse)
+        pump()
+        window.project.link('Sparse', 'Force')
+        window.show_object(modal)       # adding an object selected it
+        pump()
+    window.record_grids[modal].select_records(_elastic(shapes))
+    window.record_grids[modal].selection_changed.emit()
+    pump()
+    for other in ('Force', 'Plate'):
+        window.tree.setCurrentItem(window._item_for_object(other), 0,
+                                   QItemSelectionModel.SelectionFlag.Select)
+    pump()
+    assert window.animator is not None, window.statusBar().currentMessage()
+    animator = window.animator
+    row = list(geometry.node_id).index(505)
+    window._cursor.setValue(0.0)
+    pump()
+    animator.set_parameter(0.0)
+    moved = animator.view[row] - animator.base[row]
+    assert np.linalg.norm(moved) > 0.01 * animator.model_size
+    here = _marks(window)
+    assert set(here) == {'arrow', 'label', 'drawn'}
+    animator.reset()
+    rest = _marks(window)
+    for part in ('arrow', 'label'):
+        assert np.allclose(here[part] - rest[part], moved, atol=1e-9), part
+    # half a cycle on, the node is on the other side and so is the arrow
+    animator.set_parameter(np.pi)
+    there = _marks(window)
+    # the label is drawn through a filter and a mapper, and each is told
+    assert all(now > before for now, before in zip(there['drawn'],
+                                                   rest['drawn']))
+    for part in ('arrow', 'label'):
+        assert np.allclose(there[part] - rest[part], -moved, atol=1e-9), part
+
+
 def test_without_a_force_the_window_says_what_is_missing(window, pump, model):
     from conftest import select_objects
 

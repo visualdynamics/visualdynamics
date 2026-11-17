@@ -310,6 +310,21 @@ does not have to be passed in advance as an argument.
 `geometry.plot()` returns a `ScenePane` opened on the geometry's
 default view (`geometry.view`). *Reset View* returns to that view, and
 the labeled axes and the orientation triad are toggles on its bar.
+
+The triad has a cube at its origin. Click a face of the cube and the
+view turns to look straight at that face: the blue face on the Z arrow
+gives the view from above, with Y up on the screen, and a side face
+gives a view with Z up. Click the face you are looking at and the view
+turns to the opposite one. The view keeps its zoom and what it is
+centered on.
+
+*Perspective* on the same bar switches between perspective and
+parallel projection. In parallel projection, lines that are parallel
+on the model are parallel on the screen and a length reads the same at
+any depth, which is the view to compare two ends of a long structure
+in. The scene keeps its size on screen across the switch. The 3-D form
+of a data plot has the same toggle on its own bar. From a script,
+`pane.set_perspective(False)` does the same.
 `frf.plot()` returns a `DataPane`. Complex data gets the component
 box, so `frf.plot(component='imag')` sets the starting component
 without fixing it, and you can switch to the real part without calling

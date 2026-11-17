@@ -313,6 +313,9 @@ def place_camera(plotter: Any, rows: int, columns: int) -> None:
         (columns * 0.5 - 1.1 * extent, -1.4 * extent, 1.2 * extent),
         (columns * 0.5, rows * 0.42, 0.12 * extent),
         (0.0, 0.0, 1.0)]
+    from .geometry import keep_parallel_width
+
+    keep_parallel_width(plotter)
 
 
 def mac_bars_scene(frequencies: Sequence[float], matrix: Any,

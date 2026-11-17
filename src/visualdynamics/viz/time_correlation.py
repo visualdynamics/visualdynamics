@@ -15,7 +15,7 @@ def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
                           text_color: str = 'black') -> int:
     """Draw selectable scores and an optional interpolated surface."""
     import pyvista as pv
-    from matplotlib import colormaps
+    from pyvista import LookupTable
     from scipy.spatial import cKDTree
 
     from .geometry import COLORMAP
@@ -28,7 +28,7 @@ def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
                 and (node := parse_dof(row['dof'])[0]) in positions]
     extent = max((abs(score - 1) for _, _, score in stations), default=1)
     clim = (0, 1) if metric == 'trac' else (1 - max(extent, .05), 1 + max(extent, .05))
-    palette = colormaps[COLORMAP]
+    palette = LookupTable(cmap=COLORMAP, scalar_range=clim)
     by_node = {}
     for _, index, score in stations:
         by_node.setdefault(index, []).append(score)
@@ -50,7 +50,7 @@ def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
         marker = pv.PolyData(points[index:index+1])
         marker.field_data['comparison_row'] = [row for row, _ in at_node]
         plotter.add_mesh(marker, point_size=15, render_points_as_spheres=True,
-                         color=palette((np.mean(scores)-clim[0])/(clim[1]-clim[0]))[:3])
+                         color=palette.map_value(float(np.mean(scores)))[:3])
     if stations:
         plotter.add_text(f'{metric.upper() if metric == "trac" else "sTRAC"}: '
                          f'{clim[0]:.3g} to {clim[1]:.3g}', font_size=10, color=text_color)

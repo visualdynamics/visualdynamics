@@ -2196,6 +2196,19 @@ def _draw_reset_view(painter, color):
     painter.drawLine(center, bottom)
 
 
+def _draw_perspective(painter, color):
+    """A box seen in perspective: a near face, a smaller far face and
+    the edges between them running toward one point."""
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    near = [QPointF(8, 20), QPointF(42, 20), QPointF(42, 56), QPointF(8, 56)]
+    far = [QPointF(34, 8), QPointF(56, 8), QPointF(56, 32), QPointF(34, 32)]
+    painter.drawPolygon(near)
+    painter.drawPolygon(far)
+    for a, b in zip(near, far):
+        painter.drawLine(a, b)
+
+
 def _draw_solve_modes(painter, color):
     """A plate's mesh bent into its first bending mode (Solve Modes): a
     grid in perspective whose lengthwise lines follow a half sine — the
@@ -2772,6 +2785,7 @@ def control_icon(name: str) -> QIcon:
      'tie': _draw_tie,
      'merge_groups': _draw_merge_groups, 'solve_modes': _draw_solve_modes,
      'set_view': _draw_set_view, 'reset_view': _draw_reset_view,
+     'perspective': _draw_perspective,
      'sine': _draw_sine,
      'refresh': _draw_refresh,
      'copy': _draw_copy, 'movie': _draw_movie,

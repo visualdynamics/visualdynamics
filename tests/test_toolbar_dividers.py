@@ -141,7 +141,9 @@ def test_the_3d_toggle_stands_apart_from_the_choices(pane):
     visible = [a for a in pane.toolbar.actions() if a.isVisible()]
     at = visible.index(pane.waterfall_action)
     assert at == 0 or visible[at - 1].isSeparator(), 'fenced before'
-    assert visible[at + 1].isSeparator(), 'and after'
+    # Perspective is the 3-D form's own setting and shares its fence
+    after = [a for a in visible[at + 1:] if a is not pane.perspective_action]
+    assert after[0].isSeparator(), 'and after'
 
 
 def test_every_exclusive_group_is_fenced(pane):

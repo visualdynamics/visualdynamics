@@ -720,6 +720,9 @@ def place_camera(plotter: Any) -> None:
         (-sx * 0.5, -sy * 2.3, sz * 3.0),
         (sx * 0.5, sy * 0.5, sz * 0.2),
         (0.0, 0.0, 1.0)]
+    from .geometry import keep_parallel_width
+
+    keep_parallel_width(plotter)
 
 
 def stage_basis() -> tuple[np.ndarray, np.ndarray]:

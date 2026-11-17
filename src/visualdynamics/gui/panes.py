@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 from ..plot import background_brush
 from ..plot.log_axis import install as install_log_axis
 from ..theme import theme as resolve_theme
-from ..viz.geometry import annotate_scene
+from ..viz.geometry import annotate_scene, set_perspective
 from .amplitude_panel import AmplitudePanel
 from .author_panel import AuthorPanel
 from .averaging_panel import AveragingPanel
@@ -704,6 +704,18 @@ class DataPane(QWidget):
         self.waterfall_action.triggered.connect(
             lambda _checked: self.reread.emit())
         toolbar.addAction(self.waterfall_action)
+        # the 3-D form's projection, on the bar while that form is up
+        # (`show_waterfall`), as on the 3-D view's bar
+        self.perspective_action: QAction = QAction(
+            control_icon('perspective'), 'Perspective', self)
+        self.perspective_action.setCheckable(True)
+        self.perspective_action.setChecked(True)
+        self.perspective_action.setToolTip(
+            'Draw the view in perspective. Off, lines that are parallel '
+            'on the model are parallel on the screen')
+        self.perspective_action.toggled.connect(self.set_perspective)
+        self.perspective_action.setVisible(False)
+        toolbar.addAction(self.perspective_action)
         # the frequency axis, decades or hertz, for every plot at once:
         # some readers of a specification want one and some the other
         # (Brandon, 2026-09-05). A view control, so it sits with 3D;
@@ -1507,7 +1519,7 @@ class DataPane(QWidget):
         # stop being.
         fence(toolbar, [
             self.plot_mode_group.actions(),
-            [self.waterfall_action],
+            [self.waterfall_action, self.perspective_action],
             [self.octave_action, self.tone_action, self.confidence_action,
              self.rms_check_action],
             [self.sweep_rate_action, self.sine_profile_action],
@@ -2341,10 +2353,24 @@ class DataPane(QWidget):
         """
         if wanted:
             self.create_waterfall_plotter()
+        self.perspective_action.setVisible(
+            bool(wanted) and self._waterfall_page is not None)
         if self._waterfall_page is None:
             return   # never built, and not wanted: the graphics stand
         self.graphics.setVisible(not wanted)
         self._waterfall_page.setVisible(wanted)
+        if wanted:
+            set_perspective(self.waterfall_plotter,
+                            self.perspective_action.isChecked(), render=False)
+
+    def set_perspective(self, perspective: bool) -> None:
+        """Draw the 3-D form in perspective, or in parallel projection
+        (`viz.geometry.set_perspective`)."""
+        if self.perspective_action.isChecked() != bool(perspective):
+            self.perspective_action.setChecked(bool(perspective))
+            return      # the action's own signal comes back here
+        if self.waterfall_plotter is not None:
+            set_perspective(self.waterfall_plotter, bool(perspective))
 
     def component(self) -> str:
         """Which part of a complex ordinate to draw: 'magnitude',
@@ -2620,6 +2646,8 @@ class DataPane(QWidget):
         self.event_action.setVisible(False)
         self.scaling_action.setVisible(False)
         self.rms_action.setVisible(False)
+        # put back by `show_waterfall` when the 3-D form is drawn
+        self.perspective_action.setVisible(False)
         self.offer_sweep_rate(False)
         self.offer_signature(False)
         self.offer_matrix(False)
@@ -2658,6 +2686,7 @@ class DataPane(QWidget):
                        self.confidence_action, self.notch_action,
                        self.sweep_rate_action,
                        self.scaling_action, self.waterfall_action,
+                       self.perspective_action,
                        self.log_frequency_action,
                        self.quantity_action, self.page_action):
             action.setVisible(False)
@@ -2734,6 +2763,8 @@ class ScenePane(QWidget):
         # around the geometry is clutter until asked for
         self.bounds_visible: bool = False
         self.orientation_visible: bool = True
+        #: perspective, or parallel projection (`set_perspective`)
+        self.perspective: bool = True
         self.axis_unit: str = ''
         #: the view Reset View returns to: the shown geometry's own
         #: (`Geometry.opening_view`), None while no geometry is shown
@@ -2861,9 +2892,25 @@ class ScenePane(QWidget):
         self.orientation_action.setCheckable(True)
         self.orientation_action.setChecked(True)
         self.orientation_action.setToolTip(
-            'Show the orientation triad in the corner')
+            'Show the orientation triad in the corner. Click a face of '
+            'its cube to look straight at that face, and again to look '
+            'at the opposite one')
         self.orientation_action.toggled.connect(self.set_orientation_visible)
         toolbar.addAction(self.orientation_action)
+
+        # perspective was the only projection, and in it a long model's
+        # far end is drawn smaller than its near end, so two shapes
+        # could not be compared by eye along its length (Brandon,
+        # 2026-11-17)
+        self.perspective_action: QAction = QAction(
+            control_icon('perspective'), 'Perspective', self)
+        self.perspective_action.setCheckable(True)
+        self.perspective_action.setChecked(True)
+        self.perspective_action.setToolTip(
+            'Draw the view in perspective. Off, lines that are parallel '
+            'on the model are parallel on the screen')
+        self.perspective_action.toggled.connect(self.set_perspective)
+        toolbar.addAction(self.perspective_action)
 
         # a reading of the geometry, fenced from the view choices the
         # way every group on the data pane's bar is; shown only when
@@ -3026,6 +3073,10 @@ class ScenePane(QWidget):
             return None
         self._plotter = view
         self._page = view
+        # ahead of the camera and of every mode that watches clicks: a
+        # click on the marker's cube is the cube's whatever is going on
+        self._cube_observer = view.iren.interactor.AddObserver(
+            'LeftButtonPressEvent', self._on_cube_press, 20.0)
         self.apply_background()
         self.view_split.replaceWidget(0, view)
         self.view_split.setStretchFactor(0, 1)
@@ -3083,15 +3134,48 @@ class ScenePane(QWidget):
         self.orientation_visible = bool(visible)
         self.apply_annotations()
 
+    def set_perspective(self, perspective: bool) -> None:
+        """Draw the view in perspective, or in parallel projection
+        (`viz.geometry.set_perspective`). The choice stays through every
+        scene the pane shows."""
+        self.perspective = bool(perspective)
+        if self.perspective_action.isChecked() != self.perspective:
+            self.perspective_action.setChecked(self.perspective)
+            return      # the action's own signal comes back here
+        if self._plotter is not None:
+            set_perspective(self._plotter, self.perspective)
+
     def apply_annotations(self) -> None:
         """Draw the annotations again in place, so the camera keeps its
         position."""
         if self._plotter is None:
             return
+        # a scene drawn into a second renderer, or a camera a drawing
+        # replaced, takes the pane's projection here
+        set_perspective(self._plotter, self.perspective, render=False)
         annotate_scene(self._plotter, self.axis_unit,
                        resolve_theme(self.theme_name), self.bounds_visible,
-                       self.orientation_visible)
+                       self.orientation_visible, cube=True)
         self._plotter.render()
+
+    def click_view_cube(self, x: float, y: float) -> bool:
+        """A click at the window pixel `(x, y)`, measured from the
+        bottom left as VTK does: on a face of the orientation marker's
+        cube, the view turns to look straight at that face
+        (`viz.view_cube.look_at_face`), and this returns True."""
+        from ..viz.view_cube import look_at_face, view_cube
+
+        cube = view_cube(self._plotter) if self._plotter is not None else None
+        face = cube.face_at(x, y) if cube is not None else None
+        if face is None:
+            return False
+        look_at_face(self._plotter, *face)
+        return True
+
+    def _on_cube_press(self, caller, _event) -> None:
+        if self.click_view_cube(*caller.GetEventPosition()):
+            # the click was the cube's: the camera does not start a turn
+            caller.GetCommand(self._cube_observer).SetAbortFlag(1)
 
     def apply_background(self) -> None:
         """Set the view's background to the theme's, so an empty 3-D

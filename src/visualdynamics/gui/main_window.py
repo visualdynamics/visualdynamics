@@ -119,6 +119,7 @@ from ..core.solids import SECTIONS
 from ..core.validate import modal_coordinate
 from ..deform import (
     EnvelopeDeflection,
+    ModalOdsDeflection,
     OdsDeflection,
     ShapeDeflection,
     TimeDeflection,
@@ -176,7 +177,9 @@ from ..viz.geometry import (
     add_geometry,
     annotate_scene,
     display_points,
+    held_camera,
     labels_fit,
+    restore_camera,
     transformation_arrows,
 )
 from .channel_frf_panel import TOLERANCE as CHANNEL_TOLERANCE
@@ -2504,8 +2507,10 @@ class MainWindow(QMainWindow):
         self.drive_combo.setToolTip(
             'Which of the channel table\'s force references the geometry '
             'is driven at')
-        self.drive_combo.currentIndexChanged.connect(
-            lambda _index: self.render_current())
+        self.drive_combo.currentIndexChanged.connect(self._drive_chosen)
+        #: the line the cursor was on when the force was moved, for the
+        #: redraw that follows to keep
+        self._drive_line = None
         self.drive_combo_action: QAction = toolbar.addWidget(self.drive_combo)
         self.drive_combo_action.setVisible(False)
         #: (geometry, channel table) for each geometry drawn with sensors
@@ -2771,7 +2776,7 @@ class MainWindow(QMainWindow):
         reframe = showing is not None and (showing,) != self._framed
         if showing is not None:
             self._framed = (showing,)
-        camera = self.scene.plotter.camera_position
+        camera = held_camera(self.scene.plotter)
         self.scene.plotter.clear()
         self.scene.plotter.set_background(colors['scene_background'],
                                     top=colors['scene_background_top'])
@@ -2803,14 +2808,14 @@ class MainWindow(QMainWindow):
         self._add_sensors([geometry], follow=self.animator)
         self.scene.axis_unit = self.animator.axis_unit
         annotate_scene(self.scene.plotter, self.scene.axis_unit, colors,
-                       self.scene.bounds_visible, self.scene.orientation_visible)
+                       self.scene.bounds_visible, self.scene.orientation_visible, cube=True)
         self._caption_scene(caption)
         self._decorate_rigid()
         self.scene.set_home_view(geometry.opening_view, geometry)
         if reframe:
             self.scene.frame()
         else:
-            self.scene.plotter.camera_position = camera
+            restore_camera(self.scene.plotter, camera)
         self.scene.plotter.render()
 
     def _clear_animator(self):
@@ -8478,7 +8483,7 @@ class MainWindow(QMainWindow):
         if rows:
             entities[component] = self._entity_keys(geometry, component, rows)
         colors = resolve_theme(self.theme_name)
-        camera = self.scene.plotter.camera_position
+        camera = held_camera(self.scene.plotter)
         self.scene.plotter.clear()
         self.scene.plotter.set_background(colors['scene_background'],
                                     top=colors['scene_background_top'])
@@ -8491,11 +8496,11 @@ class MainWindow(QMainWindow):
         self.scene.axis_unit = axis_unit
         self._add_hover_mesh(geometry, colors)
         annotate_scene(self.scene.plotter, axis_unit, colors, self.scene.bounds_visible,
-                       self.scene.orientation_visible)
+                       self.scene.orientation_visible, cube=True)
         # adding an element must not move the camera: an edit redraws the
         # scene, and a rebuilt scene would otherwise re-frame itself
         self.scene.set_home_view(geometry.opening_view, geometry)
-        self.scene.plotter.camera_position = camera
+        restore_camera(self.scene.plotter, camera)
         if self._rotate_observers:
             # the clear above took the rings with it, and every committed
             # drag comes through here (its row refresh is an edit): until
@@ -11414,7 +11419,7 @@ class MainWindow(QMainWindow):
         reframe = showing is not None and tuple(showing) != self._framed
         if showing is not None:
             self._framed = tuple(showing)
-        camera = self.scene.plotter.camera_position
+        camera = held_camera(self.scene.plotter)
         self.scene.plotter.clear()
         self.scene.plotter.set_background(theme['scene_background'],
                                     top=theme['scene_background_top'])
@@ -11426,13 +11431,13 @@ class MainWindow(QMainWindow):
         self._add_sensors([first_pair[0]], follow=self.animator)
         self.scene.axis_unit = self.animator.axis_unit
         annotate_scene(self.scene.plotter, self.scene.axis_unit, theme,
-                       self.scene.bounds_visible, self.scene.orientation_visible)
+                       self.scene.bounds_visible, self.scene.orientation_visible, cube=True)
         self._caption_scene(caption)
         self.scene.set_home_view(first_pair[0].opening_view, first_pair[0])
         if reframe:
             self.scene.frame()
         else:
-            self.scene.plotter.camera_position = camera
+            restore_camera(self.scene.plotter, camera)
         self.scene.plotter.render()
 
     def _mac_clicked(self, event):
@@ -13248,6 +13253,17 @@ class MainWindow(QMainWindow):
             return None
         return name, records, tables[0], points
 
+    def _drive_chosen(self, _index):
+        """Another force reference was picked: draw the response to a
+        force there, at the line the cursor is on."""
+        deflection = getattr(self.animator, 'deflection', None)
+        if isinstance(deflection, ModalOdsDeflection):
+            self._drive_line = deflection.line
+        try:
+            self.render_current()
+        finally:
+            self._drive_line = None
+
     def _deflect_modal_ods(self, geometry, name, records, table, points,
                            showing=None):
         """Modal FRFs deflect the geometry by a force at one of a channel
@@ -13256,7 +13272,11 @@ class MainWindow(QMainWindow):
         (`Project.driven_modes`), at every DOF the shape set has on this
         geometry. The records picked are the modes included. The FRFs at
         those DOFs are never made (`deform.ModalOdsDeflection`)."""
-        from ..viz.geometry import add_dof_arrows
+        from ..viz.geometry import (
+            add_dof_arrows,
+            display_points,
+            dof_arrow_vectors,
+        )
 
         self._fill_combo(self.drive_combo, [(dof, dof) for dof in points],
                          'Which of the channel table\'s force references '
@@ -13279,7 +13299,14 @@ class MainWindow(QMainWindow):
             return f'{name}: {basis} has no DOF on this geometry'
         if deflection.peak == 0.0:
             return f'{name}: a force at {drive} moves none of its modes'
-        deflection.line = deflection.strongest_line
+        # a new selection starts where the shape is strongest; moving the
+        # force is the same question asked of another point, so the line
+        # the cursor was on is kept (Brandon, 2026-11-17: comparing drive
+        # points at 0 Hz, the cursor left for each one's strongest line)
+        held = self._drive_line
+        deflection.line = (held if held is not None
+                           and held < len(driven.lines)
+                           else deflection.strongest_line)
         data = self.objects[name]
         frequency = float(np.asarray(
             data.display_abscissa(self.unit_system))[deflection.line])
@@ -13287,9 +13314,32 @@ class MainWindow(QMainWindow):
         self._build_animator(geometry, deflection,
                              caption=f'ODS — {frequency:.5g} Hz',
                              showing=showing)
-        add_dof_arrows(self.scene.plotter, geometry, [drive],
+        # the drive is a DOF of the table's geometry: when the table is
+        # linked to one, the shapes were read at its node's place
+        # (`Project.channel_shapes`), and the arrow is that node and its
+        # coordinate system, not the node with the same number on the
+        # geometry drawn (Brandon, 2026-11-17: a table on a sparse test
+        # geometry over an FE model put the arrow at the model's node of
+        # that number, or nowhere)
+        home = self._linked_geometry(table)
+        marked = []
+        add_dof_arrows(self.scene.plotter,
+                       geometry if home is None else home[1], [drive],
                        unit_system=self.unit_system, incoming=True,
-                       name='drive-dof')
+                       name='drive-dof', drawn=marked)
+        # the arrow rides the node it pushes on: the node of the
+        # geometry drawn that is nearest the arrow's head, which for a
+        # table on this geometry is the drive's own node
+        if marked:
+            on = geometry if home is None else home[1]
+            places, _unit = display_points(on, self.unit_system)
+            node = np.asarray(places, dtype=float)[
+                dof_arrow_vectors(on, [drive])[0][0]]
+            row = int(np.argmin(np.linalg.norm(
+                self.animator.base - node, axis=1)))
+            for arrow in marked:
+                arrow.node_rows[:] = row
+                self.animator.follow(arrow)
         self.phase_slider.blockSignals(True)
         self.phase_slider.setValue(0)
         self.phase_slider.blockSignals(False)
@@ -13567,7 +13617,7 @@ class MainWindow(QMainWindow):
         showing = tuple(sorted(name for name, _ in geometries))
         reframe = showing != self._framed
         self._framed = showing
-        camera = self.scene.plotter.camera_position
+        camera = held_camera(self.scene.plotter)
         self.scene.plotter.clear()
         self.scene.plotter.set_background(colors['scene_background'],
                                     top=colors['scene_background_top'])
@@ -13602,7 +13652,7 @@ class MainWindow(QMainWindow):
                                    if note)
         self.scene.axis_unit = axis_unit
         annotate_scene(self.scene.plotter, axis_unit, colors, self.scene.bounds_visible,
-                       self.scene.orientation_visible)
+                       self.scene.orientation_visible, cube=True)
         # several geometries open on the first one's view — the one they
         # are sorted after in `showing`, so the choice does not depend on
         # the order they were clicked
@@ -13613,7 +13663,7 @@ class MainWindow(QMainWindow):
             self.scene.frame()
         else:
             # explicit: clearing a scene lets the next mesh reset the camera
-            self.scene.plotter.camera_position = camera
+            restore_camera(self.scene.plotter, camera)
         # cleared with the rest: the merge's and the mating marks go back on
         self._draw_merge_marks(render=False)
         self._draw_mate_marks(render=False)
@@ -18844,7 +18894,7 @@ class MainWindow(QMainWindow):
         geometry = self.objects[planning['geometry']]
         plotter = self.scene.plotter
         colors = resolve_theme(self.theme_name)
-        camera = plotter.camera_position
+        camera = held_camera(plotter)
         plotter.clear()
         plotter.set_background(colors['scene_background'], top=colors['scene_background_top'])
         points, axis_unit = display_points(geometry, self.unit_system)
@@ -18876,9 +18926,9 @@ class MainWindow(QMainWindow):
             add_dof_arrows(plotter, plan.geometry, plan.channels.dof_strings(),
                            unit_system=self.unit_system, name='plan')
         annotate_scene(plotter, axis_unit, colors, self.scene.bounds_visible,
-                       self.scene.orientation_visible)
+                       self.scene.orientation_visible, cube=True)
         if planning['framed']:
-            plotter.camera_position = camera
+            restore_camera(plotter, camera)
         else:
             self.scene.set_home_view(geometry.opening_view, geometry)
             self.scene.frame()

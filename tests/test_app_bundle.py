@@ -138,6 +138,7 @@ def test_the_view_is_the_stages_own(qt_app):
 
     class Fake:
         camera_position = None
+        renderers = ()      # no camera of its own to keep a width for
     fake = Fake()
     place_camera(fake)
     position, focus, up = (np.array(v, dtype=float)

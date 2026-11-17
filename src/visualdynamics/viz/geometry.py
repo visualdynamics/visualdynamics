@@ -320,7 +320,8 @@ def print_plotter(size_in: tuple[float, float], dpi: float) -> tuple[Any, float]
 
 def annotate_scene(plotter: Any, axis_unit: str, colors: Mapping[str, str],
                    bounds: bool = True,
-                   orientation: bool = True, scale: float = 1.0) -> None:
+                   orientation: bool = True, scale: float = 1.0,
+                   cube: bool = False) -> None:
     """Add or remove the scene's two annotations.
 
     `bounds` is the labeled box around the geometry, its titles carrying
@@ -329,7 +330,9 @@ def annotate_scene(plotter: Any, axis_unit: str, colors: Mapping[str, str],
     annotation already in the scene is removed. A `scale` other than one
     means a print render (`print_plotter`): the box's labels, which are
     sized in screen pixels, are set to print at the size of the scene's
-    other labels (`PRINT_BOUNDS_SIZE`).
+    other labels (`PRINT_BOUNDS_SIZE`). With `cube`, for a view that
+    takes clicks, the triad has a cube at its origin whose faces turn
+    the view (`viz.view_cube`).
     """
     if bounds:
         box = plotter.show_bounds(xtitle=f'X {axis_unit}',
@@ -345,7 +348,11 @@ def annotate_scene(plotter: Any, axis_unit: str, colors: Mapping[str, str],
             box.SetScreenSize(PRINT_BOUNDS_SIZE * scale)
     else:
         plotter.remove_bounds_axes()
-    if orientation:
+    if cube:
+        from .view_cube import show_view_cube
+
+        show_view_cube(plotter, orientation, colors['scene_text'])
+    elif orientation:
         plotter.add_axes(color=colors['scene_text'])
     else:
         plotter.hide_axes()
@@ -519,11 +526,43 @@ def dof_arrow_length(points: ArrayLike, extent: float) -> float:
 WEIGHTED_REACH = 2.5
 
 
+class DrawnAtNodes:
+    """Arrows or labels drawn at nodes, and what an animation needs to
+    move them with those nodes (`viz.animate.GeometryAnimator.follow`).
+
+    `node_rows` is the geometry's node row of every point, `base` the
+    points as drawn with every node at rest, `view` a writable view of
+    the points VTK draws from, and `points` the thing to call
+    `Modified()` on after writing them.
+    """
+
+    def __init__(self, dataset: Any, node_rows: ArrayLike,
+                 stale: Sequence[Any] = ()) -> None:
+        from vtkmodules.util.numpy_support import vtk_to_numpy
+
+        # the animator writes doubles in place, and a glyph's points
+        # are single precision
+        dataset.points = np.asarray(dataset.points, dtype=np.float64)
+        self.node_rows: np.ndarray = np.asarray(node_rows, dtype=np.intp)
+        self.view: np.ndarray = vtk_to_numpy(dataset.GetPoints().GetData())
+        self.base: np.ndarray = self.view.copy()
+        self.points: DrawnAtNodes = self
+        # a label is drawn through a filter and a mapper that each keep
+        # what they made until told their input moved
+        self._stale = [dataset.GetPoints(), dataset, *stale]
+
+    def Modified(self) -> None:
+        """Say the points moved, to everything drawn from them."""
+        for thing in self._stale:
+            thing.Modified()
+
+
 def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
                    unit_system: UnitSystem | None = None,
                    incoming: bool | Sequence[bool] = False,
                    name: str | None = None,
-                   scales: Sequence[float] | None = None) -> int:
+                   scales: Sequence[float] | None = None,
+                   drawn: list | None = None) -> int:
     """Labeled arrows marking DOFs on the geometry.
 
     One arrow per DOF, colored by its axis: X red, Y green, Z blue, the
@@ -542,7 +581,9 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
     when there are at most `DOF_LABEL_LIMIT` arrows. A DOF at a node the
     geometry does not have, or with a direction that is not a
     translation or rotation, is skipped. Given a `name`, the actors are
-    named from it, so drawing again replaces them.
+    named from it, so drawing again replaces them. Given a list as
+    `drawn`, a `DrawnAtNodes` is added to it for each mesh of arrows and
+    each set of labels, so an animator can carry them with their nodes.
 
     Returns how many arrows were drawn.
     """
@@ -560,7 +601,7 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
     shares = ([1.0] * len(dofs) if scales is None
               else [float(share) for share in scales])
     entries = [(points[found[0]], found[1] * np.sign(share), found[2], dof,
-                into, abs(share))
+                into, abs(share), found[0])
                for dof, into, share, found in zip(
                    dofs, inward, shares, dof_arrow_vectors(geometry, dofs))
                if found is not None and np.isfinite(share) and share != 0.0]
@@ -574,7 +615,9 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
     starts = {0: [], 1: [], 2: []}
     vectors = {0: [], 1: [], 2: []}
     sizes = {0: [], 1: [], 2: []}
-    for position, vector, axis, dof, into, size in entries:
+    rows = {0: [], 1: [], 2: []}
+    for position, vector, axis, dof, into, size, row in entries:
+        rows[axis].append(row)
         reach = length * size
         start = position - vector * reach if into else position
         starts[axis].append(start)
@@ -594,11 +637,16 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
         base = pv.PolyData(np.asarray(starts[axis], dtype=float))
         base['direction'] = np.asarray(vectors[axis], dtype=float)
         base['size'] = np.asarray(sizes[axis], dtype=float)
+        arrows = base.glyph(orient='direction',
+                            scale=False if scales is None else 'size',
+                            factor=length, geom=pv.Arrow())
+        if drawn is not None:
+            # a glyph's points come out arrow by arrow, in the order
+            # the arrows went in
+            drawn.append(DrawnAtNodes(arrows, np.repeat(
+                rows[axis], arrows.n_points // len(rows[axis]))))
         plotter.add_mesh(
-            base.glyph(orient='direction',
-                       scale=False if scales is None else 'size',
-                       factor=length, geom=pv.Arrow()),
-            color=AXIS_COLORS[axis], render=False,
+            arrows, color=AXIS_COLORS[axis], render=False,
             name=None if name is None else f'{name}-arrows{axis}')
     # labels only while they can be read: past a few dozen arrows the
     # names overprint into noise, and the arrows alone say where
@@ -606,13 +654,19 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
         for axis, spots in label_spots.items():
             if not spots:
                 continue
-            plotter.add_point_labels(
+            labels = plotter.add_point_labels(
                 np.asarray([spot for spot, _dof in spots]),
                 [dof for _spot, dof in spots],
                 font_size=12, always_visible=True,
                 text_color=AXIS_COLORS[axis], shape=None,
                 fill_shape=False, show_points=False, render=False,
                 name=None if name is None else f'{name}-labels{axis}')
+            if drawn is not None:
+                mapper = labels.GetMapper()
+                placed = mapper.GetInputConnection(0, 0).GetProducer()
+                drawn.append(DrawnAtNodes(
+                    placed.GetInputDataObject(0, 0), rows[axis],
+                    stale=(placed, mapper)))
     return len(entries)
 
 
@@ -1002,6 +1056,63 @@ def add_geometry(plotter: Any, geometry: Geometry,
                                  shape=None, fill_shape=False,
                                  show_points=False)
     return axis_unit
+
+
+def held_camera(plotter: Any) -> tuple:
+    """Where the camera is, to put back with `restore_camera` after a
+    scene is drawn again: its position, and the scale of a parallel
+    view, which the position does not carry."""
+    return plotter.camera_position, plotter.camera.parallel_scale
+
+
+def restore_camera(plotter: Any, held: tuple) -> None:
+    """Put the camera back where `held_camera` found it."""
+    position, scale = held
+    plotter.camera_position = position
+    plotter.camera.parallel_scale = scale
+
+
+def keep_parallel_width(plotter: Any) -> None:
+    """After the camera is put somewhere by position, make a parallel
+    view as wide as the perspective one would be from there. A parallel
+    view's width is its scale, which a position does not set."""
+    for renderer in plotter.renderers:
+        camera = renderer.camera
+        if camera.parallel_projection:
+            camera.parallel_scale = camera.distance * np.tan(
+                np.radians(camera.view_angle) / 2.0)
+
+
+def set_perspective(plotter: Any, perspective: bool,
+                    render: bool = True) -> None:
+    """Draw a 3-D view in perspective, or in parallel projection, where
+    lines that are parallel on the model are parallel on the screen and
+    a length reads the same at any depth.
+
+    Every camera the plotter has is switched. The scene keeps its size
+    on screen across the switch: the parallel view is as wide as the
+    perspective one was at the focal point, and going back the camera
+    is put at the distance that shows what the parallel view showed.
+    """
+    for renderer in plotter.renderers:
+        camera = renderer.camera
+        if bool(camera.parallel_projection) != bool(perspective):
+            continue     # already as asked
+        half = np.tan(np.radians(camera.view_angle) / 2.0)
+        if perspective:
+            # zooming a parallel view changes its scale and leaves the
+            # camera where it was, so the distance is worked out again
+            focus = np.asarray(camera.focal_point, dtype=float)
+            away = np.asarray(camera.position, dtype=float) - focus
+            away /= np.linalg.norm(away) or 1.0
+            camera.position = tuple(
+                focus + away * camera.parallel_scale / half)
+        camera.parallel_projection = not perspective
+        if not perspective:
+            camera.parallel_scale = camera.distance * half
+        renderer.ResetCameraClippingRange()
+    if render:
+        plotter.render()
 
 
 def place_view(plotter: Any, view: Any = None, render: bool = True) -> None:

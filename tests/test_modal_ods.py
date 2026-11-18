@@ -455,6 +455,11 @@ def test_modal_frfs_a_table_and_a_geometry_animate_the_response(window, pump,
     assert not window.dofs_action.isVisible()
     assert window.play_action.isEnabled()
     assert _caption(window).startswith('ODS — ')
+    # the shape can be copied as a picture: the plot's Copy is the plot's
+    from conftest import bar_acts
+
+    assert 'Copy' in bar_acts(window.scene)
+    assert bar_acts(window.data_pane)[-1] == 'Copy'
     # the cursor picks the line, and 0 Hz with the rigid-body modes in
     # has no shape
     window._cursor.setValue(0.0)

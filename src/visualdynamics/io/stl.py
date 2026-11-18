@@ -206,7 +206,7 @@ def save(obj: Geometry, path: str | os.PathLike,
     if unit_system is not None and obj.units_defined:
         from ..units import convert
         triangles = convert(triangles, 'm',
-                            unit_system.coherent.unit('length'))
+                            unit_system.unit('length'))
     normals = np.cross(triangles[:, 1] - triangles[:, 0],
                        triangles[:, 2] - triangles[:, 0])
     lengths = np.linalg.norm(normals, axis=1, keepdims=True)

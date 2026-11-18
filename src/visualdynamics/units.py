@@ -667,9 +667,8 @@ class UnitSystem:
 
     `base` is the coherent system a derived system was made from, such as
     in-slinch-lbf-s for in-slinch-lbf-s (g), which shows accelerations in
-    g. It is None for a coherent system. Most exporters write in the
-    coherent system (see `coherent`), because most file formats cannot
-    label a value as g.
+    g. It is None for a coherent system. UNV export writes the coherent
+    system (see `coherent`), because its units block cannot declare g.
 
     The angular, moment, density and modal units are filled in from
     the base units when the system does not name them.
@@ -1012,17 +1011,13 @@ FT_LBF_S = UnitSystem('ft-slug-lbf-s', {
 _COHERENT = (SI, MMKS, IN_LBF_S, FT_LBF_S)
 
 # Accelerometers are read in g, so every system gets a variant that shows
-# accelerations that way. Only the display changes: most exports are
-# written in the coherent system, since most file formats cannot record
-# "g" as a unit (the .mat writer, which labels each value, is the
-# exception; io/exporters.py).
+# accelerations that way. Exports write it too, g included, except UNV,
+# whose units block cannot declare g (io/exporters.py).
 _IN_G = tuple(s.with_units(f'{s.name} (g)', acceleration='g')
               for s in _COHERENT)
 
 SYSTEMS = {s.name: s for s in _COHERENT + _IN_G}
 
 # in-slinch-lbf-s with accelerations displayed in g (Brandon,
-# 2026-08-28): the units his tests are specified and read in. Display
-# only: most exports still write the coherent system's in/s**2, since
-# most file formats cannot record "g" as a unit.
+# 2026-08-28): the units his tests are specified and read in.
 DEFAULT_SYSTEM = SYSTEMS['in-slinch-lbf-s (g)']

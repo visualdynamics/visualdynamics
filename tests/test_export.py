@@ -689,27 +689,162 @@ def test_without_a_system_the_stored_values_go_out(tmp_path):
             RAW * 0.0254, rel=1e-9)
 
 
-def test_reading_in_g_does_not_put_g_in_the_file(tmp_path):
-    """The display override is a convenience of the screen. No format here
-    can record 'g', so exports use the coherent system underneath."""
+def test_a_format_without_units_holds_g_when_the_display_is_in_g(tmp_path):
+    """A file that cannot say its units holds the numbers on screen, g
+    included; picking a display system that suits the reader is the
+    user's call."""
     source = visualdynamics.import_file(plate('time.npz'), ordinate_unit='g')
     in_g = visualdynamics.units.SYSTEMS['in-slinch-lbf-s (g)']
     plain = visualdynamics.units.SYSTEMS['in-slinch-lbf-s']
-
-    # on screen: in/s**2 -> SI is x0.0254, SI -> g is /9.80665
-    assert np.abs(source.display_ordinate(in_g)).max() == pytest.approx(
-        np.abs(source.display_ordinate(plain)).max() * 0.0254 / 9.80665,
-        rel=1e-6)
-
     written = {}
     for system in (in_g, plain):
         path = str(tmp_path / f'{system.name}.npz')
         visualdynamics.export_file(source, path, format='sdynpy_data',
-                         unit_system=system)
+                                   unit_system=system)
         with np.load(path, allow_pickle=True) as archive:
             written[system.name] = np.abs(archive['data']['ordinate']).max()
-    assert written[in_g.name] == pytest.approx(written[plain.name]), \
-        'both write in/s**2'
+    assert written[in_g.name] == pytest.approx(
+        np.abs(source.display_ordinate(in_g)).max(), rel=1e-9), 'g'
+    assert written[plain.name] == pytest.approx(
+        np.abs(source.display_ordinate(plain)).max(), rel=1e-9), 'in/s**2'
+    assert written[in_g.name] == pytest.approx(
+        written[plain.name] * 0.0254 / 9.80665, rel=1e-6)
+
+
+def test_an_frf_without_units_in_the_file_holds_g_per_volt(tmp_path):
+    """An FRF shown in g/V goes to an sdynpy file in g/V, the numbers a
+    controller divides a specification in g by."""
+    lines = np.linspace(0.0, 100.0, 11)
+    source = visualdynamics.Frf(
+        lines, np.outer([1.0, 2.0], 1.0 + 1j * lines),
+        response_dof=['1X+', '2X+'], reference_dof=['3X+', '3X+'])
+    source.define_units('g', 'V')
+    in_g = visualdynamics.units.SYSTEMS['in-slinch-lbf-s (g)']
+    path = str(tmp_path / 'frfs.npz')
+    visualdynamics.export_file(source, path, format='sdynpy_data',
+                               unit_system=in_g)
+    with np.load(path, allow_pickle=True) as archive:
+        ordinate = archive['data']['ordinate']
+    assert ordinate.shape[:2] == (2, 1), 'two responses on one reference'
+    ordinate = ordinate.reshape(2, -1)
+    assert np.allclose(ordinate, source.display_ordinate(in_g))
+    assert np.allclose(ordinate, np.outer([1.0, 2.0], 1.0 + 1j * lines))
+
+
+@pytest.mark.parametrize('kind', ['geometry', 'stl', 'shapes'])
+def test_lengths_and_masses_go_out_in_the_display_system(tmp_path, kind):
+    """A display system that differs from its coherent one in length and
+    mass, as a script's `with_units` makes, writes its own millimeters
+    and pounds, not the coherent system's meters and kilograms."""
+    custom = visualdynamics.units.SI.with_units(length='mm', mass='lb')
+    if kind in ('geometry', 'stl'):
+        source = inch_plate()
+        path = str(tmp_path / ('geometry.npz' if kind == 'geometry'
+                               else 'geometry.stl'))
+        visualdynamics.export_file(
+            source, path,
+            format='sdynpy_geometry' if kind == 'geometry' else 'stl',
+            unit_system=custom)
+        back = visualdynamics.import_file(path)
+        if kind == 'geometry':
+            assert np.allclose(back.node_xyz, source.node_xyz * 1000.0)
+        else:
+            assert np.allclose(np.ptp(back.node_xyz, axis=0),
+                               np.ptp(source.node_xyz, axis=0) * 1000.0)
+    else:
+        shapes = visualdynamics.import_file(survey('shapes.npy'))
+        shapes.define_units('kg')
+        path = str(tmp_path / 'shapes.npy')
+        visualdynamics.export_file(shapes, path, format='sdynpy_shapes',
+                                   unit_system=custom)
+        back = visualdynamics.import_file(path)
+        pound = 0.45359237
+        assert np.allclose(np.asarray(back.shape_matrix),
+                           np.asarray(shapes.shape_matrix) * np.sqrt(pound),
+                           rtol=1e-9)
+
+
+def test_a_full_grid_of_frfs_goes_out_as_a_matrix(tmp_path):
+    """Responses down, references across, as sdynpy computes FRFs and a
+    controller reads them; it reads back record for record."""
+    source = visualdynamics.import_file(plate('frfs.npz'))
+    responses = list(dict.fromkeys(source.response_dof))
+    references = list(dict.fromkeys(source.reference_dof))
+    assert len(references) > 1 and len(responses) > len(references)
+    path = str(tmp_path / 'frfs.npz')
+    visualdynamics.export_file(source, path, format='sdynpy_data')
+    with np.load(path, allow_pickle=True) as archive:
+        records = archive['data']
+    assert records.shape == (len(responses), len(references))
+    for i, response in enumerate(responses):
+        for j, reference in enumerate(references):
+            k = next(k for k in range(source.num_records)
+                     if source.response_dof[k] == response
+                     and source.reference_dof[k] == reference)
+            assert np.array_equal(records[i, j]['ordinate'],
+                                  source.ordinate[k])
+            node, _direction = records[i, j]['coordinate'][1]
+            assert f'{node}' in reference
+    back = visualdynamics.import_file(path)
+    order = [next(k for k in range(source.num_records)
+                  if source.response_dof[k] == r
+                  and source.reference_dof[k] == q)
+             for r in responses for q in references]
+    assert np.array_equal(back.ordinate, source.ordinate[order])
+    assert list(back.response_dof) == [source.response_dof[k] for k in order]
+    assert list(back.reference_dof) == [source.reference_dof[k] for k in order]
+
+
+@pytest.mark.parametrize('broken', ['missing', 'repeated'])
+def test_frfs_that_do_not_fill_a_grid_stay_flat(tmp_path, broken):
+    source = visualdynamics.import_file(plate('frfs.npz'))
+    keep = list(range(source.num_records))
+    if broken == 'missing':
+        keep = keep[1:]
+    else:
+        keep[1] = 0     # one pair twice, another not at all
+    part = visualdynamics.Frf(
+        source.abscissa, source.ordinate[keep],
+        response_dof=[source.response_dof[k] for k in keep],
+        reference_dof=[source.reference_dof[k] for k in keep])
+    path = str(tmp_path / 'part.npz')
+    visualdynamics.export_file(part, path, format='sdynpy_data')
+    with np.load(path, allow_pickle=True) as archive:
+        assert archive['data'].shape == (len(keep),)
+
+
+def test_other_paired_data_stays_flat(tmp_path):
+    from visualdynamics.core.data import Coherence
+
+    source = visualdynamics.import_file(plate('frfs.npz'))
+    coherence = Coherence(
+        source.abscissa, np.abs(source.ordinate) / np.abs(source.ordinate).max(),
+        response_dof=list(source.response_dof),
+        reference_dof=list(source.reference_dof))
+    path = str(tmp_path / 'coherence.npz')
+    visualdynamics.export_file(coherence, path, format='sdynpy_data')
+    with np.load(path, allow_pickle=True) as archive:
+        assert archive['data'].shape == (source.num_records,)
+
+
+def test_unv_writes_the_coherent_system_it_can_declare(tmp_path):
+    source = visualdynamics.import_file(plate('time.npz'), ordinate_unit='g')
+    in_g = visualdynamics.units.SYSTEMS['in-slinch-lbf-s (g)']
+    path = str(tmp_path / 'g.unv')
+    visualdynamics.export_file(source, path, format='unv', unit_system=in_g)
+    back = visualdynamics.import_file(path)
+    assert np.allclose(back.ordinate, source.ordinate, rtol=1e-4)
+
+
+def test_the_status_line_names_what_each_format_holds():
+    from visualdynamics.io.exporters import units_written
+
+    in_g = visualdynamics.units.SYSTEMS['in-slinch-lbf-s (g)']
+    for format in ('sdynpy_data', 'sdynpy_geometry', 'sdynpy_shapes',
+                   'exodus', 'matlab', 'stl', 'delimited'):
+        assert units_written(format, in_g) == 'in-slinch-lbf-s (g)', format
+    for format in ('unv', 'unv_binary'):
+        assert units_written(format, in_g) == 'in-slinch-lbf-s', format
 
 
 def test_the_164_names_the_coherent_system(tmp_path):

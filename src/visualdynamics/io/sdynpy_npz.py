@@ -144,7 +144,7 @@ def _connectivity(rows):
 def save(geometry: Geometry, path: str | os.PathLike, unit_system: UnitSystem | None = None) -> None:
     """Write a geometry in the sdynpy .npz layout.
 
-    Coordinates are written in the coherent form of `unit_system` when
+    Coordinates are written in `unit_system` when
     the geometry's units are defined, and as stored otherwise. The format
     records no units either way, so the reader has to be told what they
     are. Each node's coordinates are written in the coordinate system it

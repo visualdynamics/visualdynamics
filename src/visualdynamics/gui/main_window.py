@@ -5364,12 +5364,19 @@ class MainWindow(QMainWindow):
                  and not table_only
                  and any(kind in ('object', 'record') for kind, _name, _obj,
                          _detail in self.selected_references()))
+        from .panes import copy_act
+
         if drawn:
-            from .panes import copy_act
             acts = acts + [copy_act(self.data_pane, 'plot') if plot_up
                            else copy_act(self.scene, '3-D view')]
         self.data_pane.show_acts(acts if plot_up else [])
-        self.scene.show_acts(([] if plot_up or table_only else acts) + self._movie_acts())
+        # beside a plot the 3-D view keeps a Copy of its own: the plot's
+        # copies the plot, and a deflection shape drawn from data had no
+        # way to the clipboard but a movie (Brandon, 2026-11-18)
+        beside = ([copy_act(self.scene, '3-D view')]
+                  if drawn and plot_up and self.scene.isVisibleTo(self) else [])
+        self.scene.show_acts(([] if plot_up or table_only else acts) + beside
+                             + self._movie_acts())
         offer_acts(self.table_bar, self.__dict__.setdefault('_table_acts', {}),
                    acts if table_only else [])
         if table_only and acts:

@@ -22,12 +22,31 @@ def test_a_mode_shape_offers_it_beside_copy(h264, shaking):
     assert bar_acts(shaking.scene)[-2:] == ['Copy', 'Save Animation']
 
 
-def test_a_time_history_offers_it_on_the_scene_while_copy_is_the_plots(
-        h264, playing):
-    """Copy follows the plot when the plot is up; the movie is the
-    scene's, so it stays on the scene's bar."""
+def test_a_time_history_offers_it_on_the_scene_beside_a_copy_of_its_own(
+        h264, playing, pump):
+    """The plot's Copy copies the plot and the scene's copies the
+    scene; the selection's other acts stay on the plot's bar, and the
+    movie is the scene's."""
+    from PySide6.QtWidgets import QApplication
+
     assert bar_acts(playing.data_pane)[-1] == 'Copy'
-    assert bar_acts(playing.scene) == ['Save Animation']
+    assert bar_acts(playing.scene) == ['Copy', 'Save Animation']
+    copied = []
+    playing.scene.copied.connect(copied.append)
+    playing.scene._acts['actions']['copy'].trigger()
+    assert copied, 'the 3-D view went to the clipboard'
+    image = QApplication.clipboard().image()
+    shot = playing.scene.plotter.screenshot(return_img=True)
+    assert (image.height(), image.width()) == shot.shape[:2]
+    # data alone has no 3-D view up, and so no Copy for one
+    playing.tree.clearSelection()
+    playing._item_for_object(next(
+        name for name, thing in playing.objects.items()
+        if type(thing).__name__ == 'TimeHistory')).setSelected(True)
+    playing.render_current()
+    pump()
+    assert not playing.scene.isVisibleTo(playing)
+    assert bar_acts(playing.scene) == []
 
 
 def test_nothing_moving_offers_no_movie(h264, shaking, pump):

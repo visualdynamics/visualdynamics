@@ -333,17 +333,20 @@ to go on (note ¹).
 Exports are written in the display unit system. What is on screen is
 what goes in the file: with in-slinch-lbf-s selected, a model one inch
 across is written as `1.0`, not as `0.0254`. A display system that
-shows acceleration in g (such as in-slinch-lbf-s (g)) writes the
-coherent system it is built on, in/s² in that case, because MATLAB's
-`.mat` is the only one of these formats that labels a value as g; the
-status line names the system written. The exceptions are ADF, whose
+shows acceleration in g (such as in-slinch-lbf-s (g)) writes g too, so
+an FRF shown in g/V is written in g/V. A format that cannot record its
+units cannot say so either, so pick the display system that suits the
+program reading the file next. The status line names the system
+written. The exceptions are UNV, which declares its units in a dataset
+that has no place for g and so writes the coherent system the display
+system is built on (in/s² for in-slinch-lbf-s (g)); ADF, whose
 definition requires SI on disk (every ADF reader converts on its own
 side, so the numbers still arrive right); Nastran bulk data, written in
-SI; 3MF, written in meters and declared as meters; ESCDF, where each
-value is written in the unit it was declared in and labeled with that
-unit (a geometry in inches as inches, a record in g as g); and MATLAB,
-written in the display units including g, with every unit field
-labeled (note ⁷).
+SI; 3MF, written in meters and declared as meters; and ESCDF, where
+each value is written in the unit it was declared in and labeled with
+that unit (a geometry in inches as inches, a record in g as g). MATLAB
+is written in the display units like the rest, and labels every unit
+field (note ⁷).
 
 UNV says which units it used, in a dataset 164 declaring the system and
 its conversion factors, so the file comes back to exactly the same SI

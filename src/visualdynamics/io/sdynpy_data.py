@@ -10,6 +10,8 @@ The format is a NumPy .npz with two entries:
   the (node, direction) pairs, shape (1,) for data with a response only
   or (2,) for response and reference. Directions use the signed
   universal file code, 1 to 6.
+  FRFs that fill a grid are written as a responses x references
+  array of records, the rest one record after another; either reads.
 
 sdynpy holds a cross-spectral density as X·conj(Y), and this package
 stores it as conj(X)·Y (`DataArray.compute_cpsds`). The two are
@@ -124,13 +126,36 @@ def _coordinate_pairs(data):
     return pairs
 
 
+def _matrix(data):
+    """For FRFs that fill a grid, the record index of each (response,
+    reference) pair as a responses x references array; None otherwise.
+
+    Responses and references are taken in the order they first appear.
+    The grid has to be complete, every response against every reference
+    and each pair once, or there is no matrix to write.
+    """
+    if not isinstance(data, Frf) or data.reference_dof is None:
+        return None
+    pairs = list(zip(data.response_dof, data.reference_dof))
+    responses = list(dict.fromkeys(data.response_dof))
+    references = list(dict.fromkeys(data.reference_dof))
+    where = {pair: i for i, pair in enumerate(pairs)}
+    if (len(where) != len(pairs)
+            or len(responses) * len(references) != len(pairs)):
+        return None
+    return np.array([[where[(r, q)] for q in references] for r in responses])
+
+
 def save(data: DataArray, path: str | os.PathLike, unit_system: UnitSystem | None = None) -> None:
     """Write a data array in the sdynpy .npz layout.
 
-    Values are written in the coherent form of `unit_system` when the
+    Values are written in `unit_system`, g included, when the
     units are defined, and as stored otherwise. The format has no place
     to record which units they are. The ordinate is complex only when
-    the data is, and the comment fields are left blank.
+    the data is, and the comment fields are left blank. FRFs that measure
+    every response against every reference are written as a responses x
+    references array, the layout sdynpy's own FRFs have; anything else is
+    one record after another.
     """
     from .exporters import data_values
 
@@ -150,5 +175,12 @@ def save(data: DataArray, path: str | os.PathLike, unit_system: UnitSystem | Non
     records['abscissa'] = abscissa
     records['ordinate'] = np.conj(ordinate) if isinstance(data, Psd) else ordinate
     records['coordinate'] = _coordinate_pairs(data)
+    # FRFs that fill a grid go out as responses x references, the shape
+    # sdynpy computes them in and a controller reading the file expects
+    # (Brandon, 2026-11-18: every exported FRF needed
+    # reshape_to_matrix() before Rattlesnake would read it)
+    matrix = _matrix(data)
+    if matrix is not None:
+        records = records[matrix]
     np.savez(path, data=records,
              function_type=np.array(data.function_type))

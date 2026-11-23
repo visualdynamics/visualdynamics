@@ -2158,8 +2158,9 @@ class MainWindow(QMainWindow):
         self.group_time_histories_action.setChecked(
             os.environ.get('VISUALDYNAMICS_GROUP_HISTORIES') == '1')
         self.group_time_histories_action.toggled.connect(self._regroup_time_histories)
-        self.tree.itemDoubleClicked.connect(self._toggle_history_section)
-        self._closed_history_sections: set[str] = set()
+        self._closed_history_sections: set[tuple] = set()
+        self.tree.itemExpanded.connect(lambda item: self._history_section_expanded(item, True))
+        self.tree.itemCollapsed.connect(lambda item: self._history_section_expanded(item, False))
         file_menu.addAction('&Import...', self.import_files)
         file_menu.addAction(self.save_test_action)
         report_menu = file_menu.addMenu('Generate &Report')
@@ -3494,7 +3495,7 @@ class MainWindow(QMainWindow):
                                 source=source, key=key)
 
     def show_object(self, name: str, source: str | None = None,
-                    key: Any = None, select: bool = True) -> str:
+                    key: Any = None, select: bool = True, *, batch: bool = False) -> str:
         """Give an object already in the project its row in the tree, and
         return its name.
 
@@ -3532,12 +3533,15 @@ class MainWindow(QMainWindow):
         self._build_children(item, obj, name)
         self.test_item.addChild(item)
         self.test_item.setExpanded(True)
-        self.refresh_compatibility()
-        self._reorder_tree()    # canonical type order, then placeholders
-        self._apply_type_links([name])
-        self._paint_links()
-        # a new object may be what a report figure was waiting for
-        self._report_content_changed(settling=True)
+        if batch:
+            self._apply_type_links([name])
+        else:
+            self.refresh_compatibility()
+            self._reorder_tree()    # canonical type order, then placeholders
+            self._apply_type_links([name])
+            self._paint_links()
+            # a new object may be what a report figure was waiting for
+            self._report_content_changed(settling=True)
         if select:
             self.tree.setCurrentItem(item)
             self.tree.clearSelection()
@@ -4847,6 +4851,9 @@ class MainWindow(QMainWindow):
         if item is self.test_item:
             return None
         while item is not None and item.parent() not in (None, self.test_item):
+            ref = item.data(0, ROLE_REFERENCE)
+            if ref and ref[0] == 'object':
+                return item
             item = item.parent()
         return item
 
@@ -6114,10 +6121,16 @@ class MainWindow(QMainWindow):
             ref[1] for item in self.tree.selectedItems()
             if (ref := item.data(0, ROLE_REFERENCE)) and ref[0] == 'history_section'
         }
+        selected = self.tree.selectedItems()
+        current = self.tree.currentItem()
+        moved = {}
         sections = {}
         for i in reversed(range(self.test_item.childCount())):
             item = self.test_item.child(i)
             if (item.data(0, ROLE_REFERENCE) or (None,))[0] == 'history_section':
+                for child in item.takeChildren():
+                    self.test_item.addChild(child)
+                    moved[child.text(0)] = child
                 self.test_item.takeChild(i)
         wanted = self._object_order(self.object_groups)
         if self.group_time_histories_action.isChecked():
@@ -6144,72 +6157,71 @@ class MainWindow(QMainWindow):
                     key = (key, key)
                 sections.setdefault(key, []).append(name)
             wanted = loose + [name for names in sections.values() for name in names]
-        selected = self.tree.selectedItems()
-        current = self.tree.currentItem()
-        moved = []
+        items = {}
         for position, name in enumerate(wanted):
             item = self._item_for_object(name)
             if item is None:
                 continue
+            items[name] = item
             item.setHidden(False)
-            if self.test_item.indexOfChild(item) != position:
-                self.test_item.takeChild(
-                    self.test_item.indexOfChild(item))
-                self.test_item.insertChild(
-                    min(position, self.test_item.childCount()), item)
-                moved.append((item, name))
-        for item, name in moved:
-            # reparenting drops item widgets: the record grid rebuilds
-            self._build_children(item, self.objects[name], name)
-        if moved and selected:
-            # reparenting also drops the selection — put it back
-            # (current first: setCurrentItem clears multi-selection)
-            if current is not None:
-                self.tree.setCurrentItem(current)
-            self.tree.clearSelection()
-            for item in selected:
-                item.setSelected(True)
+            index = self.test_item.indexOfChild(item)
+            if index != position:
+                self.test_item.takeChild(index)
+                self.test_item.insertChild(position, item)
+                moved[name] = item
         self._refresh_placeholders()
+        headers = {}
         for key, names in sections.items():
-            first = self._item_for_object(names[0])
-            if first is None:
+            members = [items[name] for name in names if name in items]
+            if not members:
                 continue
             header = QTreeWidgetItem()
             header.setData(0, ROLE_REFERENCE, ('history_section', key, tuple(names)))
-            header.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-            header.setToolTip(0, 'Double-click to expand or collapse. Ctrl-click another '
-                              'history group to compare the two sets.')
-            self.test_item.insertChild(self.test_item.indexOfChild(first), header)
-            self._show_history_section(header, key, names)
-            header.setSelected(key in selected_sections)
+            header.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                            | Qt.ItemFlag.ItemIsEditable)
+            label = self._history_section_label(key)
+            header.setData(0, ROLE_ORIGINAL_NAME, label)
+            header.setText(0, label)
+            header.setToolTip(0, f'{len(members)} histories. Double-click to rename. '
+                              'Ctrl-click another group to compare both sets.')
+            self.test_item.insertChild(self.test_item.indexOfChild(members[0]), header)
+            for item in members:
+                self.test_item.takeChild(self.test_item.indexOfChild(item))
+                header.addChild(item)
+                moved[item.text(0)] = item
+            headers[key] = header
+        for name, item in moved.items():
+            self._build_children(item, self.objects[name], name)
+        if moved or headers:
+            if current is not None and current.treeWidget() is self.tree:
+                self.tree.setCurrentItem(current)
+            self.tree.clearSelection()
+            for item in selected:
+                if item.treeWidget() is self.tree:
+                    item.setSelected(True)
+            for key in selected_sections & headers.keys():
+                headers[key].setSelected(True)
+        for key, header in headers.items():
+            header.setExpanded(key not in self._closed_history_sections)
+        self._paint_compatibility()
 
-    def _show_history_section(self, header, key, names):
-        closed = key in self._closed_history_sections
-        header.setText(0, f'{"▸" if closed else "▾"} {key[1]} ({len(names)})')
-        for name in names:
-            item = self._item_for_object(name)
-            if item is not None:
-                if closed:
-                    for selected in self.tree.selectedItems():
-                        ancestor = selected
-                        while ancestor is not None and ancestor is not item:
-                            ancestor = ancestor.parent()
-                        if ancestor is item:
-                            selected.setSelected(False)
-                item.setHidden(closed)
+    @staticmethod
+    def _history_section_setting(key):
+        from .preferences import settings
 
-    def _toggle_history_section(self, item, _column):
+        return settings(), f'trac/history_group_names/{key[0]}'
+
+    def _history_section_label(self, key):
+        store, setting = self._history_section_setting(key)
+        return store.value(setting, key[1], type=str)
+
+    def _history_section_expanded(self, item, expanded):
         ref = item.data(0, ROLE_REFERENCE)
-        if not ref or ref[0] != 'history_section':
-            return
-        _, key, names = ref
-        if key in self._closed_history_sections:
-            self._closed_history_sections.remove(key)
-        else:
-            self._closed_history_sections.add(key)
-        with QSignalBlocker(self.tree):
-            self._show_history_section(item, key, names)
-        self._selection_changed()
+        if ref and ref[0] == 'history_section':
+            if expanded:
+                self._closed_history_sections.discard(ref[1])
+            else:
+                self._closed_history_sections.add(ref[1])
 
     def _regroup_time_histories(self, _checked):
         self._reorder_tree()
@@ -6739,9 +6751,10 @@ class MainWindow(QMainWindow):
     def _paint_compatibility(self):
         """Red text for what does not fit; nothing at all for what does."""
         error = QBrush(QColor(resolve_theme(self.theme_name)['row_error']))
-        for i in range(self.test_item.childCount()):
-            item = self.test_item.child(i)
-            name = item.text(0)
+        for name in self.objects:
+            item = self._item_for_object(name)
+            if item is None:
+                continue
             issue = self.report.issue_for(name) if self.report else None
             self._set_row_error(item, error if issue else None)
             item.setToolTip(0, issue.message if issue
@@ -7104,8 +7117,12 @@ class MainWindow(QMainWindow):
         """
         for i in range(self.test_item.childCount()):
             child = self.test_item.child(i)
-            if child.text(0) == name and child.data(0, ROLE_DRAGGABLE):
-                return child
+            ref = child.data(0, ROLE_REFERENCE)
+            candidates = ([child.child(j) for j in range(child.childCount())]
+                          if ref and ref[0] == 'history_section' else [child])
+            for row in candidates:
+                if row.data(0, ROLE_REFERENCE) == ('object', name, None):
+                    return row
         return None
 
     def _refresh_item(self, item, obj):
@@ -7164,7 +7181,18 @@ class MainWindow(QMainWindow):
             self.project.name = name
             self._show_status(f'Project renamed to {name}')
             return
-        if item.parent() is not self.test_item:
+        ref = item.data(0, ROLE_REFERENCE)
+        if ref and ref[0] == 'history_section':
+            old = item.data(0, ROLE_ORIGINAL_NAME)
+            name = item.text(0).strip() or old
+            if name != old:
+                store, setting = self._history_section_setting(ref[1])
+                store.setValue(setting, name)
+            with QSignalBlocker(self.tree):
+                item.setData(0, ROLE_ORIGINAL_NAME, name)
+                item.setText(0, name)
+            return
+        if not ref or ref[0] != 'object':
             return  # sub-items are labels, not names
         old = item.data(0, ROLE_ORIGINAL_NAME)
         new = item.text(0).strip()
@@ -9866,7 +9894,7 @@ class MainWindow(QMainWindow):
                 mapping, contents = {}, list(result.items())
                 for n, (name, obj) in enumerate(contents):
                     added = self.project.add(name, obj)
-                    mapping[name] = self.show_object(added, source=path, select=False)
+                    mapping[name] = self.show_object(added, source=path, select=False, batch=True)
                     if tick is not None:
                         tick(n + 1, len(contents))
                 if any(old != new for old, new in mapping.items()):
@@ -9898,6 +9926,8 @@ class MainWindow(QMainWindow):
                     self._links_changed()
                 else:
                     self._reorder_tree()
+                self.refresh_compatibility()
+                self._report_content_changed(settling=True)
                 imported = list(mapping.values())
                 if fresh:
                     self.tree.setCurrentItem(self.test_item)

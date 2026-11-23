@@ -12,7 +12,7 @@ from .geometry import add_geometry, display_points, shared_scalars
 
 def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
                           metric: str, contour: bool, unit_system: Any,
-                          text_color: str = 'black') -> int:
+                          text_color: str = 'black', smooth: bool = False) -> int:
     """Draw selectable scores and an optional interpolated surface."""
     import pyvista as pv
     from pyvista import LookupTable
@@ -37,11 +37,23 @@ def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
         scalars = None
         if contour and by_node:
             vertices, _ = display_points(geometry, unit_system)
-            # The nearest scored station gives a piecewise-constant map.
-            # Markers still carry each actual measurement.
-            _, nearest = cKDTree(points[list(by_node)]).query(vertices)
+            station_points = points[list(by_node)]
+            station_scores = np.array([np.mean(scores) for scores in by_node.values()])
             values, scalars = shared_scalars(len(vertices), metric)
-            values[:] = np.array([np.mean(scores) for scores in by_node.values()])[nearest]
+            if smooth:
+                # Normalize by the closest distance before squaring to keep
+                # weights finite. Coincident vertices retain the measured score.
+                distances = np.linalg.norm(vertices[:, None] - station_points, axis=2)
+                closest = distances.argmin(axis=1)
+                minimum = distances.min(axis=1)
+                weights = np.divide(minimum[:, None], distances,
+                                    out=np.zeros_like(distances), where=distances > 0)**2
+                exact = minimum == 0
+                weights[exact, closest[exact]] = 1
+                values[:] = (weights @ station_scores) / weights.sum(axis=1)
+            else:
+                _, nearest = cKDTree(station_points).query(vertices)
+                values[:] = station_scores[nearest]
         add_geometry(plotter, geometry, unit_system, opacity=.45,
                      color_override='#8795a1' if scalars is None else None,
                      scalars=scalars, clim=clim)
@@ -52,28 +64,15 @@ def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
         plotter.add_mesh(marker, point_size=15, render_points_as_spheres=True,
                          color=palette.map_value(float(np.mean(scores)))[:3])
     if stations:
-        plotter.add_text(f'{metric.upper() if metric == "trac" else "sTRAC"}: '
-                         f'{clim[0]:.3g} to {clim[1]:.3g}', font_size=10, color=text_color)
+        label = 'TRAC' if metric == 'trac' else 'sTRAC'
+        average = np.mean([score for _, _, score in stations])
+        plotter.add_text(f'Average {label}: {average:.3f}', position='upper_left',
+                         font_size=12, color=text_color, name='correlation-average')
+        mapper = pv.DataSetMapper()
+        mapper.lookup_table = palette
+        plotter.add_scalar_bar(label,
+                               mapper=mapper, color=text_color, vertical=True,
+                               position_x=.87, position_y=.18, width=.09, height=.52)
     else:
         plotter.add_text('No scored DOFs match the linked geometry', font_size=10, color=text_color)
     return len(stations)
-
-
-def matching_surfaces(primary: Any, candidates: Any) -> list:
-    """Find meshes whose node IDs and positions agree with a point survey."""
-    from ..core.geometry import Geometry
-
-    matched = []
-    for geometry in candidates:
-        if not isinstance(geometry, Geometry) or geometry is primary or not len(geometry.elem_type):
-            continue
-        if primary.num_nodes == 0 or not np.all(geometry.contains_nodes(primary.node_id)):
-            continue
-        positions = geometry.node_xyz[geometry.node_index(primary.node_id)]
-        # A scan may be projected onto the XY plane. Keep that geometry as
-        # measured and check the axes on which it actually spans a distance.
-        axes = np.ptp(primary.node_xyz, axis=0) > 1e-8
-        if axes.any() and np.allclose(positions[:, axes], primary.node_xyz[:, axes],
-                                     atol=1e-4, rtol=0):
-            matched.append(geometry)
-    return matched

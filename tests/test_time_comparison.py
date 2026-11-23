@@ -232,12 +232,13 @@ def test_filtered_batch_collapses_separately_from_raw_histories(window):
     sections = [window.test_item.child(i) for i in range(window.test_item.childCount())
                 if (window.test_item.child(i).data(0, ROLE_REFERENCE) or (None,))[0]
                 == 'history_section']
-    header = next(row for row in sections if row.text(0).startswith('▾ Filtered batch'))
-    window._toggle_history_section(header, 0)
-    assert all(window._item_for_object(name).isHidden() for name in results)
-    assert all(not window._item_for_object(name).isHidden() for name in sources)
-    window._toggle_history_section(header, 0)
-    assert all(not window._item_for_object(name).isHidden() for name in results)
+    header = next(row for row in sections if row.text(0).startswith('Filtered batch'))
+    assert header.childCount() == len(results)
+    header.setExpanded(False)
+    assert header.data(0, ROLE_REFERENCE)[1] in window._closed_history_sections
+    assert all(window._item_for_object(name).parent() is not header for name in sources)
+    window._reorder_tree()
+    assert not window._item_for_object(results[0]).parent().isExpanded()
 
 
 def test_opening_project_does_not_select_each_history(window, tmp_path):
@@ -274,7 +275,31 @@ def test_import_sections_survive_reopen_and_select_a_whole_trac_pair(window, tmp
     headers = [item for i in range(window.test_item.childCount())
                if (item := window.test_item.child(i)).data(0, ROLE_REFERENCE)
                and item.data(0, ROLE_REFERENCE)[0] == 'history_section']
-    assert [item.text(0).split()[1] for item in headers] == ['experimental.unv', 'analytical.unv']
+    assert [item.text(0) for item in headers] == ['experimental.unv', 'analytical.unv']
+    header = headers[0]
+    assert header.child(0) is window._item_for_object(a)
+    rect = window.tree.visualItemRect(header)
+    arrow = QPoint(rect.left() - window.tree.indentation() // 2, rect.center().y())
+    QTest.mouseClick(window.tree.viewport(), Qt.MouseButton.LeftButton, pos=arrow)
+    assert not header.isExpanded()
+    QTest.mouseClick(window.tree.viewport(), Qt.MouseButton.LeftButton, pos=arrow)
+    assert header.isExpanded()
+    from PySide6.QtWidgets import QLineEdit
+
+    title = QPoint(rect.left() + 40, rect.center().y())
+    QTest.mouseClick(window.tree.viewport(), Qt.MouseButton.LeftButton, pos=title)
+    QTest.mouseDClick(window.tree.viewport(), Qt.MouseButton.LeftButton, pos=title)
+    pump()
+    editor = window.tree.findChild(QLineEdit)
+    assert editor is not None and editor.isVisible()
+    editor.setText('Experiment')
+    QTest.keyClick(editor, Qt.Key.Key_Return)
+    pump()
+    assert header.text(0) == 'Experiment'
+    assert header.isExpanded()
+    window._reorder_tree()
+    headers = [window._item_for_object(name).parent() for name in (a, b)]
+    assert headers[0].text(0) == 'Experiment'
     for header, modifier in zip(headers, [Qt.KeyboardModifier.NoModifier,
                                           Qt.KeyboardModifier.ControlModifier], strict=True):
         window.tree.scrollToItem(header)

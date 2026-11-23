@@ -5,15 +5,17 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import QSignalBlocker, Qt
-from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtGui import QAction, QActionGroup, QColor
 from PySide6.QtWidgets import (
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QSplitter,
     QTableWidget,
@@ -61,7 +63,9 @@ class TimeTools:
         self.table.horizontalHeaderItem(2).setToolTip(
             'Signed gain multiplying the second trace to fit the first. Ideal: 1.')
         self.map_mode: QComboBox = QComboBox()
-        self.map_mode.addItems(['Off', 'TRAC points', 'sTRAC points', 'TRAC contour', 'sTRAC contour'])
+        self.map_mode.addItems(['Off', 'TRAC points', 'sTRAC points',
+                                'TRAC contour', 'sTRAC contour',
+                                'TRAC smooth contour', 'sTRAC smooth contour'])
         self.map_mode.currentIndexChanged.connect(self._edited)
         self.mesh_choice: QComboBox = QComboBox()
         self.mesh_choice.currentIndexChanged.connect(self._edited)
@@ -71,23 +75,22 @@ class TimeTools:
         self.figures: QSplitter = QSplitter()
         self.traces: QSplitter = QSplitter(Qt.Orientation.Vertical)
         self.figures.addWidget(self.traces)
-        self.waterfall_frame: QWidget = QWidget()
-        waterfall_layout = QVBoxLayout(self.waterfall_frame)
-        waterfall_layout.setContentsMargins(0, 0, 0, 0)
-        close_row = QHBoxLayout()
-        close_row.addWidget(QLabel('Waterfall'))
-        close_row.addStretch()
-        close = QPushButton('×')
-        close.setToolTip('Hide waterfall')
-        close.clicked.connect(self._close_waterfall)
-        close_row.addWidget(close)
-        waterfall_layout.addLayout(close_row)
+        self.trace_visible: QCheckBox = QCheckBox('Show time traces')
+        self.trace_visible.setChecked(True)
+        self.trace_visible.toggled.connect(self._edited)
+        self.trace_frame: QWidget = self._figure_frame(
+            'Time traces', lambda: self.trace_visible.setChecked(False))
+        self.map_frame: QWidget = self._figure_frame(
+            'Geometry correlation', lambda: self.map_mode.setCurrentIndex(0))
+        self.waterfall_frame: QWidget = self._figure_frame('Waterfall', self._close_waterfall)
+        self.traces.addWidget(self.trace_frame)
         self.traces.addWidget(self.waterfall_frame)
         pane._time_tools_layout.insertWidget(0, self.figures, 1)
         self.figures.hide()
         form.addRow('Geometry correlation', self.map_mode)
         form.addRow('FEM overlay', self.mesh_choice)
         form.addRow('Layout', self.layout_choice)
+        form.addRow(self.trace_visible)
         self.correlation_view: Any = None
         self.correlation_key: tuple | None = None
         self.correlation_count: int = 0
@@ -147,7 +150,7 @@ class TimeTools:
     def hide(self) -> None:
         """Put away the settings while a different view is being drawn."""
         if self.correlation_view is not None:
-            self.correlation_view.hide()
+            self.map_frame.hide()
         pane = self.window.data_pane
         if not self.figures.isHidden():
             pane.author_split.insertWidget(0, pane.graphics)
@@ -372,6 +375,9 @@ class TimeTools:
         if pane.showing_waterfall and pane.waterfall_plotter is not None:
             plotter = pane.waterfall_plotter
             plotter.clear()
+            from ..theme import theme
+
+            plotter.set_background(theme(self.window.theme_name)['scene_background'])
             groups = waterfall_groups(left)
             pane.show_quantities([(key[0], key) for key, _r in groups] if len(groups) > 1 else [])
             labels = {left.record_label(i): ('TRAC —' if row['trac'] is None
@@ -392,10 +398,18 @@ class TimeTools:
         a, _i, b, _j = row['pair']
         build_plots(pane.graphics, [(a, left, [current]), (b, right, [current])],
                     unit_system=self.window.unit_system, theme=self.window.theme_name)
+        score = '—' if row['trac'] is None else f"{row['trac']:.3f}"
+        from pyqtgraph import PlotItem
+
+        for plot in pane.graphics.ci.items:
+            if isinstance(plot, PlotItem):
+                plot.setTitle(f"{row['dof']} · TRAC {score}")
+                self._style_trace_plot(plot)
         map_note = self._correlation_map(rows, start, stop)
-        if pane.graphics.parentWidget() is not self.traces:
-            self.traces.insertWidget(0, pane.graphics)
+        if pane.graphics.parentWidget() is not self.trace_frame:
+            self.trace_frame.layout().addWidget(pane.graphics, 1)
         pane.graphics.show()
+        self.trace_frame.setVisible(self.trace_visible.isChecked())
         waterfall = pane.showing_waterfall and pane._waterfall_page is not None
         if waterfall:
             page = pane._waterfall_page
@@ -424,10 +438,8 @@ class TimeTools:
         linked = project.object_group_of(self.saved) if self.saved else None
         geometries = [project[name] for name in linked or ()
                       if isinstance(project[name], Geometry)]
-        from ..viz.time_correlation import matching_surfaces
-
-        surfaces = matching_surfaces(geometries[0], project.values()) if geometries else []
-        choices = [project.name_of(surface) for surface in surfaces]
+        choices = [name for name, obj in project.items()
+                   if isinstance(obj, Geometry) and all(obj is not geometry for geometry in geometries)] if geometries else []
         with QSignalBlocker(self.mesh_choice):
             selected = self.mesh_choice.currentData() if self.mesh_source == self.key else None
             self.mesh_source = self.key
@@ -444,7 +456,7 @@ class TimeTools:
         mode = self.map_mode.currentIndex()
         if not mode or not geometries:
             if self.correlation_view is not None:
-                self.correlation_view.hide()
+                self.map_frame.hide()
             return 'Link a saved comparison to geometry to map its scores.' if mode else ''
         if self.correlation_view is None:
             if self.window.data_pane.offscreen:
@@ -452,13 +464,16 @@ class TimeTools:
             view = three_d_view(self.window.data_pane)
             if view is None:
                 return '3D geometry rendering is unavailable.'
+            view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            view.customContextMenuRequested.connect(self._geometry_view_menu)
             self.correlation_view = view
+            self.map_frame.layout().addWidget(view, 1)
             self._arrange_views()
             view.enable_mesh_picking(
                 callback=self._pick_correlation_point, left_clicking=True,
                 show=False, show_message=False, picker='point', use_actor=False)
         view = self.correlation_view
-        metric = 'strac' if mode in (2, 4) else 'trac'
+        metric = 'strac' if mode in (2, 4, 6) else 'trac'
         from ..theme import theme
 
         colors = theme(self.window.theme_name)
@@ -473,10 +488,11 @@ class TimeTools:
             view.set_background(colors['scene_background'])
             count = draw_time_correlation(view, geometries, rows, metric=metric,
                                           contour=mode >= 3, unit_system=self.window.unit_system,
-                                          text_color=colors['scene_text'])
+                                          text_color=colors['scene_text'], smooth=mode >= 5)
             if reset:
                 view.reset_camera()
             self.correlation_count = count
+        self.map_frame.show()
         view.show()
         message = f'{self.correlation_count} scored stations. Click a station to select its traces.'
         if mode >= 3 and not any(len(geometry.elem_type) for geometry in geometries):
@@ -502,5 +518,144 @@ class TimeTools:
             return
         layout = self.layout_choice.currentIndex()
         self.figures.setOrientation(Qt.Orientation.Horizontal if layout else Qt.Orientation.Vertical)
-        self.figures.insertWidget(1 if layout == 1 else 0, view)
+        self.figures.insertWidget(1 if layout == 1 else 0, self.map_frame)
         self.figures.setSizes([1, 2] if layout != 1 else [2, 1])
+
+    @staticmethod
+    def _figure_frame(title, close_action):
+        frame = QWidget()
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        header = QHBoxLayout()
+        header.addWidget(QLabel(title))
+        header.addStretch()
+        close = QPushButton('×')
+        close.setToolTip(f'Hide {title.lower()}')
+        close.clicked.connect(close_action)
+        header.addWidget(close)
+        layout.addLayout(header)
+        return frame
+
+    def _geometry_view_menu(self, position):
+        view = self.correlation_view
+        menu = QMenu(view)
+        for title, plane, reverse in (
+            ('Top (+Z)', view.view_xy, False), ('Bottom (−Z)', view.view_xy, True),
+            ('Front (−Y)', view.view_xz, False), ('Back (+Y)', view.view_xz, True),
+            ('Right (+X)', view.view_yz, False), ('Left (−X)', view.view_yz, True),
+        ):
+            menu.addAction(title, lambda checked=False, plane=plane, reverse=reverse:
+                           plane(negative=reverse))
+        menu.addAction('Isometric', view.view_isometric)
+        menu.addSeparator()
+        for angle in (90, -90):
+            menu.addAction(f'Rotate {angle:+d}°', lambda checked=False, angle=angle:
+                           self._roll_geometry(angle))
+        menu.exec(view.mapToGlobal(position))
+
+    def _roll_geometry(self, angle: int) -> None:
+        view = self.correlation_view
+        view.camera.Roll(angle)
+        view.render()
+
+    def _style_trace_plot(self, plot) -> None:
+        from pyqtgraph import mkPen
+
+        from .preferences import settings
+
+        store = settings()
+        curves = plot.listDataItems()
+        menu = plot.getViewBox().menu.addMenu('Trace options')
+        colors = menu.addMenu('Colors')
+        lines = menu.addMenu('Line options')
+        thickness = menu.addMenu('Line thickness')
+        styles = {
+            'Solid': (Qt.PenStyle.SolidLine, None),
+            'Dashed': (Qt.PenStyle.DashLine, None),
+            'Dotted': (Qt.PenStyle.DotLine, None),
+            'Squares': (Qt.PenStyle.SolidLine, 's'),
+            'Circles': (Qt.PenStyle.SolidLine, 'o'),
+        }
+        for index, curve in enumerate(curves):
+            color_key = f'trac/trace_color_{index}'
+            style_key = f'trac/trace_style_{index}'
+            width_key = f'trac/trace_width_{index}'
+            pen = mkPen(curve.opts['pen'])
+            color = QColor(store.value(color_key, pen.color().name(), type=str))
+            pen.setColor(color)
+            style = store.value(style_key, 'Solid', type=str)
+            line, symbol = styles.get(style, styles['Solid'])
+            width = store.value(width_key, pen.widthF(), type=float)
+            pen.setStyle(line)
+            pen.setWidthF(width)
+            curve.setPen(pen)
+            if symbol:
+                self._add_trace_markers(plot, curve, symbol, color)
+            title = f'Trace {index + 1}: {curve.name()}'
+            colors.addAction(title, lambda checked=False, curve=curve, key=color_key:
+                             self._choose_trace_color(curve, key))
+            self._trace_choices(lines.addMenu(title), style_key,
+                                [(name, name) for name in styles], style)
+            self._trace_choices(thickness.addMenu(title), width_key,
+                                [(f'{size:g} px', size) for size in (1, 1.5, 2, 3, 4)], width)
+        menu.addSeparator()
+        menu.addAction('Reset trace options', self._reset_trace_options)
+
+    @staticmethod
+    def _add_trace_markers(plot, curve, symbol: str, color: QColor) -> None:
+        from pyqtgraph import ScatterPlotItem
+
+        markers = ScatterPlotItem(symbol=symbol, size=4, pen=None, brush=color)
+        plot.addItem(markers, ignoreBounds=True)
+        view = plot.getViewBox()
+
+        def update() -> None:
+            x, y = curve.getOriginalDataset()
+            if x is None or y is None:
+                return
+            low, high = view.viewRange()[0]
+            first = x.searchsorted(low)
+            stop = x.searchsorted(high, side='right')
+            target = max(1, int(view.width() / 8))
+            step = max(1, (stop - first + target - 1) // target)
+            markers.setData(x=x[first:stop:step], y=y[first:stop:step])
+
+        view.sigXRangeChanged.connect(update)
+        view.sigResized.connect(update)
+        update()
+
+    def _trace_choices(self, menu, key, choices, current) -> None:
+        group = QActionGroup(menu)
+        for label, value in choices:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(value == current)
+            group.addAction(action)
+            action.triggered.connect(lambda checked=False, value=value:
+                                     self._set_trace_option(key, value))
+
+    def _set_trace_option(self, key, value) -> None:
+        from .preferences import settings
+
+        settings().setValue(key, value)
+        self._edited()
+
+    def _choose_trace_color(self, curve, key: str) -> None:
+        from pyqtgraph import mkPen
+
+        from .preferences import settings
+
+        color = QColorDialog.getColor(mkPen(curve.opts['pen']).color(),
+                                      self.window, 'Choose trace color')
+        if color.isValid():
+            settings().setValue(key, color.name())
+            self._edited()
+
+    def _reset_trace_options(self) -> None:
+        from .preferences import settings
+
+        store = settings()
+        for index in range(2):
+            for option in ('color', 'style', 'width'):
+                store.remove(f'trac/trace_{option}_{index}')
+        self._edited()

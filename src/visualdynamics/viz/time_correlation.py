@@ -12,8 +12,17 @@ from .geometry import add_geometry, display_points, shared_scalars
 
 def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
                           metric: str, contour: bool, unit_system: Any,
-                          text_color: str = 'black', smooth: bool = False) -> int:
-    """Draw selectable scores and an optional interpolated surface."""
+                          text_color: str = 'black',
+                          smooth: bool = False) -> tuple[int, str]:
+    """Draw each station's score at its node, and optionally a surface
+    colored by the scores, on `plotter`.
+
+    The stations are placed on the first geometry, by the node of each
+    row's DOF; a geometry with elements is drawn translucent under them,
+    colored by the nearest station's score with `contour`, or by an
+    inverse-distance-squared blend of all of them with `smooth` as well.
+    Returns the number of stations drawn and the axis unit text the
+    scene's bounds are labeled with."""
     import pyvista as pv
     from pyvista import LookupTable
     from scipy.spatial import cKDTree
@@ -21,7 +30,7 @@ def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
     from .geometry import COLORMAP
 
     primary = geometries[0]
-    points, _ = display_points(primary, unit_system)
+    points, axis_unit = display_points(primary, unit_system)
     positions = {int(node): i for i, node in enumerate(primary.node_id)}
     stations = [(i, positions[node], row[metric]) for i, row in enumerate(rows)
                 if row[metric] is not None
@@ -54,13 +63,11 @@ def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
             else:
                 _, nearest = cKDTree(station_points).query(vertices)
                 values[:] = station_scores[nearest]
-        add_geometry(plotter, geometry, unit_system, opacity=.45,
+        axis_unit = add_geometry(plotter, geometry, unit_system, opacity=.45,
                      color_override='#8795a1' if scalars is None else None,
                      scalars=scalars, clim=clim)
     for index, scores in by_node.items():
-        at_node = [(row, score) for row, point, score in stations if point == index]
         marker = pv.PolyData(points[index:index+1])
-        marker.field_data['comparison_row'] = [row for row, _ in at_node]
         plotter.add_mesh(marker, point_size=15, render_points_as_spheres=True,
                          color=palette.map_value(float(np.mean(scores)))[:3])
     if stations:
@@ -75,4 +82,4 @@ def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
                                position_x=.87, position_y=.18, width=.09, height=.52)
     else:
         plotter.add_text('No scored DOFs match the linked geometry', font_size=10, color=text_color)
-    return len(stations)
+    return len(stations), axis_unit

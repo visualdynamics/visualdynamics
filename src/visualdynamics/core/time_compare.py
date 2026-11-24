@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from collections import defaultdict
 from typing import Any
 
@@ -138,14 +137,11 @@ def scores(data: TimeHistory, start: float | None = None,
     unchanged. Signed correlation and RMS ratio make those limits visible.
     sTRAC is the signed least-squares multiplier from the second trace
     to the first, with an ideal value of one.
-
-    References
-    ----------
-    The standard metric and its amplitude limitation are described in:
-
-    1. Coble et al., *Mechanical Systems and Signal Processing*,
-       [doi:10.1016/j.ymssp.2024.111522](https://doi.org/10.1016/j.ymssp.2024.111522).
     """
+    # The reference this came with (doi:10.1016/j.ymssp.2024.111522)
+    # is a paper on friction and backlash identification, not a source
+    # for TRAC, so it was taken out (Brandon, 2026-11-23). TRAC wants
+    # the paper that defines it cited here once one has been read.
     setting = data.time_comparison
     start = setting['start'] if start is None else float(start)
     stop = setting['stop'] if stop is None else float(stop)
@@ -181,21 +177,3 @@ def scores(data: TimeHistory, start: float | None = None,
                      'trac': trac, 'strac': strac, 'correlation': correlation, 'rms_ratio': ratio,
                      'samples': int(keep.sum()), 'reason': reason})
     return rows
-
-
-def scaled(data: TimeHistory, factor: float, records: Any = None,
-           include_references: bool = False) -> TimeHistory:
-    """Return an independent scaled copy, preserving SI units and timing."""
-    if not np.isfinite(factor):
-        raise ValueError('Scale factor must be finite')
-    selected = (list(range(data.num_records)) if include_references else response_records(data))
-    if records is not None:
-        selected = list(records)
-    if not selected:
-        raise ValueError('No response records selected to scale')
-    result = copy.deepcopy(data)
-    if any(not isinstance(i, (int, np.integer)) or not 0 <= i < data.num_records
-           for i in selected):
-        raise ValueError('Invalid selected record index')
-    result.ordinate[selected] *= float(factor)
-    return result

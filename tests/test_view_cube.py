@@ -1,5 +1,6 @@
 """The orientation marker's cube: a click on a face turns the view to
-look straight at that face, and again to the opposite one."""
+look straight at that face, and again to the opposite one; while the
+view is square, its arrows turn it a quarter turn."""
 
 import numpy as np
 import pytest
@@ -10,6 +11,7 @@ from visualdynamics.viz.view_cube import (
     ViewCube,
     look_at_face,
     show_view_cube,
+    turn_view,
     view_cube,
 )
 
@@ -144,3 +146,53 @@ def test_a_click_on_the_cube_turns_the_view(window, pump):
     assert not scene.click_view_cube(*cube.face_pixel(2, 1))
     scene.orientation_action.trigger()
     assert view_cube(plotter) is not None
+
+
+def test_the_turn_arrows_show_only_while_square_and_turn_a_quarter(plotter):
+    show_view_cube(plotter, True, 'black')
+    cube = view_cube(plotter)
+    look_at_face(plotter, 2, 1)
+    plotter.render()
+    held = plotter.camera.position
+    assert cube.arrow_at(*cube.arrow_pixel(1)) == 1
+    assert cube.arrow_at(*cube.arrow_pixel(-1)) == -1
+    # an arrow is not a face, and a face is not an arrow
+    assert cube.face_at(*cube.arrow_pixel(1)) is None
+    assert cube.arrow_at(*cube.face_pixel(2, 1)) is None
+    # from above, Y up and X right: clockwise puts Y on the right
+    turn_view(plotter, 1)
+    assert np.allclose(plotter.camera.up, (-1, 0, 0))
+    assert plotter.camera.position == held, 'only which way is up changes'
+    # still square, so the arrows stay, drawn where they were
+    assert cube.arrow_at(*cube.arrow_pixel(1)) == 1
+    turn_view(plotter, -1)
+    turn_view(plotter, -1)
+    assert np.allclose(plotter.camera.up, (1, 0, 0))
+    # from a side, about the line of sight too
+    look_at_face(plotter, 0, 1)
+    turn_view(plotter, 1)
+    assert np.allclose(plotter.camera.direction, (-1, 0, 0))
+    assert np.allclose(plotter.camera.up, (0, -1, 0))
+    # turned off square, they are gone
+    plotter.camera_position = [(5.0, 5.0, 5.0), (0, 0, 0), (0, 0, 1)]
+    plotter.render()
+    assert cube.arrow_at(*cube.arrow_pixel(1)) is None
+    assert cube.arrow_at(*cube.arrow_pixel(-1)) is None
+
+
+def test_a_click_on_a_turn_arrow_turns_the_view(window, pump):
+    from conftest import select_objects
+
+    window.add_object('Plate', plate.build(4).geometry())
+    pump()
+    select_objects(window, pump, 'Plate')
+    scene = window.scene
+    plotter = scene.plotter
+    plotter.render()
+    cube = view_cube(plotter)
+    assert scene.click_view_cube(*cube.face_pixel(2, 1))
+    plotter.render()
+    assert np.allclose(plotter.camera.up, (0, 1, 0))
+    assert scene.click_view_cube(*cube.arrow_pixel(-1))
+    assert np.allclose(plotter.camera.up, (1, 0, 0))
+    assert np.allclose(plotter.camera.direction, (0, 0, -1))

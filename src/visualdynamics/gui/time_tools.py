@@ -5,17 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import QSignalBlocker, Qt
-from PySide6.QtGui import QAction, QActionGroup, QColor
+from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QMenu,
     QPushButton,
     QSplitter,
     QTableWidget,
@@ -25,8 +23,35 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.data import TimeHistory
-from ..core.time_compare import compare, response_records, scaled, scores, sides
+from ..core.time_compare import compare, response_records, scores, sides
 from .editors import DoubleSpinBox
+from .object_tables import _elsewhere
+from .tables import Column, CopyPasteTableView, TableModel
+
+
+def pair_model(pairs: list[list[int]], labels: list[str],
+               parent: Any = None) -> TableModel:
+    """The pair editor's table: one row a pair, the first and the second
+    response each picked from `labels`. `pairs` holds indices into
+    `labels` and is edited in place; the comparison the pairs are given
+    to is what the journal records, so the columns journal elsewhere."""
+
+    def getter(side: int):
+        return lambda obj, row: labels[obj[row][side]]
+
+    def setter(side: int):
+        def put(obj, row, text):
+            text = str(text).strip()
+            if text not in labels:
+                raise ValueError(f'{text!r} is not one of the picked responses')
+            obj[row][side] = labels.index(text)
+        return put
+
+    columns = [Column(title, getter(side), set=setter(side), choices=list(labels),
+                      journal=_elsewhere,
+                      alignment=int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
+               for side, title in enumerate(('First (colored)', 'Second (gray)'))]
+    return TableModel(pairs, columns, len, parent)
 
 
 class TimeTools:
@@ -39,8 +64,6 @@ class TimeTools:
         self.group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
         self.compare_action: QAction = self._action(
             'TRAC / Overlay', 'Overlay paired responses and choose the TRAC time window')
-        self.scale_action: QAction = self._action(
-            'Scale', 'Preview a multiplier and apply it to copies of selected time histories')
         self.panel: QWidget = QWidget(pane)
         self.panel.setMinimumWidth(245)
         layout = QVBoxLayout(self.panel)
@@ -67,21 +90,20 @@ class TimeTools:
                                 'TRAC contour', 'sTRAC contour',
                                 'TRAC smooth contour', 'sTRAC smooth contour'])
         self.map_mode.currentIndexChanged.connect(self._edited)
+        self.map_mode.setToolTip('Color the linked geometry in the 3-D view by each '
+                                 'station\'s score, as points or a contour')
         self.mesh_choice: QComboBox = QComboBox()
         self.mesh_choice.currentIndexChanged.connect(self._edited)
-        self.layout_choice: QComboBox = QComboBox()
-        self.layout_choice.addItems(['Stacked', 'Geometry on right', 'Geometry on left'])
-        self.layout_choice.currentIndexChanged.connect(self._arrange_views)
+        self.mesh_choice.setToolTip('A finite element geometry to draw the contour on, under the measured stations')
         self.figures: QSplitter = QSplitter()
         self.traces: QSplitter = QSplitter(Qt.Orientation.Vertical)
         self.figures.addWidget(self.traces)
         self.trace_visible: QCheckBox = QCheckBox('Show time traces')
         self.trace_visible.setChecked(True)
+        self.trace_visible.setToolTip('Show the selected pair\'s time traces')
         self.trace_visible.toggled.connect(self._edited)
         self.trace_frame: QWidget = self._figure_frame(
             'Time traces', lambda: self.trace_visible.setChecked(False))
-        self.map_frame: QWidget = self._figure_frame(
-            'Geometry correlation', lambda: self.map_mode.setCurrentIndex(0))
         self.waterfall_frame: QWidget = self._figure_frame('Waterfall', self._close_waterfall)
         self.traces.addWidget(self.trace_frame)
         self.traces.addWidget(self.waterfall_frame)
@@ -89,9 +111,7 @@ class TimeTools:
         self.figures.hide()
         form.addRow('Geometry correlation', self.map_mode)
         form.addRow('FEM overlay', self.mesh_choice)
-        form.addRow('Layout', self.layout_choice)
         form.addRow(self.trace_visible)
-        self.correlation_view: Any = None
         self.correlation_key: tuple | None = None
         self.correlation_count: int = 0
         self.mesh_source: tuple | None = None
@@ -99,27 +119,12 @@ class TimeTools:
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.settings, 1)
-        self.scale_settings: QWidget = QWidget()
-        scale_form = QFormLayout(self.scale_settings)
-        self.factor: DoubleSpinBox = DoubleSpinBox()
-        self.factor.setToolTip('Multiply response samples by this factor; units stay the same')
-        self.factor.setRange(-1e12, 1e12)
-        self.factor.setDecimals(9)
-        self.factor.setKeyboardTracking(False)
-        self.factor.setValue(1)
-        scale_form.addRow('Multiplier', self.factor)
-        self.references: QCheckBox = QCheckBox('Include reference channels')
-        self.references.setToolTip('Also scale the reference force or drive channels')
-        scale_form.addRow(self.references)
-        layout.addWidget(self.scale_settings)
         self.apply: QPushButton = QPushButton('Save comparison')
         self.apply.setToolTip('Keep the previewed result and its settings in the project')
         layout.addWidget(self.apply)
         pane._time_tools_layout.addWidget(self.panel)
         self.start.valueChanged.connect(self._edited)
         self.stop.valueChanged.connect(self._edited)
-        self.factor.valueChanged.connect(self._edited)
-        self.references.toggled.connect(self._edited)
         self.table.currentCellChanged.connect(self._edited)
         self.manual.clicked.connect(self._manual_pairs)
         self.apply.clicked.connect(self._apply)
@@ -149,8 +154,6 @@ class TimeTools:
 
     def hide(self) -> None:
         """Put away the settings while a different view is being drawn."""
-        if self.correlation_view is not None:
-            self.map_frame.hide()
         pane = self.window.data_pane
         if not self.figures.isHidden():
             pane.author_split.insertWidget(0, pane.graphics)
@@ -160,7 +163,6 @@ class TimeTools:
             self.figures.hide()
         self.panel.hide()
         self.compare_action.setVisible(False)
-        self.scale_action.setVisible(False)
 
     def _start_reading(self, _checked: bool) -> None:
         self.window.data_pane.end_readings()
@@ -197,52 +199,60 @@ class TimeTools:
                    for i in records.get(name, response_records(project[name]))]
         if len(choices) < 2:
             return
+        labels = [f'{n}: {project[n].record_label(i)}' for n, i in choices]
+        if self.draft is not None:
+            pairs = [[choices.index(tuple(pair[:2])), choices.index(tuple(pair[2:]))]
+                     for pair in self.draft.time_comparison['pairs']]
+        else:
+            pairs = [[0, 1]]
         dialog = QDialog(self.window)
         dialog.setWindowTitle('Pair time responses')
         dialog.resize(780, 440)
         layout = QVBoxLayout(dialog)
         layout.addWidget(QLabel('Choose one first and one second response per pair.'))
-        table = QTableWidget(0, 2)
-        table.setHorizontalHeaderLabels(['First (colored)', 'Second (gray)'])
+        model = pair_model(pairs, labels, dialog)
+        table = CopyPasteTableView(dialog)
+        table.setModel(model)
+        table.rows_deletable = True
         table.horizontalHeader().setStretchLastSection(True)
         table.setColumnWidth(0, 350)
         layout.addWidget(table)
+        refused = QLabel()
+        refused.setWordWrap(True)
+        model.edit_rejected.connect(refused.setText)
+        table.edits_applied.connect(
+            lambda _written, _refused, why: refused.setText(why))
 
-        def add(pair=None):
-            row = table.rowCount()
-            table.insertRow(row)
-            for col in range(2):
-                box = QComboBox()
-                for n, i in choices:
-                    box.addItem(f'{n}: {project[n].record_label(i)}', (n, i))
-                if pair is not None:
-                    box.setCurrentIndex(choices.index(tuple(pair[col*2:col*2+2])))
-                else:
-                    box.setCurrentIndex(col)
-                table.setCellWidget(row, col, box)
+        def change(edit) -> None:
+            model.beginResetModel()
+            edit()
+            model.endResetModel()
 
-        if self.draft is not None:
-            for pair in self.draft.time_comparison['pairs']:
-                add(pair)
-        else:
-            add()
+        def remove(rows) -> None:
+            keep = [pair for k, pair in enumerate(pairs) if k not in set(rows)]
+            change(lambda: pairs.__setitem__(slice(None), keep))
+
+        table.rows_deleted.connect(remove)
         row = QHBoxLayout()
         add_button = QPushButton('Add pair')
+        add_button.setToolTip('Add a pair below the others')
         remove_button = QPushButton('Remove pair')
-        add_button.clicked.connect(lambda: add())
-        remove_button.clicked.connect(lambda: table.removeRow(table.currentRow()))
+        remove_button.setToolTip('Remove the pair holding the current cell')
+        add_button.clicked.connect(lambda: change(lambda: pairs.append([0, 1])))
+        remove_button.clicked.connect(
+            lambda: remove([table.currentIndex().row()]))
         row.addWidget(add_button)
         row.addWidget(remove_button)
         layout.addLayout(row)
+        layout.addWidget(refused)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
                                    QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.explicit = [[*table.cellWidget(i, 0).currentData(),
-                              *table.cellWidget(i, 1).currentData()]
-                             for i in range(table.rowCount())]
+        if dialog.exec() == QDialog.DialogCode.Accepted and pairs:
+            self.explicit = [[*choices[first], *choices[second]]
+                             for first, second in pairs]
             self.draft = None
             self.window.render_current()
 
@@ -258,10 +268,6 @@ class TimeTools:
                     *names, pairs=self.explicit, records=records,
                     start=self._window()[0], stop=self._window()[1])
                 self.add_results([name])
-            elif self.scale_action.isChecked():
-                self.add_results(project.scale_time_histories(
-                    *names, factor=self.factor.value(), records=records,
-                    include_references=self.references.isChecked()))
         except ValueError as error:
             self.note.setText(str(error))
 
@@ -276,7 +282,6 @@ class TimeTools:
             if compare_sections:
                 self.window.data_pane.waterfall_action.setChecked(False)
             self.compare_action.setChecked(compare_sections)
-            self.scale_action.setChecked(False)
             self.explicit = self.draft = None
             self.key = key
         self.series = series
@@ -285,8 +290,7 @@ class TimeTools:
         comparable = (len(series) > 1 or self.saved is not None
                       or (series[0][2] is not None and len(series[0][2]) > 1))
         self.compare_action.setVisible(comparable)
-        self.scale_action.setVisible(self.saved is None)
-        if not (self.saved or self.compare_action.isChecked() or self.scale_action.isChecked()):
+        if not (self.saved or self.compare_action.isChecked()):
             return None
         if self.saved:
             self.compare_action.setChecked(True)
@@ -295,17 +299,12 @@ class TimeTools:
                            complex_data=False, pair=False)
         pane.toolbar.show()
         self.panel.show()
-        comparison = self.compare_action.isChecked()
-        self.settings.setVisible(comparison)
-        self.scale_settings.setVisible(not comparison)
         return self._preview()
 
     def _preview(self) -> str:
         self.apply.setEnabled(True)
         try:
-            if self.compare_action.isChecked():
-                return self._compare_preview(self.series[0][1])
-            return self._scale_preview()
+            return self._compare_preview(self.series[0][1])
         except ValueError as error:
             self.note.setText(str(error))
             self.apply.setEnabled(False)
@@ -315,20 +314,6 @@ class TimeTools:
             with QSignalBlocker(self.table):
                 self.table.setRowCount(0)
             return str(error)
-
-    def _scale_preview(self) -> str:
-        from ..plot import build_plots
-
-        name, data, records = self.series[0]
-        result = scaled(data, self.factor.value(), records, self.references.isChecked())
-        pane = self.window.data_pane
-        pane.show_waterfall(False)
-        build_plots(pane.graphics, [(name, data, records), ('Scaled', result, records)],
-                    unit_system=self.window.unit_system, theme=self.window.theme_name)
-        self.apply.setText('Apply scale')
-        note = f'Preview: {name}\nApply to {len(self.series)} selected histories.'
-        self.note.setText(note)
-        return note
 
     def _window(self) -> tuple[float, float]:
         return (max(self.start.value(), float(self.draft.abscissa[0])),
@@ -404,7 +389,6 @@ class TimeTools:
         for plot in pane.graphics.ci.items:
             if isinstance(plot, PlotItem):
                 plot.setTitle(f"{row['dof']} · TRAC {score}")
-                self._style_trace_plot(plot)
         map_note = self._correlation_map(rows, start, stop)
         if pane.graphics.parentWidget() is not self.trace_frame:
             self.trace_frame.layout().addWidget(pane.graphics, 1)
@@ -432,7 +416,6 @@ class TimeTools:
 
     def _correlation_map(self, rows: list, start: float, stop: float) -> str:
         from ..core.geometry import Geometry
-        from .opengl import three_d_view
 
         project = self.window.project
         linked = project.object_group_of(self.saved) if self.saved else None
@@ -455,71 +438,55 @@ class TimeTools:
         self.map_mode.setEnabled(bool(geometries))
         mode = self.map_mode.currentIndex()
         if not mode or not geometries:
-            if self.correlation_view is not None:
-                self.map_frame.hide()
+            self.correlation_key = None
             return 'Link a saved comparison to geometry to map its scores.' if mode else ''
-        if self.correlation_view is None:
-            if self.window.data_pane.offscreen:
-                return ''
-            view = three_d_view(self.window.data_pane)
-            if view is None:
-                return '3D geometry rendering is unavailable.'
-            view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            view.customContextMenuRequested.connect(self._geometry_view_menu)
-            self.correlation_view = view
-            self.map_frame.layout().addWidget(view, 1)
-            self._arrange_views()
-            view.enable_mesh_picking(
-                callback=self._pick_correlation_point, left_clicking=True,
-                show=False, show_message=False, picker='point', use_actor=False)
-        view = self.correlation_view
+        # drawn in the window's own 3-D view, with its view cube and
+        # camera, rather than in a second view of its own
+        window = self.window
+        window.reveal_scene()
+        plotter = window.scene.plotter
+        if plotter is None:
+            return '3D geometry rendering is unavailable.'
         metric = 'strac' if mode in (2, 4, 6) else 'trac'
         from ..theme import theme
 
-        colors = theme(self.window.theme_name)
+        colors = theme(window.theme_name)
         key = (self.key, tuple(map(id, geometries)), mode, start, stop,
-               self.window.unit_system, self.window.theme_name)
+               window.unit_system, window.theme_name)
         if key != self.correlation_key:
+            from ..viz.geometry import annotate_scene, held_camera, restore_camera
             from ..viz.time_correlation import draw_time_correlation
 
-            reset = self.correlation_key is None or self.correlation_key[:2] != key[:2]
+            # framed when the geometries change, as any scene is; a new
+            # window or contour keeps the camera where it was put
+            showing = ('time correlation', self.key, key[1])
+            reframe = window._framed != showing
+            window._framed = showing
+            camera = held_camera(plotter)
+            plotter.clear()
+            plotter.set_background(colors['scene_background'],
+                                   top=colors['scene_background_top'])
+            self.correlation_count, axis_unit = draw_time_correlation(
+                plotter, geometries, rows, metric=metric, contour=mode >= 3,
+                unit_system=window.unit_system, text_color=colors['scene_text'],
+                smooth=mode >= 5)
+            window.scene.axis_unit = axis_unit
+            annotate_scene(plotter, axis_unit, colors, window.scene.bounds_visible,
+                           window.scene.orientation_visible, cube=True)
+            if reframe:
+                window.scene.frame()
+            else:
+                restore_camera(plotter, camera)
             self.correlation_key = key
-            view.clear()
-            view.set_background(colors['scene_background'])
-            count = draw_time_correlation(view, geometries, rows, metric=metric,
-                                          contour=mode >= 3, unit_system=self.window.unit_system,
-                                          text_color=colors['scene_text'], smooth=mode >= 5)
-            if reset:
-                view.reset_camera()
-            self.correlation_count = count
-        self.map_frame.show()
-        view.show()
-        message = f'{self.correlation_count} scored stations. Click a station to select its traces.'
+            plotter.render()
+        message = f'{self.correlation_count} scored stations on the 3-D view.'
         if mode >= 3 and not any(len(geometry.elem_type) for geometry in geometries):
             message += ' Select a FEM overlay to show a surface contour.'
         return message
 
-    def _pick_correlation_point(self, mesh: Any) -> None:
-        if mesh is not None and 'comparison_row' in mesh.field_data:
-            rows = list(mesh.field_data['comparison_row'])
-            current = self.table.currentRow()
-            row = rows[(rows.index(current) + 1) % len(rows)] if current in rows else rows[0]
-            self.table.setCurrentCell(int(row), 0)
-            if row == current:
-                self._edited()
-
     def _close_waterfall(self) -> None:
         self.window.data_pane.waterfall_action.setChecked(False)
         self._edited()
-
-    def _arrange_views(self) -> None:
-        view = self.correlation_view
-        if view is None:
-            return
-        layout = self.layout_choice.currentIndex()
-        self.figures.setOrientation(Qt.Orientation.Horizontal if layout else Qt.Orientation.Vertical)
-        self.figures.insertWidget(1 if layout == 1 else 0, self.map_frame)
-        self.figures.setSizes([1, 2] if layout != 1 else [2, 1])
 
     @staticmethod
     def _figure_frame(title, close_action):
@@ -535,127 +502,3 @@ class TimeTools:
         header.addWidget(close)
         layout.addLayout(header)
         return frame
-
-    def _geometry_view_menu(self, position):
-        view = self.correlation_view
-        menu = QMenu(view)
-        for title, plane, reverse in (
-            ('Top (+Z)', view.view_xy, False), ('Bottom (−Z)', view.view_xy, True),
-            ('Front (−Y)', view.view_xz, False), ('Back (+Y)', view.view_xz, True),
-            ('Right (+X)', view.view_yz, False), ('Left (−X)', view.view_yz, True),
-        ):
-            menu.addAction(title, lambda checked=False, plane=plane, reverse=reverse:
-                           plane(negative=reverse))
-        menu.addAction('Isometric', view.view_isometric)
-        menu.addSeparator()
-        for angle in (90, -90):
-            menu.addAction(f'Rotate {angle:+d}°', lambda checked=False, angle=angle:
-                           self._roll_geometry(angle))
-        menu.exec(view.mapToGlobal(position))
-
-    def _roll_geometry(self, angle: int) -> None:
-        view = self.correlation_view
-        view.camera.Roll(angle)
-        view.render()
-
-    def _style_trace_plot(self, plot) -> None:
-        from pyqtgraph import mkPen
-
-        from .preferences import settings
-
-        store = settings()
-        curves = plot.listDataItems()
-        menu = plot.getViewBox().menu.addMenu('Trace options')
-        colors = menu.addMenu('Colors')
-        lines = menu.addMenu('Line options')
-        thickness = menu.addMenu('Line thickness')
-        styles = {
-            'Solid': (Qt.PenStyle.SolidLine, None),
-            'Dashed': (Qt.PenStyle.DashLine, None),
-            'Dotted': (Qt.PenStyle.DotLine, None),
-            'Squares': (Qt.PenStyle.SolidLine, 's'),
-            'Circles': (Qt.PenStyle.SolidLine, 'o'),
-        }
-        for index, curve in enumerate(curves):
-            color_key = f'trac/trace_color_{index}'
-            style_key = f'trac/trace_style_{index}'
-            width_key = f'trac/trace_width_{index}'
-            pen = mkPen(curve.opts['pen'])
-            color = QColor(store.value(color_key, pen.color().name(), type=str))
-            pen.setColor(color)
-            style = store.value(style_key, 'Solid', type=str)
-            line, symbol = styles.get(style, styles['Solid'])
-            width = store.value(width_key, pen.widthF(), type=float)
-            pen.setStyle(line)
-            pen.setWidthF(width)
-            curve.setPen(pen)
-            if symbol:
-                self._add_trace_markers(plot, curve, symbol, color)
-            title = f'Trace {index + 1}: {curve.name()}'
-            colors.addAction(title, lambda checked=False, curve=curve, key=color_key:
-                             self._choose_trace_color(curve, key))
-            self._trace_choices(lines.addMenu(title), style_key,
-                                [(name, name) for name in styles], style)
-            self._trace_choices(thickness.addMenu(title), width_key,
-                                [(f'{size:g} px', size) for size in (1, 1.5, 2, 3, 4)], width)
-        menu.addSeparator()
-        menu.addAction('Reset trace options', self._reset_trace_options)
-
-    @staticmethod
-    def _add_trace_markers(plot, curve, symbol: str, color: QColor) -> None:
-        from pyqtgraph import ScatterPlotItem
-
-        markers = ScatterPlotItem(symbol=symbol, size=4, pen=None, brush=color)
-        plot.addItem(markers, ignoreBounds=True)
-        view = plot.getViewBox()
-
-        def update() -> None:
-            x, y = curve.getOriginalDataset()
-            if x is None or y is None:
-                return
-            low, high = view.viewRange()[0]
-            first = x.searchsorted(low)
-            stop = x.searchsorted(high, side='right')
-            target = max(1, int(view.width() / 8))
-            step = max(1, (stop - first + target - 1) // target)
-            markers.setData(x=x[first:stop:step], y=y[first:stop:step])
-
-        view.sigXRangeChanged.connect(update)
-        view.sigResized.connect(update)
-        update()
-
-    def _trace_choices(self, menu, key, choices, current) -> None:
-        group = QActionGroup(menu)
-        for label, value in choices:
-            action = menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(value == current)
-            group.addAction(action)
-            action.triggered.connect(lambda checked=False, value=value:
-                                     self._set_trace_option(key, value))
-
-    def _set_trace_option(self, key, value) -> None:
-        from .preferences import settings
-
-        settings().setValue(key, value)
-        self._edited()
-
-    def _choose_trace_color(self, curve, key: str) -> None:
-        from pyqtgraph import mkPen
-
-        from .preferences import settings
-
-        color = QColorDialog.getColor(mkPen(curve.opts['pen']).color(),
-                                      self.window, 'Choose trace color')
-        if color.isValid():
-            settings().setValue(key, color.name())
-            self._edited()
-
-    def _reset_trace_options(self) -> None:
-        from .preferences import settings
-
-        store = settings()
-        for index in range(2):
-            for option in ('color', 'style', 'width'):
-                store.remove(f'trac/trace_{option}_{index}')
-        self._edited()

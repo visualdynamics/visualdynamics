@@ -56,7 +56,16 @@ def every_model():
         ('imported units', units_table_model(data)),
         ('imported units (geometry)', units_table_model(geometry())),
         *sheet_tables(),
+        ('time response pairs', time_pair_model()),
     ]
+
+
+def time_pair_model():
+    """The pair editor of the time-response comparison."""
+    from visualdynamics.gui.time_tools import pair_model
+
+    labels = ['A: 1Z+', 'A: 2Z+', 'B: 1Z+', 'B: 2Z+']
+    return pair_model([[0, 2], [1, 3]], labels)
 
 
 def sheet_tables():

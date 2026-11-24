@@ -73,15 +73,41 @@ def test_ordinary_multichannel_histories_stay_together(tmp_path):
     assert project.import_file(path) == ['Time History']
 
 
-def test_the_tree_keeps_response_pair_names(window, tmp_path):
-    from visualdynamics.gui.preferences import settings
+def test_the_files_reference_is_shown_and_can_be_replaced(window, tmp_path,
+                                                         monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
 
     path = trace_file(tmp_path)
-    store = settings()
-    store.setValue('unv_reference_node', 1013)
-    try:
-        names = window.import_path(str(path))
-    finally:
-        store.remove('unv_reference_node')
+    assert unv.trace_pair_references(path) == ['1Z+']
+    asked = []
+
+    def answer(_parent, _title, label, value, *_limits):
+        asked.append((label, value))
+        return 1013, True
+
+    monkeypatch.setattr(QInputDialog, 'getInt', answer)
+    [names] = window.import_paths([str(path)])
+    assert '1Z+' in asked[0][0] and asked[0][1] == 1
     assert names == ['Time History - 730Z- - ref 1013Z+',
                      'Time History - 1125Z- - ref 1013Z+']
+
+
+def test_a_file_without_labeled_pairs_asks_nothing(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    data = TimeHistory(np.arange(8), np.ones((2, 8)),
+                       response_dof=['1Z+', '2Z+'], ordinate_dim='velocity')
+    path = tmp_path / 'ordinary.unv'
+    unv.save(data, path)
+    assert unv.trace_pair_references(path) == []
+    monkeypatch.setattr(QInputDialog, 'getInt',
+                        lambda *_a: pytest.fail('asked about a file with no pairs'))
+    assert window.import_paths([str(path)]) == ['Time History']
+
+
+def test_canceling_the_reference_question_skips_the_file(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    monkeypatch.setattr(QInputDialog, 'getInt', lambda *_a: (1, False))
+    assert window.import_paths([str(trace_file(tmp_path))]) == []
+    assert not list(window.project)

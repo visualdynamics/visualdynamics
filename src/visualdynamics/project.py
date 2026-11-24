@@ -2962,38 +2962,6 @@ class Project(dict):
                 self.provenance[name]['params']['tree_batch'] = results[0]
         return results
 
-    def scale_time_histories(self, *sources: Any, factor: float = 1.0,
-                             include_references: bool = False,
-                             records: Any = None) -> list[str]:
-        """Scale selected time-history responses without changing their units.
-
-        Parameters
-        ----------
-        *sources : str or TimeHistory
-            The selected histories.
-        factor : float, default 1
-            Finite multiplier, including negative factors for sign reversal.
-        include_references : bool, default False
-            Scale reference force channels too. Normally only responses change.
-        records : dict, optional
-            Explicit selected record indices by source name, overriding roles.
-
-        Returns
-        -------
-        list of str
-            Names of independent scaled copies. Originals stay unchanged.
-        """
-        from .core.time_compare import scaled
-
-        sources = list(dict.fromkeys(self.name_of(n) for n in sources))
-        if not sources or any(not isinstance(self[n], TimeHistory) for n in sources):
-            raise ValueError('Select time histories to scale')
-        made = [scaled(self[n], factor, (records or {}).get(n), include_references)
-                for n in sources]
-        return [self._derive(n, obj, f'{n} Scaled', recipe=('scale_time_histories',
-                {'factor': float(factor), 'include_references': include_references,
-                 'records': (records or {}).get(n)})) for n, obj in zip(sources, made)]
-
     def compare_time_histories(self, *sources: Any, pairs: Any = None,
                                records: Any = None, start: float | None = None,
                                stop: float | None = None,
@@ -8922,7 +8890,7 @@ class Project(dict):
         # and differentiation read the record's bytes, so refreshing a
         # re-filtered source cascades down the whole motion chain
         'filter_data': 'filtering', 'truncate_data': 'truncation',
-        'scale_time_histories': 'content', 'compare_time_histories': 'time_pairs',
+        'compare_time_histories': 'time_pairs',
         # the smoothing and the refinement the levels were read with
         'extract_sine': 'sine_extraction',
         'integrate': 'content', 'differentiate': 'content',
@@ -9576,7 +9544,6 @@ _VERB_APPLIES: tuple = (
     ('integrate', _integrable),
     ('differentiate', _differentiable),
     ('filter_data', _is_time),
-    ('scale_time_histories', _is_time),
     ('truncate_data', _is_time),
     ('resample', _is_time),
     ('rescale', _is_time),
@@ -9871,7 +9838,7 @@ _JOURNALED_VERBS = (
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'make_realizable',
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
-    'detect_shocks', 'filter_data', 'filter_histories', 'scale_time_histories',
+    'detect_shocks', 'filter_data', 'filter_histories',
     'compare_time_histories', 'set_time_comparison_window', 'truncate_data',
     'resample', 'rescale', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
@@ -9944,9 +9911,6 @@ _RECOMPUTE = {
     'compute_octave': lambda p, s, k: p[s].to_octave(
         k.get('per_octave', 6)),
     'filter_data': lambda p, s, k: p[s].filter(),
-    'scale_time_histories': lambda p, s, k: __import__(
-        'visualdynamics.core.time_compare', fromlist=['scaled']).scaled(
-            p[s], k['factor'], k.get('records'), k.get('include_references', False)),
     'compare_time_histories': lambda p, s, k: __import__(
         'visualdynamics.core.time_compare', fromlist=['compare']).compare(
             p, k['sources'], pairs=k['pairs'], start=k['start'], stop=k['stop']),

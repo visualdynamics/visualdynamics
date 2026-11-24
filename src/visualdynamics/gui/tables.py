@@ -584,11 +584,6 @@ def _open_list(editor: QComboBox) -> None:
         return                        # the editor closed while we waited
     if not alive:
         return
-    if QApplication.mouseButtons() != Qt.MouseButton.NoButton:
-        # The opening press must finish before its release can reach the
-        # popup. A zero timer alone can run between those two events.
-        QTimer.singleShot(15, lambda: _open_list(editor))
-        return
     trace_units('showPopup')
     editor.setProperty('vd_opening', True)
     try:

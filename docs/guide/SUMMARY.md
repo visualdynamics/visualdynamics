@@ -43,6 +43,7 @@
     - [Checking each channel against its range](overload.md)
     - [Taking a record to a lower sample rate](resample.md)
     - [Rescaling a record](rescale.md)
+    - [Comparing two sets of time responses](time-comparison.md)
     - [The wavelet reading](wavelet.md)
 - Sine:
     - [How a tracking filter reads a sweep](sine-tracking.md)

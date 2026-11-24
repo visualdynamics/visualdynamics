@@ -187,6 +187,7 @@ from .editors import DoubleSpinBox, SpinBox, commit_on_enter, commit_typed
 from .icons import (
     child_icon,
     control_icon,
+    group_icon,
     object_icon,
     placeholder_icon,
     type_icon,
@@ -2155,8 +2156,11 @@ class MainWindow(QMainWindow):
         view_menu = self.menuBar().addMenu('&View')
         self.group_time_histories_action: QAction = view_menu.addAction('Group Time Histories')
         self.group_time_histories_action.setCheckable(True)
-        self.group_time_histories_action.setChecked(
-            os.environ.get('VISUALDYNAMICS_GROUP_HISTORIES') == '1')
+        self.group_time_histories_action.setToolTip(
+            'Gather the time histories under one row per imported file')
+        from .preferences import remembered_group_histories
+
+        self.group_time_histories_action.setChecked(remembered_group_histories())
         self.group_time_histories_action.toggled.connect(self._regroup_time_histories)
         self._closed_history_sections: set[tuple] = set()
         self.tree.itemExpanded.connect(lambda item: self._history_section_expanded(item, True))
@@ -3360,8 +3364,7 @@ class MainWindow(QMainWindow):
             self._remember_run_log_place()
             self.run_log_dock.panel.shut_down()
         plotters = [self.scene.built_plotter, self.data_pane.waterfall_plotter,
-                    self._mac_bars_plotter_obj, self.time_tools.correlation_view]
-        self.time_tools.correlation_view = None
+                    self._mac_bars_plotter_obj]
         self.scene.plotter = None
         self.data_pane.waterfall_plotter = None
         self._mac_bars_plotter_obj = None
@@ -6149,8 +6152,8 @@ class MainWindow(QMainWindow):
                 if recipe.get('verb') == 'filter_data':
                     section = recipe.get('params', {}).get('tree_batch')
                     key = f'Filtered batch: {section}' if section else 'Filtered time histories'
-                elif recipe.get('verb') == 'scale_time_histories':
-                    key = 'Scaled time histories'
+                elif recipe.get('verb') == 'rescale':
+                    key = 'Rescaled time histories'
                 else:
                     key = imported.get(name, ('Raw time histories', 'Raw time histories'))
                 if isinstance(key, str):
@@ -6167,7 +6170,10 @@ class MainWindow(QMainWindow):
             index = self.test_item.indexOfChild(item)
             if index != position:
                 self.test_item.takeChild(index)
-                self.test_item.insertChild(position, item)
+                # bounded, as it was: past the end Qt drops the row
+                # silently, and a plan's channel table vanished
+                self.test_item.insertChild(
+                    min(position, self.test_item.childCount()), item)
                 moved[name] = item
         self._refresh_placeholders()
         headers = {}
@@ -6182,6 +6188,7 @@ class MainWindow(QMainWindow):
             label = self._history_section_label(key)
             header.setData(0, ROLE_ORIGINAL_NAME, label)
             header.setText(0, label)
+            header.setIcon(0, group_icon())
             header.setToolTip(0, f'{len(members)} histories. Double-click to rename. '
                               'Ctrl-click another group to compare both sets.')
             self.test_item.insertChild(self.test_item.indexOfChild(members[0]), header)
@@ -6223,7 +6230,10 @@ class MainWindow(QMainWindow):
             else:
                 self._closed_history_sections.add(ref[1])
 
-    def _regroup_time_histories(self, _checked):
+    def _regroup_time_histories(self, checked):
+        from .preferences import remember_group_histories
+
+        remember_group_histories(checked)
         self._reorder_tree()
         self._paint_links()
         self._selection_changed()
@@ -9507,7 +9517,10 @@ class MainWindow(QMainWindow):
                         text = self._text_import_choices(path)
                         if text is None:
                             continue
-                        options = {**options, **text, **self._unv_import_choices(path)}
+                        pairs = self._unv_import_choices(path)
+                        if pairs is None:
+                            continue
+                        options = {**options, **text, **pairs}
                         # a stream that would take a large share of
                         # the machine is imported through a window the
                         # user chooses on a preview — or not at all
@@ -9744,17 +9757,37 @@ class MainWindow(QMainWindow):
         return name
 
     def _unv_import_choices(self, path):
-        """Use the locally configured reference node for labeled UNV pairs."""
-        from .preferences import settings
+        """The reference node for a Universal file's labeled time-trace
+        pairs, asked when it has them.
 
-        if os.path.splitext(str(path))[1].lower() not in ('.unv', '.uff', '.uf'):
+        {} for any other file, and for a file whose reference node is
+        kept; None means cancel, which skips the file. Some exporters
+        write a channel number where the reference's node belongs, so
+        the node the file names is shown and can be replaced
+        (`unv.load`'s `reference_node`); the direction is kept.
+        """
+        from ..core.data import parse_dof
+        from ..io import unv
+
+        if not unv.sniff(path):
             return {}
-        node = settings().value('unv_reference_node')
-        return {'reference_node': int(node)} if node is not None else {}
+        found = unv.trace_pair_references(path)
+        if not found:
+            return {}
+        named = parse_dof(found[0])[0]
+        node, ok = QInputDialog.getInt(
+            self, 'Paired time traces',
+            f'{os.path.basename(path)} pairs each response with a reference '
+            f'trace at {", ".join(found)}.\n'
+            'Reference node to give them (the direction is kept):',
+            named, 1, 2**31 - 1)
+        if not ok:
+            return None
+        return {} if node == named else {'reference_node': node}
 
     def import_path(self, path: str, **units: str) -> str | None:
         try:
-            result = io.import_file(path, **{**self._unv_import_choices(path), **units})
+            result = io.import_file(path, **units)
         except (ValueError, OSError) as e:
             QMessageBox.critical(self, 'Import failed', str(e))
             return None
@@ -9929,8 +9962,16 @@ class MainWindow(QMainWindow):
                 self.refresh_compatibility()
                 self._report_content_changed(settling=True)
                 imported = list(mapping.values())
-                if fresh:
-                    self.tree.setCurrentItem(self.test_item)
+                # the rows were added unselected, so the tree is tidied
+                # once rather than per object; the last one is then
+                # selected, as when each add selected its own row, so an
+                # opened project still shows something (and a 3-D view
+                # is still checked before it is built)
+                last = self._item_for_object(imported[-1]) if imported else None
+                if last is not None:
+                    self.tree.setCurrentItem(last)
+                    self.tree.clearSelection()
+                    last.setSelected(True)
             elif isinstance(result, dict):
                 imported = [
                     self.add_object(imported_name(obj), obj,
@@ -10562,7 +10603,20 @@ class MainWindow(QMainWindow):
         wanted = (three_d, plots, table)
         for pane, visible in zip(panes, wanted):
             pane.setVisible(visible)
-        # a pane revealed after being hidden can come back with no size.
+        self._size_views()
+
+    def reveal_scene(self) -> None:
+        """Bring up the 3-D view beside what is already showing, for a
+        reading that draws on it, without resetting the plot bar's
+        controls as `_show_views` does."""
+        self.scene.setVisible(True)
+        self._size_views()
+
+    def _size_views(self) -> None:
+        """Give a pane revealed after being hidden its share: it can
+        come back with no size."""
+        panes = (self.scene, self.data_pane, self.table_pane)
+        wanted = [pane.isVisibleTo(self) for pane in panes]
         # Splitter positions, not tuple positions: comparing reorders them
         sizes = self.views.sizes()
         showing = [self.views.indexOf(pane)
@@ -16425,7 +16479,7 @@ class MainWindow(QMainWindow):
                                      complex_data=complex_series,
                                      pair=offered,
                                      averaging=history is not None,
-                                     filtering=bool(series) and all(isinstance(d, TimeHistory)
+                                     histories=bool(series) and all(isinstance(d, TimeHistory)
                                                                    for _n, d, _r in series),
                                      sine=history is not None
                                      and bool(self.project.sine_sweep_specifications),
@@ -16508,6 +16562,14 @@ class MainWindow(QMainWindow):
                                 ('rescale', self._render_rescale)):
                 if self.data_pane.showing(key):
                     return render(history, series[0][0], series[0][2])
+        if (len(series) > 1 and self.data_pane.showing('rescale')
+                and all(isinstance(d, TimeHistory) for _n, d, _r in series)):
+            # one factor for every history picked: the first is drawn,
+            # and Apply Rescale makes a rescaled copy of each
+            name, first, records = series[0]
+            reading = self._render_rescale(first, name, records)
+            return (f'{reading} on {name}; Apply Rescale makes all '
+                    f'{len(series)} histories')
         for check in ('conditioning', 'realizability'):
             source = self._matrix_check_source(check, series)
             if source is not None and self.data_pane.showing(check):
@@ -16867,7 +16929,7 @@ class MainWindow(QMainWindow):
             component=self.data_pane.component()
             if complex_series else 'magnitude')
         axis_note = self._offer_frequency_axis(series)
-        if self.time_tools.scale_action.isVisible():
+        if self.time_tools.compare_action.isVisible():
             self.data_pane.toolbar.show()
         if len(series) == 1:
             # the *unpaged* entry: paging swaps records=None for a slice,
@@ -23585,6 +23647,11 @@ class MainWindow(QMainWindow):
         """Make the selected time history with its picked records (all
         of them when none are) rescaled as the rescale panel says, and
         add it beside the source (`Project.rescale`)."""
+        _kinds, series = self._current_series()
+        if len(series) > 1 and all(isinstance(d, TimeHistory)
+                                   for _n, d, _r in series):
+            self._rescale_histories(series)
+            return
         obj = self.current_object()
         if not isinstance(obj, TimeHistory):
             self._show_status('Select a time history to rescale')
@@ -23609,6 +23676,27 @@ class MainWindow(QMainWindow):
         self._show_status(f'{added}: {count} of {obj.num_records} records '
                           f'\N{MULTIPLICATION SIGN} '
                           f'{self.project.provenance[added]["params"]["factor"]:g}')
+
+    def _rescale_histories(self, series):
+        """Apply Rescale with several time histories picked: one
+        `Project.rescale` per history, each on its own picked records
+        (every record when none are), all checked before any is added."""
+        settings = self.data_pane.rescale_panel.settings()
+        given = ({'factor': settings['factor']} if settings['way'] == 'factor'
+                 else {'recorded_sensitivity': settings['recorded'],
+                       'correct_sensitivity': settings['correct']})
+        try:
+            factor = self._rescale_factor()
+            for _name, history, records in series:
+                history.rescale(factor, records)
+        except ValueError as error:
+            self._show_status(str(error))
+            return
+        names = [self.project.rescale(name, records=records, **given)
+                 for name, _history, records in series]
+        self.time_tools.add_results(names)
+        self._show_status(f'Rescaled {len(names)} histories '
+                          f'\N{MULTIPLICATION SIGN} {factor:g}; originals kept')
 
     def _settle_on_record(self, name, history, records, channel):
         """Settle the tree onto the one record a reading is drawn for,

@@ -10,7 +10,6 @@ of its own opened from a script.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Sequence
 from functools import partial
 from typing import Any, ClassVar, NamedTuple
@@ -703,11 +702,8 @@ class DataPane(QWidget):
         self.waterfall_action.setToolTip(
             'Spread the channels along a depth axis, colored by level')
         self.waterfall_action.setChecked(True)
-        # A Windows data selection can reach the native 3-D probe before
-        # the scene has initialized it. Keep the flat plot available on
-        # first selection and let the 3D button explicitly start the view.
-        self._defer_first_waterfall = os.name == 'nt' and not self.offscreen
-        self.waterfall_action.triggered.connect(self._request_waterfall)
+        self.waterfall_action.triggered.connect(
+            lambda _checked: self.reread.emit())
         toolbar.addAction(self.waterfall_action)
         # the 3-D form's projection, on the bar while that form is up
         # (`show_waterfall`), as on the 3-D view's bar
@@ -1585,7 +1581,7 @@ class DataPane(QWidget):
     #: other reading's handler. The order is the bar's.
     _READINGS: ClassVar[tuple[Reading, ...]] = (
         Reading('averaging', 'averaging_panel', 'averaging'),
-        Reading('filter', 'filter_panel', 'filtering'),
+        Reading('filter', 'filter_panel', 'histories'),
         # offered for a record that has a sweep specification to be
         # read against, and nowhere else (principle 3)
         Reading('sine', 'sine_panel', 'sine'),
@@ -1624,8 +1620,9 @@ class DataPane(QWidget):
         # to lower, read on its spectrum, which has no 3-D form here
         Reading('resample', 'resample_panel', 'averaging', flat=True,
                 sticky=True),
-        # any time history: a factor needs no sample rate
-        Reading('rescale', 'rescale_panel', 'record', flat=True,
+        # any time history, or several at once: a factor needs no
+        # sample rate
+        Reading('rescale', 'rescale_panel', 'histories', flat=True,
                 sticky=True),
     )
 
@@ -2177,11 +2174,6 @@ class DataPane(QWidget):
         applies only to FRFs, so the caller checks that first."""
         return self.cmif_action.isChecked()
 
-    def _request_waterfall(self, checked: bool) -> None:
-        self._defer_first_waterfall = False
-        self.waterfall_action.setChecked(checked)
-        self.reread.emit()
-
     @property
     def showing_waterfall(self) -> bool:
         """Whether the 3-D form is checked. It applies only where the
@@ -2204,11 +2196,8 @@ class DataPane(QWidget):
         # Asked last, so the OpenGL check runs only when the 3-D form
         # would be drawn, and a machine that cannot draw it gets the
         # flat one instead
-        from .opengl import probed, ready
+        from .opengl import ready
 
-        if self._defer_first_waterfall and not probed():
-            self.waterfall_action.setChecked(False)
-            return False
         return (self.waterfall_action.isChecked() and not self.flat_only
                 and ready())
 
@@ -2495,7 +2484,7 @@ class DataPane(QWidget):
                       averaging: bool = False, shocks: bool = False,
                       residual: bool = False,
                       octave: bool = False, sine: bool = False,
-                      filtering: bool = False,
+                      histories: bool = False,
                       tone: bool = False, fit: bool = False,
                       transmissibility: bool = False,
                       confidence: bool = False,
@@ -2520,7 +2509,9 @@ class DataPane(QWidget):
         offers the readings of a time history (averaging, filter,
         truncate, kurtosis, scalogram), `sine` adds the sine reading to
         them for a record with a sweep specification, and `shocks` offers
-        the shock view and kurtosis. `fit` offers the replication fit and
+        the shock view and kurtosis. `histories` offers the readings
+        that apply to several time histories at once (filter, rescale),
+        for a selection of time histories only. `fit` offers the replication fit and
         the stroke readout, for a record with acceleration in a declared
         unit to integrate. `table` offers the overload check, for a
         record a linked channel table describes. `octave` offers the
@@ -2561,7 +2552,7 @@ class DataPane(QWidget):
         # whichever button had been pressed, with no way back except
         # unpicking it first (Brandon, 2026-08-27). A fenced set of
         # five that shows one is worse than the undivided row was.
-        offers = {'averaging': averaging, 'filtering': filtering or averaging,
+        offers = {'averaging': averaging, 'histories': histories or averaging,
                   'sine': averaging and sine,
                   'shocks': shocks, 'fit': fit,
                   'record': averaging or shocks,
@@ -3177,10 +3168,16 @@ class ScenePane(QWidget):
         """A click at the window pixel `(x, y)`, measured from the
         bottom left as VTK does: on a face of the orientation marker's
         cube, the view turns to look straight at that face
-        (`viz.view_cube.look_at_face`), and this returns True."""
-        from ..viz.view_cube import look_at_face, view_cube
+        (`viz.view_cube.look_at_face`); on one of its turn arrows, the
+        view turns a quarter turn (`viz.view_cube.turn_view`). Either
+        way this returns True."""
+        from ..viz.view_cube import look_at_face, turn_view, view_cube
 
         cube = view_cube(self._plotter) if self._plotter is not None else None
+        turn = cube.arrow_at(x, y) if cube is not None else None
+        if turn is not None:
+            turn_view(self._plotter, turn)
+            return True
         face = cube.face_at(x, y) if cube is not None else None
         if face is None:
             return False

@@ -673,6 +673,35 @@ def _build_data_objects(functions, factors, ordinate_unit, path,
     return out
 
 
+#: the comments that mark a time trace as one side of an acquisition pair
+TRACE_PAIR_LABELS = frozenset({'Response Time Trace', 'Reference Time Trace'})
+
+
+def trace_pair_references(path: str | os.PathLike) -> list[str]:
+    """The reference DOFs a file's labeled time-trace pairs name, in the
+    order they first appear, or [] for a file with none.
+
+    Some exporters write a channel number in the reference field of
+    these traces rather than the reference's node; `load` takes a
+    `reference_node` to put right, and this is what to show beside the
+    question. Only the header records are read.
+    """
+    from ..core.data import dof_string
+
+    with open(path, 'rb') as f:
+        text = f.read()
+    found: dict[str, None] = {}
+    for number, records, _payload in iter_datasets(text):
+        if number != 58 or len(records) < 6:
+            continue
+        if records[0].strip() not in TRACE_PAIR_LABELS:
+            continue
+        node = _int_slice(records[5], 66, 76)
+        if node:
+            found[dof_string(node, _int_slice(records[5], 76, 80))] = None
+    return list(found)
+
+
 def _build_trace_pairs(out, entries, factors, ordinate_unit, temperature):
     """Keep explicitly labeled response/reference traces in acquisition pairs.
 
@@ -680,7 +709,7 @@ def _build_trace_pairs(out, entries, factors, ordinate_unit, temperature):
     trace's channel identity comes from the reference field instead.
     Ordinary time records retain their shared multichannel object.
     """
-    labels = {'Response Time Trace', 'Reference Time Trace'}
+    labels = TRACE_PAIR_LABELS
     if not any(e['comment'] in labels for e in entries):
         return False
     if not all(e['comment'] in labels for e in entries):
@@ -826,7 +855,7 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
             raise ValueError('reference_node must be a positive integer')
         for entry in functions:
             if (entry['function_type'] == 1
-                    and entry['comment'] in {'Response Time Trace', 'Reference Time Trace'}
+                    and entry['comment'] in TRACE_PAIR_LABELS
                     and entry['reference']):
                 _node, direction = parse_dof(entry['reference'])
                 entry['reference'] = dof_string(int(reference_node), direction_code(direction))

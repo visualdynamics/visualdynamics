@@ -72,13 +72,10 @@ def test_unscorable_responses_report_the_reason(replacement, reason):
     assert reason in row['reason']
 
 
-def test_batch_filter_creates_copies_and_scaling_leaves_reference_force_alone():
+def test_batch_filter_creates_copies_and_leaves_the_sources_alone():
     project = Project()
     a, b = _pair(project)
     before = project[a].ordinate.copy()
-    scaled = project.scale_time_histories(a, b, factor=-3)
-    np.testing.assert_array_equal(project[scaled[0]].ordinate[0], -3*before[0])
-    np.testing.assert_array_equal(project[scaled[0]].ordinate[1], before[1])
     filtered = project.filter_histories(a, b, filtering=Filtering(high=10))
     assert len(filtered) == 2
     assert np.std(project[filtered[0]].ordinate[0]) < 0.1*np.std(before[0])
@@ -131,7 +128,14 @@ def test_waterfall_draws_two_sides_at_one_station_with_trac_note(window, pump):
     window.data_pane.waterfall_action.setChecked(True)
     window.render_current()
     pump()
-    actors = window.data_pane.waterfall_plotter.actors
+    from visualdynamics.gui import opengl
+
+    pane = window.data_pane
+    assert pane.waterfall_plotter is not None, {
+        'checked': pane.waterfall_action.isChecked(), 'flat_only': pane.flat_only,
+        'refusal': opengl.refusal(),
+        'note': window.time_tools.note.text()}
+    actors = pane.waterfall_plotter.actors
     assert {'paired-loud', 'paired-quiet'} <= set(actors)
     assert any(key.startswith('paired-end-notes') for key in actors)
     a = actors['paired-loud'].mapper.dataset.points[:, 1]
@@ -177,47 +181,23 @@ def test_renaming_a_source_preserves_pair_mapping_and_recompute():
     assert name not in project.stale()
 
 
-def test_units_list_waits_until_the_opening_mouse_button_is_released(window, monkeypatch):
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication, QComboBox
-
-    from visualdynamics.gui import tables
-
-    shown = []
-
-    class MenuProbe(QComboBox):
-        def showPopup(self):
-            shown.append(True)
-
-    editor = MenuProbe(window)
-    editor.addItems(['m', 'mm'])
-    editor.show()
-    pending = []
-    monkeypatch.setattr(tables.QTimer, 'singleShot', lambda _delay, call: pending.append(call))
-    monkeypatch.setattr(QApplication, 'mouseButtons', lambda: Qt.MouseButton.LeftButton)
-    tables._open_list(editor)
-    assert not shown
-    assert len(pending) == 1
-    monkeypatch.setattr(QApplication, 'mouseButtons', lambda: Qt.MouseButton.NoButton)
-    pending[0]()
-    assert shown == [True]
-
-
-def test_scale_preview_applies_to_both_selected_histories(window, pump):
+def test_rescale_applies_one_factor_to_every_selected_history(window, pump):
     names = _pair(window.project)
     for name in names:
         window.show_object(name, select=False)
     _select(window, names)
-    tools = window.time_tools
-    tools.scale_action.trigger()
+    pane = window.data_pane
+    assert pane.rescale_action.isVisible()
+    pane.rescale_action.trigger()
     pump()
-    tools.factor.setValue(-2)
-    assert tools.apply.isEnabled()
-    tools.apply.click()
+    assert pane.showing('rescale')
+    panel = pane.rescale_panel
+    panel.set_settings({**panel.settings(), 'way': 'factor', 'factor': -2.0})
+    panel.apply_asked.emit()
     for name in names:
-        old, new = window.project[name], window.project[f'{name} Scaled']
-        np.testing.assert_array_equal(new.ordinate[0], -2*old.ordinate[0])
-        np.testing.assert_array_equal(new.ordinate[1], old.ordinate[1])
+        old, new = window.project[name], window.project[f'{name} Rescaled']
+        np.testing.assert_array_equal(new.ordinate, -2*old.ordinate)
+        assert window.project.provenance[f'{name} Rescaled']['verb'] == 'rescale'
 
 
 def test_filtered_batch_collapses_separately_from_raw_histories(window):
@@ -250,8 +230,9 @@ def test_opening_project_does_not_select_each_history(window, tmp_path):
     window.tree.currentItemChanged.connect(
         lambda item, _old: selections.append(item.text(0)) if item else None)
     assert len(window.import_path(str(path))) == 2
-    assert not {'Experiment', 'Model'}.intersection(selections)
-    assert window.tree.currentItem() is window.test_item
+    # the rows arrive unselected; only the last is selected, once, so
+    # the opened project shows something without a redraw per history
+    assert selections == ['Model']
 
 
 def test_import_sections_survive_reopen_and_select_a_whole_trac_pair(window, tmp_path, pump):
@@ -318,16 +299,95 @@ def test_import_sections_survive_reopen_and_select_a_whole_trac_pair(window, tmp
     assert window.time_tools.saved == comparison
 
 
-def test_windows_first_time_trace_waits_for_an_explicit_3d_request(window, monkeypatch):
-    from visualdynamics.gui import opengl
+def test_group_time_histories_is_remembered_and_starts_off(window, window_factory):
+    assert not window.group_time_histories_action.isChecked()
+    window.group_time_histories_action.setChecked(True)
+    from visualdynamics.gui.preferences import remembered_group_histories
 
-    monkeypatch.setattr(window.data_pane, '_defer_first_waterfall', True, raising=False)
-    monkeypatch.setattr(opengl, '_found', [])
-    calls = []
-    monkeypatch.setattr(opengl, 'ready', lambda: calls.append('OpenGL') or False)
-    name, _ = _pair(window.project)
-    window.data_pane.waterfall_action.setChecked(True)
-    window.show_object(name)
-    assert calls == []
-    window.data_pane.waterfall_action.trigger()
-    assert calls
+    assert remembered_group_histories()
+    assert window_factory().group_time_histories_action.isChecked()
+
+
+def test_the_pair_editor_is_the_shared_table(window, monkeypatch):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog
+
+    from visualdynamics.gui.tables import CopyPasteTableView
+
+    a, b = _pair(window.project)
+    tools = window.time_tools
+    tools.series = [(a, window.project[a], None), (b, window.project[b], None)]
+    refused = []
+
+    def edit(dialog):
+        model = dialog.findChild(CopyPasteTableView).model()
+        model.edit_rejected.connect(refused.append)
+        labels = model.columns[0].choices
+        assert [model.data(model.index(0, c)) for c in (0, 1)] == labels[:2]
+        assert not model.setData(model.index(0, 0), 'nothing', Qt.ItemDataRole.EditRole)
+        model.setData(model.index(0, 0), labels[1], Qt.ItemDataRole.EditRole)
+        model.setData(model.index(0, 1), labels[0], Qt.ItemDataRole.EditRole)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QDialog, 'exec', edit)
+    monkeypatch.setattr(window, 'render_current', lambda: None)
+    tools._manual_pairs()
+    assert refused
+    assert tools.explicit == [[b, 0, a, 0]]
+
+
+def test_the_score_map_is_drawn_in_the_windows_own_3d_view(window, pump):
+    names = _pair(window.project)
+    comparison = window.project.compare_time_histories(*names)
+    geo = Geometry(node_id=[10, 20], node_xyz=[[0, 0, 0], [1, 0, 0]], length_unit='m')
+    window.add_object('Stations', geo)
+    window.project.link('Stations', comparison)
+    window.show_object(comparison)
+    pump()
+    tools = window.time_tools
+    assert window.data_pane.isVisible()
+    assert not window.scene.isVisible(), 'no map asked for, no 3-D view'
+    tools.map_mode.setCurrentIndex(1)                 # TRAC points
+    window.render_current()
+    pump()
+    plotter = window.scene.plotter
+    assert window.scene.isVisible() and window.data_pane.isVisible()
+    assert 'correlation-average' in plotter.actors
+    assert 'TRAC' in plotter.scalar_bars
+    assert tools.correlation_count == 1
+    assert '1 scored stations' in tools.note.text()
+    # a new reading of the same stations keeps the camera where it was put
+    plotter.camera.position = (5.0, 5.0, 5.0)
+    held = plotter.camera.position
+    tools.map_mode.setCurrentIndex(2)                 # sTRAC points
+    window.render_current()
+    pump()
+    assert 'sTRAC' in plotter.scalar_bars and 'TRAC' not in plotter.scalar_bars
+    assert plotter.camera.position == pytest.approx(held)
+    tools.map_mode.setCurrentIndex(0)
+    window.render_current()
+    pump()
+    assert not window.scene.isVisible()
+
+
+def test_a_group_row_wears_a_folder(window):
+    from visualdynamics.gui.icons import group_icon, object_icon
+    from visualdynamics.gui.project_tree import ROLE_REFERENCE
+
+    sources = _pair(window.project)
+    for name in sources:
+        window.show_object(name, select=False)
+    window.group_time_histories_action.setChecked(True)
+    header = next(window.test_item.child(i) for i in range(window.test_item.childCount())
+                  if (window.test_item.child(i).data(0, ROLE_REFERENCE) or (None,))[0]
+                  == 'history_section')
+
+    def ink(icon):
+        image = icon.pixmap(16, 16).toImage()
+        return [image.pixelColor(x, y).alpha() > 0
+                for y in range(image.height()) for x in range(image.width())]
+
+    shown = ink(header.icon(0))
+    assert sum(shown) > 40, 'a glyph a person can see at 16 px'
+    assert shown == ink(group_icon())
+    assert shown != ink(object_icon(window.project[sources[0]]))

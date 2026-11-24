@@ -28,7 +28,7 @@ T = np.arange(4096) / 2048.0
 
 #: the verbs whose act is the apply button of a reading's pane — the
 #: four parts of principle 13, so not a bar button of their own
-PANE_VERBS = {'filter_data', 'filter_histories', 'scale_time_histories',
+PANE_VERBS = {'filter_data', 'filter_histories',
               'compare_time_histories', 'truncate_data', 'resample', 'rescale',
               'detect_shocks',
               'compute_spectra', 'compute_psds', 'compute_cpsds',

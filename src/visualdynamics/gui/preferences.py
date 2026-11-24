@@ -89,6 +89,25 @@ def remember_3d(on: bool) -> None:
     store.sync()
 
 
+#: View → Group Time Histories, off until it is first turned on
+GROUP_HISTORIES_KEY = 'group_time_histories'
+
+
+def remembered_group_histories() -> bool:
+    """Whether the tree gathers time histories under one row per
+    imported file: False until View → Group Time Histories is turned
+    on, then whatever it was last left at."""
+    said = settings().value(GROUP_HISTORIES_KEY, False)
+    return str(said).strip().lower() in ('true', '1', 'yes')
+
+
+def remember_group_histories(on: bool) -> None:
+    """Store the Group Time Histories choice."""
+    store = settings()
+    store.setValue(GROUP_HISTORIES_KEY, bool(on))
+    store.sync()
+
+
 CREATOR_KEY = 'creator'
 
 

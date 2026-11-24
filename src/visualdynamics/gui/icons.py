@@ -2986,6 +2986,45 @@ def object_icon(obj: Any, units_defined: bool = True) -> QIcon:
     return type_icon(name, units_defined)
 
 
+def _draw_folder(painter, color):
+    """A folder with a trace on its front: a group of time histories.
+
+    The tree's group rows hold the histories from one imported file, or
+    the copies one batch made. The row is not an object, so it does not
+    wear an object's glyph; a folder says it only holds things."""
+    fill = QColor(color)
+    fill.setAlpha(60)
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(QBrush(fill))
+    folder = QPainterPath()
+    folder.moveTo(8, 18)
+    folder.lineTo(8, 52)
+    folder.lineTo(56, 52)
+    folder.lineTo(56, 20)
+    folder.lineTo(32, 20)
+    folder.lineTo(27, 13)
+    folder.lineTo(12, 13)
+    folder.closeSubpath()
+    painter.drawPath(folder)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(color, 3))
+    painter.drawPath(_curve([(15, 38), (21, 30), (27, 43), (33, 29),
+                             (39, 41), (45, 33), (50, 37)]))
+
+
+@cache
+def group_icon() -> QIcon:
+    """The icon of a group row in the tree (View → Group Time
+    Histories), in the time histories' color."""
+    pixmap = QPixmap(SIZE, SIZE)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    _draw_folder(painter, COLORS['TimeHistory'])
+    painter.end()
+    return QIcon(pixmap)
+
+
 @cache
 def placeholder_icon(type_name: str) -> QIcon:
     """The type's glyph in gray, for an object the project's type

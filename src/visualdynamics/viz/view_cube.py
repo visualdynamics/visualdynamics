@@ -1,5 +1,7 @@
 """The orientation marker of an interactive 3-D view: the triad, with a
-cube at its origin whose faces turn the view to look straight at them.
+cube at its origin whose faces turn the view to look straight at them,
+and, while the view looks straight at one, two curved arrows that turn
+it a quarter turn about the line of sight.
 
 The marker is a small renderer of its own in a corner of the window,
 turned with the main camera before every frame. It uses no Qt; the pane
@@ -34,6 +36,11 @@ TINT = 0.6
 #: looking this squarely at a face already, a click on it turns the
 #: view to the opposite face
 SQUARE = 0.999
+#: the turn arrows' arc: its radius and its width, in the marker's
+#: units, and the angles each one runs between, from the top
+ARC_RADIUS = 1.05
+ARC_WIDTH = 0.12
+ARC_SPAN = (22.0, 55.0)
 
 _cubes: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
@@ -70,6 +77,8 @@ class ViewCube:
             sign = 1 if normal[axis] > 0 else -1
             self.faces.append((axis, sign))
             colors.append(_rgb(AXIS_COLORS[axis], 0.0 if sign > 0 else TINT))
+        # Brandon, 2026-11-23: the quarter turn Callum Hammill's score map
+        # offered on a right-click menu, moved onto the marker
         cube.cell_data['color'] = np.asarray(colors, dtype=np.uint8)
         mapper = vtk.vtkPolyDataMapper()
         mapper.SetInputData(cube)
@@ -88,6 +97,20 @@ class ViewCube:
         self.renderer.InteractiveOff()
         self.renderer.AddViewProp(self.axes)
         self.renderer.AddActor(self.cube)
+        ink = pv.Color(text_color if text_color is not None else 'gray')
+        #: the turn arrows, keyed by their turn: +1 clockwise on screen,
+        #: top right, and -1 counterclockwise, top left
+        self.arrows: dict[int, Any] = {}
+        for turn in (1, -1):
+            arrow = vtk.vtkActor()
+            arrow_mapper = vtk.vtkPolyDataMapper()
+            arrow_mapper.SetInputData(_turn_arrow(turn))
+            arrow.SetMapper(arrow_mapper)
+            arrow.GetProperty().SetColor(*ink.float_rgb)
+            arrow.GetProperty().LightingOff()
+            arrow.SetUserMatrix(vtk.vtkMatrix4x4())
+            self.renderer.AddActor(arrow)
+            self.arrows[turn] = arrow
         self.renderer.GetActiveCamera().ParallelProjectionOn()
         window = plotter.render_window
         # on a layer over the scene's, where a renderer draws on what is
@@ -111,6 +134,18 @@ class ViewCube:
         camera.SetPosition(*(-10.0 * direction))
         camera.SetViewUp(*main.GetViewUp())
         camera.SetParallelScale(REACH)
+        # the arrows stay put on screen as the cube turns under them, and
+        # show only while the view looks straight along an axis
+        up = np.asarray(main.GetViewUp(), dtype=float)
+        right = np.cross(direction, up)
+        square = bool(np.max(np.abs(direction)) > SQUARE)
+        for arrow in self.arrows.values():
+            matrix = arrow.GetUserMatrix()
+            for row in range(3):
+                for column, vector in enumerate((right, up, -direction)):
+                    matrix.SetElement(row, column, vector[row])
+            matrix.Modified()
+            arrow.SetVisibility(square)
         self.renderer.ResetCameraClippingRange(
             -REACH, REACH, -REACH, REACH, -REACH, REACH)
 
@@ -120,9 +155,32 @@ class ViewCube:
         cube."""
         if self._picker.Pick(x, y, 0.0, self.renderer):
             cell = self._picker.GetCellId()
-            if cell >= 0:
+            if cell >= 0 and self._picker.GetActor() is self.cube:
                 return self.faces[cell]
         return None
+
+    def arrow_at(self, x: float, y: float) -> int | None:
+        """The turn arrow under the window pixel `(x, y)`, as its turn:
+        +1 for the clockwise one, -1 for the other; None off both, and
+        while they are hidden."""
+        if self._picker.Pick(x, y, 0.0, self.renderer):
+            for turn, arrow in self.arrows.items():
+                if self._picker.GetActor() is arrow:
+                    return turn
+        return None
+
+    def arrow_pixel(self, turn: int) -> tuple[float, float]:
+        """The window pixel the middle of a turn arrow's arc is drawn at."""
+        self.follow()
+        angle = np.radians(90.0 - turn * sum(ARC_SPAN) / 2.0)
+        local = np.array([np.cos(angle), np.sin(angle), 0.0, 1.0]) * \
+            np.array([ARC_RADIUS, ARC_RADIUS, 1.0, 1.0])
+        matrix = self.arrows[turn].GetUserMatrix()
+        point = matrix.MultiplyPoint(tuple(local))
+        self.renderer.SetWorldPoint(*point[:3], 1.0)
+        self.renderer.WorldToDisplay()
+        x, y, _depth = self.renderer.GetDisplayPoint()
+        return x, y
 
     def face_pixel(self, axis: int, sign: int) -> tuple[float, float]:
         """The window pixel a face's center is drawn at."""
@@ -137,6 +195,51 @@ class ViewCube:
         """Take the marker out of the window."""
         self.plotter.renderer.RemoveObserver(self._observer)
         self.plotter.render_window.RemoveRenderer(self.renderer)
+
+
+def _turn_arrow(turn: int) -> Any:
+    """A flat curved arrow in the screen's plane (x right, y up), on the
+    arc around the cube: top right pointing clockwise for `turn` +1, its
+    mirror top left for -1."""
+    import pyvista as pv
+
+    inner, outer = ARC_RADIUS - ARC_WIDTH / 2.0, ARC_RADIUS + ARC_WIDTH / 2.0
+    start, stop = ARC_SPAN      # degrees clockwise from the top
+    steps = np.linspace(start, stop, 12)
+    points = []
+    for radius in (inner, outer):
+        for angle in np.radians(90.0 - steps):
+            points.append((radius * np.cos(angle), radius * np.sin(angle), 0.0))
+    count = len(steps)
+    faces = []
+    for i in range(count - 1):
+        faces += [4, i, i + 1, count + i + 1, count + i]
+    # the head: a triangle wider than the band, its tip further round
+    base = np.radians(90.0 - stop)
+    tip = np.radians(90.0 - (stop + 14.0))
+    head = len(points)
+    for radius, angle in ((inner - ARC_WIDTH, base), (outer + ARC_WIDTH, base),
+                          (ARC_RADIUS, tip)):
+        points.append((radius * np.cos(angle), radius * np.sin(angle), 0.0))
+    faces += [3, head, head + 1, head + 2]
+    points = np.asarray(points)
+    if turn < 0:
+        points[:, 0] *= -1.0
+    return pv.PolyData(points, faces=np.asarray(faces))
+
+
+def turn_view(plotter: Any, turn: int, render: bool = True) -> None:
+    """Turn the view a quarter turn about the line of sight: the scene
+    turns clockwise on screen for `turn` +1, counterclockwise for -1.
+    The camera stays where it is; only which way is up changes."""
+    camera = plotter.renderer.GetActiveCamera()
+    direction = np.asarray(camera.GetDirectionOfProjection(), dtype=float)
+    up = np.asarray(camera.GetViewUp(), dtype=float)
+    right = np.cross(direction, up)
+    camera.SetViewUp(*(-turn * right))
+    camera.OrthogonalizeViewUp()
+    if render:
+        plotter.render()
 
 
 def show_view_cube(plotter: Any, shown: bool, text_color: Any = None) -> None:

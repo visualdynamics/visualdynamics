@@ -2757,6 +2757,10 @@ class ScenePane(QWidget):
     #: the rigid-body reading was asked for, or put away
     modes_toggled = Signal(bool)
 
+    #: a click landed on a time-comparison station: the score-table
+    #: rows it scores
+    station_clicked = Signal(list)
+
     def __init__(self, theme_name: str, offscreen: bool = False,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -3184,9 +3188,23 @@ class ScenePane(QWidget):
         look_at_face(self._plotter, *face)
         return True
 
+    def click_station(self, x: float, y: float) -> bool:
+        """A click at the window pixel `(x, y)`, from the bottom left:
+        on a time-comparison station, `station_clicked` carries the
+        score-table rows it scores and this returns True."""
+        from ..viz.time_correlation import station_at
+
+        rows = station_at(self._plotter, x, y) if self._plotter is not None else None
+        if not rows:
+            return False
+        self.station_clicked.emit(rows)
+        return True
+
     def _on_cube_press(self, caller, _event) -> None:
-        if self.click_view_cube(*caller.GetEventPosition()):
-            # the click was the cube's: the camera does not start a turn
+        position = caller.GetEventPosition()
+        if self.click_view_cube(*position) or self.click_station(*position):
+            # the click was the cube's or a station's: the camera does
+            # not start a turn
             caller.GetCommand(self._cube_observer).SetAbortFlag(1)
 
     def apply_background(self) -> None:

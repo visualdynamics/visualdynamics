@@ -484,6 +484,21 @@ class TimeTools:
             message += ' Select a FEM overlay to show a surface contour.'
         return message
 
+    def pick_station(self, rows: list[int]) -> None:
+        """Select a station's row in the score table, which plots its
+        traces. A node scored by more than one row steps through them
+        on each click."""
+        # Callum Hammill's, 2026-11: a station clicked on the geometry
+        # selects its traces. Brought back onto the main 3-D view when
+        # the map moved there (Brandon, 2026-11-24)
+        if not self.panel.isVisible() or not rows:
+            return
+        current = self.table.currentRow()
+        row = rows[(rows.index(current) + 1) % len(rows)] if current in rows else rows[0]
+        if 0 <= row < self.table.rowCount():
+            self.table.setCurrentCell(row, 0)
+            self.table.scrollToItem(self.table.item(row, 0))
+
     def _close_waterfall(self) -> None:
         self.window.data_pane.waterfall_action.setChecked(False)
         self._edited()

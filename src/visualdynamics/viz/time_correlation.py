@@ -9,6 +9,9 @@ import numpy as np
 from ..core.data import parse_dof
 from .geometry import add_geometry, display_points, shared_scalars
 
+#: the field a station marker keeps its score-table rows in
+STATION_ROWS = 'comparison_rows'
+
 
 def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
                           metric: str, contour: bool, unit_system: Any,
@@ -39,8 +42,10 @@ def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
     clim = (0, 1) if metric == 'trac' else (1 - max(extent, .05), 1 + max(extent, .05))
     palette = LookupTable(cmap=COLORMAP, scalar_range=clim)
     by_node = {}
-    for _, index, score in stations:
+    rows_at = {}
+    for row, index, score in stations:
         by_node.setdefault(index, []).append(score)
+        rows_at.setdefault(index, []).append(row)
     surfaces = [geometry for geometry in geometries if len(geometry.elem_type)]
     for geometry in surfaces:
         scalars = None
@@ -68,6 +73,8 @@ def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
                      scalars=scalars, clim=clim)
     for index, scores in by_node.items():
         marker = pv.PolyData(points[index:index+1])
+        # the table rows scored at this node, for `station_at`
+        marker.field_data[STATION_ROWS] = np.asarray(rows_at[index], dtype=int)
         plotter.add_mesh(marker, point_size=15, render_points_as_spheres=True,
                          color=palette.map_value(float(np.mean(scores)))[:3])
     if stations:
@@ -83,3 +90,48 @@ def draw_time_correlation(plotter: Any, geometries: list, rows: list, *,
     else:
         plotter.add_text('No scored DOFs match the linked geometry', font_size=10, color=text_color)
     return len(stations), axis_unit
+
+
+def station_at(plotter: Any, x: float, y: float,
+               radius: float = 12.0) -> list[int] | None:
+    """The score-table rows of the station drawn nearest the window
+    pixel `(x, y)`, measured from the bottom left as VTK does, or None
+    when no station is within `radius` pixels.
+
+    Measured on the screen rather than picked from the scene: a marker
+    is a point drawn as a sphere, and a point has no surface for a
+    picker to hit."""
+    renderer = plotter.renderer
+    best, nearest = None, radius
+    for actor in renderer.GetActors():
+        mapper = actor.GetMapper()
+        dataset = mapper.GetInput() if mapper is not None else None
+        if (dataset is None or not actor.GetVisibility()
+                or dataset.GetFieldData().GetArray(STATION_ROWS) is None):
+            continue
+        renderer.SetWorldPoint(*dataset.GetPoint(0), 1.0)
+        renderer.WorldToDisplay()
+        px, py, _ = renderer.GetDisplayPoint()
+        distance = float(np.hypot(px - x, py - y))
+        if distance <= nearest:
+            rows = dataset.GetFieldData().GetArray(STATION_ROWS)
+            best = [int(rows.GetValue(i)) for i in range(rows.GetNumberOfTuples())]
+            nearest = distance
+    return best
+
+
+def station_pixel(plotter: Any, row: int) -> tuple[float, float] | None:
+    """The window pixel, from the bottom left, of the station that
+    scores table row `row`, or None when no station does."""
+    renderer = plotter.renderer
+    for actor in renderer.GetActors():
+        mapper = actor.GetMapper()
+        dataset = mapper.GetInput() if mapper is not None else None
+        rows = dataset.GetFieldData().GetArray(STATION_ROWS) if dataset is not None else None
+        if rows is not None and row in [int(rows.GetValue(i))
+                                        for i in range(rows.GetNumberOfTuples())]:
+            renderer.SetWorldPoint(*dataset.GetPoint(0), 1.0)
+            renderer.WorldToDisplay()
+            px, py, _ = renderer.GetDisplayPoint()
+            return px, py
+    return None

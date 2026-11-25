@@ -518,7 +518,8 @@ class Project(dict):
                  object_groups: Iterable[ObjectGroup] | None = None,
                  provenance: dict[str, dict[str, Any]] | None = None,
                  data_index: DataIndex | Iterable[Mapping[str, Any]]
-                 | None = None
+                 | None = None,
+                 history_group_names: Mapping[str, str] | None = None
                  ) -> None:
         super().__init__(objects or {})
         self.name: str = str(name)
@@ -538,6 +539,14 @@ class Project(dict):
                                  and not group.get('role')) else None,
              **({'name': str(group['name'])} if group.get('name') else {})}
             for group in (object_groups or [])]
+        #: what each of the tree's time-history groups is called, when it
+        #: has been renamed: {group key: name}. Kept in the project so
+        #: the names travel with the file (2026-11-24: they lived in the
+        #: app's settings, and a project opened on another machine
+        #: showed none of them)
+        self.history_group_names: dict[str, str] = {
+            str(key): str(value)
+            for key, value in (history_group_names or {}).items()}
         #: the roles the last link moved, (history, channel, was, now)
         #: — a front end says so rather than letting FRFs move silently
         self.last_role_changes: list = []
@@ -754,6 +763,8 @@ class Project(dict):
             self.object_groups += remap_links(
                 result.object_groups, mapping,
                 {group['role'] for group in self.object_groups if group['role']})
+            for key, label in result.history_group_names.items():
+                self.history_group_names.setdefault(key, label)
             if was_empty:
                 self.name = result.name or self.name
                 self.project_type = result.project_type
@@ -1149,6 +1160,35 @@ class Project(dict):
                     group.pop('name', None)
                 return list(group['members'])
         raise KeyError(f'{member!r} is in no object group')
+
+    def name_history_group(self, key: str, name: str | None) -> str | None:
+        """Name one of the tree's time-history groups, or remove its name.
+
+        The tree gathers time histories into one group for each imported
+        file, one for each filtered batch, and one for rescaled copies.
+        A group's key is the imported file's path as the data index
+        records it, `Filtered batch: <first copy's name>`, `Filtered
+        time histories`, `Rescaled time histories` or `Raw time
+        histories`. The name is saved with the project.
+
+        Parameters
+        ----------
+        key : str
+            The group's key.
+        name : str or None
+            The group's new name; None or an empty string removes it,
+            and the group shows its default name again.
+
+        Returns
+        -------
+        str or None
+            The name now stored for the group.
+        """
+        if name and str(name).strip():
+            self.history_group_names[str(key)] = str(name).strip()
+        else:
+            self.history_group_names.pop(str(key), None)
+        return self.history_group_names.get(str(key))
 
     def object_group_of(self, name: Any) -> list[str] | None:
         """The members linked with `name`, or None.
@@ -9145,7 +9185,8 @@ class Project(dict):
                   active_geometry=self.active_geometry,
                   project_type=self.project_type, object_groups=self.object_groups,
                   provenance=self.provenance,
-                  data_index=self.data_index.records())
+                  data_index=self.data_index.records(),
+                  history_group_names=self.history_group_names)
         written = str(path) if str(path).endswith('.vdyn') else f'{path}.vdyn'
         self.file = os.path.abspath(os.path.expanduser(written))
         return str(path)
@@ -9833,7 +9874,7 @@ def _solids_take_a_material_alone(geometry: Geometry, groups: Sequence[int]) -> 
 
 _JOURNALED_VERBS = (
     'add', 'import_file', 'remove', 'rename', 'rename_dof', 'link', 'unlink',
-    'relink', 'name_object_group',
+    'relink', 'name_object_group', 'name_history_group',
     'place', 'set_role', 'set_basis', 'merge', 'set_channel_role',
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'make_realizable',

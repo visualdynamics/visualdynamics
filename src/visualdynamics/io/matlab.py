@@ -264,7 +264,8 @@ def save(obj: Any, path: str | os.PathLike, unit_system: Any = None,
                                   {name: shown(item) for name, item in obj.items()},
                                   active_geometry=obj.active_geometry,
                                   project_type=obj.project_type,
-                                  object_groups=obj.object_groups, provenance=obj.provenance)
+                                  object_groups=obj.object_groups, provenance=obj.provenance,
+                                  history_group_names=obj.history_group_names)
         else:
             native.save_into(shown(obj), f)
         tree = _tree_out(f)

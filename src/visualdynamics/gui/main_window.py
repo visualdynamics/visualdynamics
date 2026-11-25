@@ -1078,6 +1078,7 @@ class MainWindow(QMainWindow):
         from .time_tools import TimeTools
 
         self.time_tools: TimeTools = TimeTools(self)
+        self.scene.station_clicked.connect(self.time_tools.pick_station)
         self.data_pane.reread.connect(self.render_current)
         self.data_pane.copied.connect(self._show_status)
         self.scene.copied.connect(self._show_status)
@@ -6212,15 +6213,11 @@ class MainWindow(QMainWindow):
             header.setExpanded(key not in self._closed_history_sections)
         self._paint_compatibility()
 
-    @staticmethod
-    def _history_section_setting(key):
-        from .preferences import settings
-
-        return settings(), f'trac/history_group_names/{key[0]}'
-
     def _history_section_label(self, key):
-        store, setting = self._history_section_setting(key)
-        return store.value(setting, key[1], type=str)
+        # the project's, not the app's settings: a name kept in the
+        # settings stayed on the machine that gave it (2026-11-24,
+        # Callum's example opened here with none of his group names)
+        return self.project.history_group_names.get(key[0], key[1])
 
     def _history_section_expanded(self, item, expanded):
         ref = item.data(0, ROLE_REFERENCE)
@@ -7196,8 +7193,8 @@ class MainWindow(QMainWindow):
             old = item.data(0, ROLE_ORIGINAL_NAME)
             name = item.text(0).strip() or old
             if name != old:
-                store, setting = self._history_section_setting(ref[1])
-                store.setValue(setting, name)
+                self.project.name_history_group(
+                    ref[1][0], None if name == ref[1][1] else name)
             with QSignalBlocker(self.tree):
                 item.setData(0, ROLE_ORIGINAL_NAME, name)
                 item.setText(0, name)

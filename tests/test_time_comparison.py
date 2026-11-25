@@ -278,6 +278,12 @@ def test_import_sections_survive_reopen_and_select_a_whole_trac_pair(window, tmp
     pump()
     assert header.text(0) == 'Experiment'
     assert header.isExpanded()
+    # the name is the project's, so it travels with the file
+    assert list(window.project.history_group_names.values()) == ['Experiment']
+    for suffix in ('vdyn', 'mat'):
+        window.project.save(tmp_path / f'named.{suffix}')
+        reopened = Project.open(tmp_path / f'named.{suffix}')
+        assert reopened.history_group_names == window.project.history_group_names
     window._reorder_tree()
     headers = [window._item_for_object(name).parent() for name in (a, b)]
     assert headers[0].text(0) == 'Experiment'
@@ -370,6 +376,60 @@ def test_the_score_map_is_drawn_in_the_windows_own_3d_view(window, pump):
     assert not window.scene.isVisible()
 
 
+
+def test_a_click_on_a_station_selects_its_row_and_plots_its_traces(window, pump):
+    from pyqtgraph import PlotItem
+
+    from visualdynamics.viz.time_correlation import station_pixel
+
+    t = np.arange(1200)/1000
+    y = np.sin(2*np.pi*20*t)
+    project = window.project
+    names = [project.add(f'{side} {dof}', _trace(t, y if side == 'Test' else 2*y + t, dof))
+             for side in ('Test', 'Model') for dof in ('30Z-', '40Z-')]
+    comparison = project.compare_time_histories(*names)
+    geo = Geometry(node_id=[30, 40], node_xyz=[[0, 0, 0], [1, 0, 0]], length_unit='m')
+    window.add_object('Stations', geo)
+    project.link('Stations', comparison)
+    window.show_object(comparison)
+    pump()
+    tools = window.time_tools
+    tools.map_mode.setCurrentIndex(1)                 # TRAC points
+    window.render_current()
+    pump()
+    plotter = window.scene.plotter
+    plotter.render()
+    assert [tools.table.item(i, 0).text() for i in range(2)] == ['30Z-', '40Z-']
+    assert tools.table.currentRow() == 0
+    x, y = station_pixel(plotter, 1)
+    # through the press handler, as a mouse press arrives (the headless
+    # view has no interactor to send one through); the handler stops
+    # the camera from starting a turn when the press was a station's
+    aborted = []
+
+    class Press:
+        def GetEventPosition(self):
+            return round(x), round(y)
+
+        def GetCommand(self, _observer):
+            return self
+
+        def SetAbortFlag(self, flag):
+            aborted.append(flag)
+
+    window.scene._cube_observer = None
+    window.scene._on_cube_press(Press(), None)
+    pump()
+    assert aborted == [1]
+    assert tools.table.currentRow() == 1
+    assert tools.table.item(1, 0).isSelected()
+    titles = {plot.titleLabel.text for plot in window.data_pane.graphics.ci.items
+              if isinstance(plot, PlotItem)}
+    assert titles and all('40Z-' in title for title in titles)
+    # a click away from every station leaves the row alone
+    assert not window.scene.click_station(2.0, 2.0)
+    assert tools.table.currentRow() == 1
+
 def test_a_group_row_wears_a_folder(window):
     from visualdynamics.gui.icons import group_icon, object_icon
     from visualdynamics.gui.project_tree import ROLE_REFERENCE
@@ -391,3 +451,13 @@ def test_a_group_row_wears_a_folder(window):
     assert sum(shown) > 40, 'a glyph a person can see at 16 px'
     assert shown == ink(group_icon())
     assert shown != ink(object_icon(window.project[sources[0]]))
+
+
+def test_a_history_group_name_is_set_cleared_and_journaled():
+    project = Project()
+    assert project.name_history_group('Rescaled time histories', ' Scaled ') == 'Scaled'
+    assert project.history_group_names == {'Rescaled time histories': 'Scaled'}
+    assert project.journal[-1] == (
+        "project.name_history_group('Rescaled time histories', ' Scaled ')")
+    assert project.name_history_group('Rescaled time histories', '') is None
+    assert project.history_group_names == {}

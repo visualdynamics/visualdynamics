@@ -76,7 +76,9 @@ Link the saved comparison to the test's geometry and choose a
 **Geometry correlation**: the TRAC or the sTRAC of each station as a
 colored point at its node, or as a contour over a finite element
 geometry. The 3-D view comes up beside the plot with the scores drawn
-on it and their average in the corner. **FEM overlay** picks the
+on it and their average in the corner. Click a station to select its
+row in the score table and plot its two traces; clicking a node that
+has more than one scored DOF steps through them. **FEM overlay** picks the
 geometry the contour is drawn on, drawn translucent under the
 stations; each of its nodes takes the score of the nearest station, or
 an inverse-distance-squared blend of all the stations with the
@@ -90,7 +92,8 @@ once. Select them all, and the reading's pane shows the first one;
 settings, each checked before any is added. The sources are left as
 they were. With View → Group Time Histories on, the tree gathers the
 histories under one row per imported file, and the filtered and
-rescaled copies under rows of their own.
+rescaled copies under rows of their own. Double-click a row to rename
+it; the name is saved with the project.
 
 ## Paired time traces from a Universal file
 
